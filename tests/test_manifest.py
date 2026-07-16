@@ -60,3 +60,50 @@ def test_manifest_is_deterministic(source_tables):
     assert render(a) == render(b)
     # render is sorted/stable
     assert render(a).endswith("}\n")
+
+
+# --- conformance is set after the lint runs, not before (review C7) ---------- #
+def test_conformance_not_validated_without_lint(source_tables):
+    cau, cc = source_tables[("aws", "1.3")]
+    m = convert_to_focus_1_4(cau, cc, validate=False).manifest
+    assert m["datasets"]["Cost and Usage"]["conformance"] == "NOT_VALIDATED"
+
+
+def test_conformance_structural_lint_after_passing_lint(source_tables):
+    m = _convert(source_tables, Mode.STRICT).manifest
+    assert m["datasets"]["Cost and Usage"]["conformance"] == "STRUCTURAL_LINT"
+
+
+def test_conformance_lint_failed_on_bad_source(source_tables):
+    cau, cc = source_tables[("aws", "1.3")]
+    bad = [dict(r) for r in cau]
+    bad[0]["BillingCurrency"] = "ZZ"  # not an ISO 4217 code
+    result = convert_to_focus_1_4(bad, cc)
+    assert not result.reports["Cost and Usage"].ok
+    assert result.manifest["datasets"]["Cost and Usage"]["conformance"] == "LINT_FAILED"
+    assert result.ok is False
+
+
+# --- empty derived datasets are NOT_PRODUCED, not headerless files (review C8) ---- #
+def test_synthetic_invoice_detail_not_produced_when_no_invoice_id(source_tables):
+    cau, _ = source_tables[("gcp", "1.2")]
+    stripped = [dict(r, InvoiceId="") for r in cau]
+    result = convert_to_focus_1_4(stripped, mode=Mode.SYNTHETIC)
+    assert "Invoice Detail" not in result.datasets
+    entry = result.manifest["datasets"]["Invoice Detail"]
+    assert entry["status"] == "NOT_PRODUCED"
+    assert "no derivable rows" in entry["reason"]
+
+
+def test_empty_contract_commitment_source_not_produced(source_tables):
+    cau, _ = source_tables[("aws", "1.3")]
+    result = convert_to_focus_1_4(cau, [], mode=Mode.SYNTHETIC)
+    assert "Contract Commitment" not in result.datasets
+    assert result.manifest["datasets"]["Contract Commitment"]["status"] == "NOT_PRODUCED"
+
+
+# --- backfilled pricing columns are derived, not observed (review C9) ---------- #
+def test_pricing_currency_columns_are_derived(source_tables):
+    prov = _convert(source_tables, Mode.STRICT).provenance["Cost and Usage"]
+    assert str(prov["PricingCurrency"].lineage) == "DERIVED"
+    assert str(prov["PricingCurrencyEffectiveCost"].lineage) == "DERIVED"

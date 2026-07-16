@@ -47,18 +47,26 @@ def cost_and_usage_provenance(
                 if source_version == "1.3" and "ContractApplied" in present
                 else ColumnRule(Lineage.UNAVAILABLE, note="emitted null")
             )
+        elif col in ("PricingCurrency", "PricingCurrencyEffectiveCost"):
+            # Non-nullable in 1.4; source value where present, nulls backfilled from
+            # billing-currency values -> derived at the column level (not plain observed).
+            rules[col] = ColumnRule(
+                Lineage.DERIVED, "source value; nulls backfilled from billing-currency values"
+            )
         elif col in present:
             rules[col] = ColumnRule(Lineage.OBSERVED, f"CostAndUsage.{col}")
         elif source_version == "1.2" and col in _DERIVED_FROM_1_2:
             rules[col] = ColumnRule(Lineage.RENAMED, _DERIVED_FROM_1_2[col])
         elif col == "InvoiceDetailId":
+            # A locally generated hash presented as an issuer-assigned id -> assumed
+            # when linked (so synthetic Cost and Usage is labelled synthetic); else null.
             rules[col] = (
-                ColumnRule(Lineage.DERIVED, "deterministic FK to the produced Invoice Detail")
+                ColumnRule(
+                    Lineage.ASSUMED, note="locally generated back-link to synthetic Invoice Detail"
+                )
                 if invoice_detail_linked
                 else ColumnRule(Lineage.UNAVAILABLE, note="emitted null (Invoice Detail not produced)")
             )
-        elif col in ("PricingCurrency", "PricingCurrencyEffectiveCost"):
-            rules[col] = ColumnRule(Lineage.DERIVED, "backfilled from billing currency")
         else:
             rules[col] = ColumnRule(Lineage.UNAVAILABLE, note="emitted null")
     return rules
