@@ -130,8 +130,9 @@ For consolidated, multi-provider, multi-issuer, multi-currency exports:
   charge category), so lines from different issuers/accounts/currencies are never merged.
   Locally generated ids are `x_fdt_…`-prefixed and never presented as issuer-assigned.
 - **Cross-dataset validation** (`validate_dataset_bundle`) checks referential integrity,
-  currency/period/issuer coherence, invoice reconciliation (with a rounding tolerance) and
-  Split Cost Allocation — separately from the per-dataset linter.
+  currency/period/issuer coherence, invoice reconciliation (with a rounding tolerance),
+  Split Cost Allocation, and correction/lifecycle integrity — separately from the
+  per-dataset linter.
 - **Atomic writes**: output appears only after validation succeeds and checksums + manifest
   are written; nothing partial is left on error. `--on-exists refuse|replace|version`.
 
@@ -141,6 +142,60 @@ from focus_data_toolkit import convert_to_focus_1_4, detect_focus_schema, valida
 detection = detect_focus_schema(headers)          # dataset, version, confidence, ...
 report = validate_bundle({"Cost and Usage": cu_rows, "Invoice Detail": invd_rows})
 print(report.ok, report.counts())                 # cross-dataset findings, JSON-serialisable
+```
+
+### Scale: streaming conversion and Parquet (0.3.0 / P1 Phase B)
+
+For large client files, `convert_files` streams the Cost and Usage file **once** and stages
+Invoice Detail aggregation / Billing Period dedup in a throwaway SQLite database, so peak
+memory stays **flat regardless of row count** — a constant ~64 MB peak process RSS whether
+converting 50k or 300k rows (6× the rows, ×1.05 the memory; `tools/benchmark_streaming.py`).
+Its output is **byte-identical** to the in-memory path — both call the same pure
+per-row/per-group functions and the same manifest assembler.
+
+```bash
+# bounded-memory streaming to CSV (recommended for large exports)
+focus-toolkit convert --cost-and-usage huge_cost_and_usage.csv.gz --out ./focus-1.4 \
+  --mode synthetic --stream
+
+# Parquet output with exact decimal128 (requires the [parquet] extra)
+focus-toolkit convert --cost-and-usage huge_cost_and_usage.csv --out ./focus-1.4 \
+  --mode synthetic --output-format parquet
+```
+
+Gzip input is auto-detected. Exactness contract: **CSV is byte-exact** (the literal), while
+**Parquet is decimal-value-exact** — decimal columns are written as `decimal128(precision,
+scale)` (never binary float; a value needing more scale than the column allows raises with its
+line number instead of rounding silently), dates as UTC timestamps, JSON/strings verbatim.
+
+```python
+from focus_data_toolkit import convert_files
+
+out = convert_files("huge_cost_and_usage.csv.gz", "./focus-1.4",
+                    mode="synthetic", output_format="parquet")  # -> published Path
+```
+
+`pip install "focus-data-toolkit[parquet]"` for Parquet; streaming CSV needs no extra
+(the external state uses the standard-library `sqlite3`).
+
+### Synthetic scenarios (SCA, corrections, billing lifecycle)
+
+Deterministic, provider-agnostic scenario builders produce self-consistent data for tests and
+demos, and typed lifecycle checks validate status transitions:
+
+```python
+from focus_data_toolkit.generators.scenarios import (
+    split_allocation_group, correction_set, billing_lifecycle_instances,
+)
+from focus_data_toolkit import check_status_transitions, validate_bundle
+
+alloc = split_allocation_group("origin-1", "100.00", weights=[3, 2, 1])   # ratios sum to 1,
+validate_bundle({"Cost and Usage": alloc}).ok                             # costs sum to origin
+
+corr = correction_set("chg-1", "100.00", ["-30.00"])   # original + signed Correction line,
+validate_bundle({"Cost and Usage": corr}).ok           # running net recorded in x_NetCharge
+
+check_status_transitions(billing_lifecycle_instances())  # [] — only allowed transitions
 ```
 
 ### Python API
@@ -176,8 +231,11 @@ output bytes, in both modes.
 
 ```bash
 git clone https://github.com/guymano/focus-data-toolkit && cd focus-data-toolkit
-pip install -e .[dev]
-pytest -q          # generators, detection, migration/lint, modes, manifest, CLI
+pip install -e .[dev]           # includes pyarrow, so the Parquet suite runs (not skipped)
+pytest -q                       # generators, detection, migration/lint, modes, manifest, CLI,
+                                # streaming, Parquet, split-allocation, corrections, lifecycle
+pytest -m slow                  # large-scale bounded-memory test (excluded by default)
+python tools/benchmark_streaming.py --rows 100000 500000   # throughput + peak RSS
 ruff check src tests
 ```
 

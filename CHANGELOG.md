@@ -6,9 +6,9 @@ All notable changes to this project are documented here. This project adheres to
 ## [0.3.0] — unreleased
 
 The 0.3.0 line ("P1") makes the toolkit reliable on **real client data** — consolidated,
-multi-provider, multi-issuer, multi-currency exports — without re-implementing the 0.2.0
-(P0) guardrails. This entry covers **Phase A** (correctness & integrity); streaming and
-Parquet (Phase B) follow.
+multi-provider, multi-issuer, multi-currency, volumetric exports — without re-implementing the
+0.2.0 (P0) guardrails. It lands in two phases: **Phase A** (correctness & integrity) and
+**Phase B** (scale & realism), both described below.
 
 ### Added — schema detection
 
@@ -70,11 +70,66 @@ Parquet (Phase B) follow.
   `OnExists` (**refuse** default / replace via crash-safe swap-dir / version). CLI:
   `--on-exists`, `--keep-temp`.
 
+### Added — streaming conversion (Phase B)
+
+- **`focus_data_toolkit.convert.convert_files(cost_and_usage, out_dir, …)`** streams the Cost
+  and Usage file **once** and stages Invoice Detail aggregation / Billing Period dedup in a
+  throwaway SQLite database (`storage/external_index.py`), so **peak memory is flat regardless
+  of row count** — a constant ~64 MB peak process RSS from 50k to 300k rows (6× the rows,
+  ×1.05 the memory; `tools/benchmark_streaming.py`), and ~38 MB of traced Python allocations
+  that a `slow` test asserts do not scale. Costs are summed with Python `Decimal` over an
+  `ORDER BY` (BINARY) scan — never SQL `SUM()` — so the streamed totals are bit-for-bit the
+  eager ones.
+- **Byte-identical to the in-memory path**: both call the same pure per-row / per-group
+  functions (`convert_cost_and_usage_row`, `invoice_detail_row`, `billing_period_row`) and the
+  same `assemble_manifest`, so equivalence holds by construction (asserted on the datasets,
+  the manifest, and `SHA256SUMS`). A new streaming reader/writer layer (`io/records.py`,
+  `io/csv_io.py`) auto-detects gzip input and rejects wrong-field-count rows with a
+  line-numbered error. CLI: `convert --stream`.
+
+### Added — Parquet output (Phase B)
+
+- **`--output-format parquet`** / `convert_files(…, output_format="parquet")` writes the
+  datasets as Parquet with **exact decimal128** (`io/parquet_io.py`): decimal columns use
+  `decimal128(precision, scale)` from a committed, reviewed scale registry
+  (`model/focus_1_4_decimal_scale.json`) — never binary float, and a value needing more scale
+  than the column allows raises with its line number instead of rounding silently. Dates are
+  UTC timestamps, JSON/strings verbatim, empty string ↔ null. Exactness contract: **CSV is
+  byte-exact, Parquet is decimal-value-exact**. PyArrow stays an optional `[parquet]` extra
+  with a clear install hint; the core stays standard-library only.
+
+### Added — synthetic scenarios & lifecycle (Phase B)
+
+- **`generators/scenarios.py`**: deterministic, provider-agnostic scenario builders —
+  `split_allocation_group` (ratios sum to exactly 1, allocated costs sum to exactly the origin,
+  last consumer absorbs the residue), `correction_set` (original charge plus signed
+  `ChargeClass="Correction"` lines that reference it and record the running auditable net in
+  `x_NetCharge`; the original is never overwritten), and `billing_lifecycle_instances` (a
+  T0→T6 dataset-instance sequence with only allowed status transitions).
+- **`focus_data_toolkit.lifecycle`**: a `DatasetInstance` snapshot structure and
+  status-transition checks (`FDT-CORR-004`) from the FOCUS `InvoiceIssueStatus`
+  (Open→Issued→Voided) and `BillingPeriodStatus` (Open→Closed) value sets — flagging un-void,
+  un-issue and silent reopen, scoped per subject.
+- **New correction checks** in `validate_dataset_bundle`: net-sum reconciliation to the
+  declared `x_NetCharge` (`FDT-CORR-002`) and duplicate-`x_ChargeKey` overwrite detection
+  (`FDT-CORR-003`).
+
+### Fixed — streaming publish integrity (Phase B)
+
+- The streaming path wrote datasets through direct file handles (for bounded memory), which
+  bypassed the atomic writer's file registration — so `SHA256SUMS` listed only the manifest and
+  the scratch SQLite database was published into the output directory. Produced files are now
+  fsync'd and enrolled for checksums, and the scratch DB is deleted before commit; `SHA256SUMS`
+  is complete and byte-identical to the eager path. (Regression tests added.)
+
 ### Changed
 
-- Version bumped to 0.3.0. `focus-data-toolkit[parquet]` / `[scale]` / `[all]` optional extras
-  declared (PyArrow, used in Phase B); the core remains standard-library only. A `slow` pytest
-  marker is added and excluded from the default run.
+- Version 0.3.0 (P1). `focus-data-toolkit[parquet]` / `[scale]` / `[all]` optional extras
+  (PyArrow, used for Parquet); the runtime core remains standard-library only. `pyarrow` is
+  added to the `dev` extra so CI runs the Parquet suite rather than skipping it. A `slow`
+  pytest marker is added and excluded from the default run. New public API surfaced at the
+  package root: `convert_files`, `DatasetInstance`, `check_status_transitions`. Reproducible
+  benchmark at `tools/benchmark_streaming.py`.
 
 ## [0.2.0] — unreleased
 
