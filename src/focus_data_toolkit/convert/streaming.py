@@ -175,9 +175,12 @@ def convert_files(
             return None
         from focus_data_toolkit.io.parquet_io import dataset_metadata
 
+        # The output is FOCUS 1.4; `version` is the *source* version (1.2/1.3) and belongs in
+        # source_version, not target_version, so Parquet-metadata readers are not misled.
         return dataset_metadata(
             dataset,
-            version=version,
+            target_version="1.4",
+            source_version=version,
             mode=mode.value,
             conformance="see manifest",
             tool_version=__version__,
@@ -249,6 +252,10 @@ def convert_files(
         finally:
             cu_handle.close()
             reader.close()
+        if not cu_count:
+            # Header-only input: match the eager path rather than publishing a manifest-only
+            # directory. Raising inside the context removes the staging dir (nothing published).
+            raise ConversionError("no Cost and Usage rows to convert")
         row_counts["Cost and Usage"] = cu_count
 
         staged = {"Cost and Usage": cu_file}

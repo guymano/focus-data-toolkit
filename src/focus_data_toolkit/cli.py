@@ -27,6 +27,7 @@ from focus_data_toolkit.convert import (
     write_result,
 )
 from focus_data_toolkit.generators import FOCUS_VERSIONS, PROVIDERS, get_generator
+from focus_data_toolkit.io.records import MalformedRecordError
 from focus_data_toolkit.manifest import render as render_manifest
 from focus_data_toolkit.model.validator import lint_focus_1_4_structure, resolve_dataset
 from focus_data_toolkit.modes import Mode
@@ -64,7 +65,9 @@ def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
             keep_temp=args.keep_temp,
             output_format=args.output_format,
         )
-    except (ConversionError, DestinationExistsError) as exc:
+    except (ConversionError, DestinationExistsError, MalformedRecordError) as exc:
+        # MalformedRecordError covers a malformed CSV record and a missing PyArrow (the clear
+        # install hint) — surface both as a normal CLI error, not a traceback.
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except AtomicWriteError as exc:
@@ -73,7 +76,12 @@ def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
 
     from focus_data_toolkit.manifest import NOT_PRODUCED
 
-    manifest = json.loads((out / "focus_1_4_manifest.json").read_text(encoding="utf-8"))
+    published_manifest = out / "focus_1_4_manifest.json"
+    if args.manifest:  # honour --manifest for the streaming path too (parity with eager)
+        Path(args.manifest).write_text(
+            published_manifest.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+    manifest = json.loads(published_manifest.read_text(encoding="utf-8"))
     print(f"wrote {out}/ (format {args.output_format}, mode {mode})")
     for name, entry in manifest["datasets"].items():
         if entry.get("status") == NOT_PRODUCED:

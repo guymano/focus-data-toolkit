@@ -161,3 +161,47 @@ def test_bad_output_format_is_rejected(tmp_path):
     cau.write_bytes(module.generate_csv_bytes(10, 1302))
     with pytest.raises(ConversionError, match="unsupported output format"):
         convert_files(str(cau), str(tmp_path / "o"), mode="synthetic", output_format="orc")
+
+
+def test_metadata_records_target_and_source_version(tmp_path):
+    module = get_generator("aws", "1.3")
+    cau = tmp_path / "cau.csv"
+    cau.write_bytes(module.generate_csv_bytes(20, 1302))
+    out = convert_files(str(cau), str(tmp_path / "pq"), mode="synthetic", output_format="parquet")
+    meta = pq.ParquetFile(str(out / "synthetic_focus_1_4_cost_and_usage.parquet")).schema_arrow.metadata
+    # The file conforms to FOCUS 1.4; the source it was converted from is recorded separately.
+    assert meta[b"focus.target_version"] == b"1.4"
+    assert meta[b"focus.source_version"] == b"1.3"
+
+
+@pytest.mark.parametrize("value", ["2026-05-01T00:00:00+00:00", "2026-05-01T00:00:00"])
+def test_non_focus_datetime_is_rejected(tmp_path, value):
+    # An offset (+00:00) or naive datetime would normalize to ...Z and slip past the read-back
+    # lint; the CSV path rejects it, so Parquet coercion must too (with the row's line number).
+    path = tmp_path / "dt.parquet"
+    with pytest.raises(MalformedRecordError) as excinfo:
+        with ParquetRowWriter(path, DatasetSchema(_CU, ("BillingPeriodStart",))) as w:
+            w.write({"BillingPeriodStart": "2026-01-01T00:00:00Z"})
+            w.write({"BillingPeriodStart": value})
+    assert excinfo.value.line_number == 2
+
+
+@pytest.mark.parametrize("value", ["+1", ".5", "1E+7", "NaN", "Infinity"])
+def test_non_focus_numeric_is_rejected(tmp_path, value):
+    # Parseable by Decimal but violating FOCUS NumericFormat; must be refused before coercion.
+    path = tmp_path / "num.parquet"
+    with pytest.raises(MalformedRecordError) as excinfo:
+        with ParquetRowWriter(path, DatasetSchema(_CU, ("BilledCost",))) as w:
+            w.write({"BilledCost": "1.0"})
+            w.write({"BilledCost": value})
+    assert excinfo.value.line_number == 2
+
+
+def test_valid_focus_datetime_and_numeric_still_pass(tmp_path):
+    # Non-regression: canonical Z-datetimes and plain decimals convert cleanly.
+    cols = ("BillingPeriodStart", "BilledCost")
+    rows = [{"BillingPeriodStart": "2026-01-01T00:00:00Z", "BilledCost": "35.2"},
+            {"BillingPeriodStart": "2026-02-01T00:00:00.500Z", "BilledCost": "-0.000001"}]
+    _, out = _write_read(tmp_path, cols, rows)
+    assert out[0]["BillingPeriodStart"] == "2026-01-01T00:00:00Z"
+    assert Decimal(out[1]["BilledCost"]) == Decimal("-0.000001")

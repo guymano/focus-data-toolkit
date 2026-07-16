@@ -24,12 +24,18 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from functools import cache
 from pathlib import Path
 
 from focus_data_toolkit.io.records import DatasetSchema, MalformedRecordError, Record
 from focus_data_toolkit.model import column_spec, load_model, resolve_dataset
+
+# Reuse the linter's FOCUS format predicates so Parquet coercion refuses exactly what the CSV
+# lint gate refuses. Otherwise Decimal()/fromisoformat() would accept non-FOCUS literals (`+1`,
+# `.5`, `1E+7`, an offset/naive datetime), normalise them to decimal128/UTC, and the read-back
+# lint would never see the original defect.
+from focus_data_toolkit.model.validator import _decimal_or_none, _is_utc_datetime
 
 _PARQUET_HINT = (
     "Parquet support requires PyArrow. Install it with: pip install 'focus-data-toolkit[parquet]'"
@@ -87,26 +93,28 @@ def _parse_timestamp(value: str, column: str, line: int) -> datetime | None:
     text = value.strip()
     if not text:
         return None
-    iso = text[:-1] + "+00:00" if text.endswith("Z") else text
-    try:
-        dt = datetime.fromisoformat(iso)
-    except ValueError as exc:
+    # Enforce the FOCUS Date/Time format (ISO-8601 UTC with a 'Z') *before* normalising, so an
+    # offset (`+00:00`) or naive value is refused here exactly as the CSV lint gate refuses it.
+    if not _is_utc_datetime(text):
         raise MalformedRecordError(
-            f"column {column!r}: {value!r} is not an ISO-8601 datetime", line_number=line
-        ) from exc
-    return dt.astimezone(UTC) if dt.tzinfo else dt.replace(tzinfo=UTC)
+            f"column {column!r}: {value!r} is not a FOCUS Date/Time (ISO-8601 UTC, ...Z)",
+            line_number=line,
+        )
+    return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(UTC)
 
 
 def _to_decimal(value: str, column: str, line: int) -> Decimal | None:
     text = value.strip()
     if not text:
         return None
-    try:
-        return Decimal(text)
-    except InvalidOperation as exc:
+    # Enforce the FOCUS NumericFormat before coercion: `+1`, `.5`, `1E+7`, NaN/Inf are parseable
+    # by Decimal but violate the spec and would pass a read-back lint once normalised.
+    parsed = _decimal_or_none(text)
+    if parsed is None:
         raise MalformedRecordError(
-            f"column {column!r}: {value!r} is not a decimal", line_number=line
-        ) from exc
+            f"column {column!r}: {value!r} is not a FOCUS numeric literal", line_number=line
+        )
+    return parsed
 
 
 def _column_arrays(pa, dataset: str, columns: Sequence[str], rows: list[Mapping[str, str]], base_line: int):
@@ -156,11 +164,25 @@ def _stringify(dataset: str, column: str, value) -> str:
     return str(value)
 
 
-def dataset_metadata(dataset: str, *, version: str, mode: str, conformance: str, tool_version: str) -> dict:
-    """Business (deterministic) file metadata; operational keys live in a separate namespace."""
+def dataset_metadata(
+    dataset: str,
+    *,
+    target_version: str,
+    source_version: str,
+    mode: str,
+    conformance: str,
+    tool_version: str,
+) -> dict:
+    """Business (deterministic) file metadata; operational keys live in a separate namespace.
+
+    ``target_version`` is the FOCUS version the file conforms to (1.4); ``source_version`` is the
+    version it was converted from. Keeping them distinct stops a Parquet-metadata reader from
+    mistaking the source version for the file's own FOCUS version.
+    """
     return {
         "focus.dataset": resolve_dataset(dataset),
-        "focus.target_version": version,
+        "focus.target_version": target_version,
+        "focus.source_version": source_version,
         "focus.mode": mode,
         "focus.conformance": conformance,
         "focus.toolkit_version": tool_version,

@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from focus_data_toolkit.convert import (
+    ConversionError,
     convert_files,
     convert_to_focus_1_4,
     read_csv_rows,
@@ -74,6 +75,20 @@ def test_streaming_is_deterministic(tmp_path):
     convert_files(str(cau), str(b), contract_commitment=str(cc), mode="synthetic")
     for name in _csv_files(a):
         assert (a / name).read_bytes() == (b / name).read_bytes()
+
+
+def test_header_only_input_is_rejected(tmp_path):
+    # A valid Cost and Usage header with zero data rows must be refused (parity with the eager
+    # API), not published as a manifest-only directory.
+    module = get_generator("aws", "1.3")
+    header = module.generate_csv_bytes(1, 1302).decode().splitlines()[0]
+    src = tmp_path / "header_only.csv"
+    src.write_text(header + "\n")
+    out = tmp_path / "out"
+    with pytest.raises(ConversionError, match="no Cost and Usage rows to convert"):
+        convert_files(str(src), str(out), mode="synthetic")
+    assert not out.exists()
+    assert not list(tmp_path.glob(".output.tmp-*"))  # staging cleaned up
 
 
 def test_error_mid_stream_leaves_no_output(tmp_path):
