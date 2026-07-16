@@ -1,7 +1,12 @@
-"""Split Cost Allocation validation (P1.8). Hand-authored allocation groups."""
+"""Split Cost Allocation validation (P1.8). Hand-authored + generator-built allocation groups."""
 
 from __future__ import annotations
 
+from decimal import Decimal
+
+import pytest
+
+from focus_data_toolkit.generators.scenarios import split_allocation_group
 from focus_data_toolkit.validate.allocation import validate_split_allocation
 
 
@@ -123,3 +128,44 @@ def test_non_finite_ratio_is_flagged_incomplete():
 
 def test_no_allocation_rows_is_a_noop():
     assert validate_split_allocation([{"BilledCost": "10.00", "ChargeCategory": "Usage"}]) == []
+
+
+# --- generator-built groups (P1.8): coherent scenarios that must validate clean ------------
+
+
+@pytest.mark.parametrize(
+    "weights",
+    [
+        [1, 1, 1, 1],                 # equal, 4 consumers
+        [3, 2, 1],                    # proportional
+        [1, 1, 1],                    # 100/3 -> residue must be absorbed
+        [7, 11, 13, 17, 19],          # 5 consumers, awkward ratios
+        [1],                          # degenerate single consumer
+    ],
+)
+def test_generated_group_reconciles(weights):
+    rows = split_allocation_group("G", "100.00", weights)
+    assert validate_split_allocation(rows) == []
+
+
+def test_generated_group_costs_sum_exactly_to_origin():
+    rows = split_allocation_group("G", "100.00", [1, 1, 1])
+    total = sum((Decimal(r["BilledCost"]) for r in rows), Decimal(0))
+    assert total == Decimal("100.00")  # residue absorbed -> exact, no lost cent
+
+
+def test_generated_negative_origin_reconciles():
+    rows = split_allocation_group("G", "-250.75", [2, 3, 5])
+    assert validate_split_allocation(rows) == []
+    assert sum((Decimal(r["BilledCost"]) for r in rows), Decimal(0)) == Decimal("-250.75")
+
+
+def test_generated_weighted_group_has_unique_resources():
+    rows = split_allocation_group("G", "500.00", [5, 3, 2], resource_prefix="vm")
+    assert len({r["AllocatedResourceId"] for r in rows}) == len(rows)
+
+
+def test_generator_is_deterministic():
+    a = split_allocation_group("G", "100.00", [3, 2, 1])
+    b = split_allocation_group("G", "100.00", [3, 2, 1])
+    assert a == b
