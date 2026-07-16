@@ -27,8 +27,39 @@ import json
 from decimal import Decimal
 
 from focus_data_toolkit.model import dataset_columns
+from focus_data_toolkit.provenance import ColumnRule, Lineage
 
 DATASET = "Invoice Detail"
+
+# Provenance of every emitted Invoice Detail column. Invoice-issuer facts (status,
+# terms, issuer-assigned id, provider timestamps, correction linkage) are not derivable
+# from Cost and Usage -> ASSUMED (block strict). BilledCost is a real aggregation.
+PROVENANCE: dict[str, ColumnRule] = {
+    "InvoiceDetailId": ColumnRule(
+        Lineage.ASSUMED, note="locally generated hash; spec: issuer-assigned id"
+    ),
+    "InvoiceId": ColumnRule(Lineage.OBSERVED, "CostAndUsage.InvoiceId"),
+    "ReferenceInvoiceId": ColumnRule(
+        Lineage.ASSUMED, note="self-reference; real correction linkage unknown"
+    ),
+    "ChargeCategory": ColumnRule(Lineage.OBSERVED, "CostAndUsage.ChargeCategory"),
+    "BilledCost": ColumnRule(Lineage.DERIVED, "sum(CostAndUsage.BilledCost)"),
+    "BillingAccountId": ColumnRule(Lineage.OBSERVED, "CostAndUsage.BillingAccountId"),
+    "BillingCurrency": ColumnRule(Lineage.OBSERVED, "CostAndUsage.BillingCurrency"),
+    "BillingPeriodStart": ColumnRule(Lineage.OBSERVED, "CostAndUsage.BillingPeriodStart"),
+    "BillingPeriodEnd": ColumnRule(Lineage.OBSERVED, "CostAndUsage.BillingPeriodEnd"),
+    "InvoiceDetailCreated": ColumnRule(Lineage.ASSUMED, note="provider record timestamp"),
+    "InvoiceDetailLastUpdated": ColumnRule(Lineage.ASSUMED, note="provider record timestamp"),
+    "InvoiceDetailDescription": ColumnRule(Lineage.ASSUMED, note="synthesized description"),
+    "InvoiceDetailGrain": ColumnRule(Lineage.ASSUMED, note="synthetic aggregation grain (x_ keys)"),
+    "InvoiceIssueDate": ColumnRule(Lineage.ASSUMED, note="provider invoice issue date"),
+    "InvoiceIssueStatus": ColumnRule(
+        Lineage.ASSUMED, note="provider publication state; assumed 'Issued'"
+    ),
+    "InvoiceIssuerName": ColumnRule(Lineage.OBSERVED, "CostAndUsage.InvoiceIssuerName"),
+    "PaymentDueDate": ColumnRule(Lineage.UNAVAILABLE, note="emitted null"),
+    "PaymentTerms": ColumnRule(Lineage.ASSUMED, note="assumed 'Net 30'"),
+}
 
 _OMITTED_CONDITIONAL = frozenset(
     {

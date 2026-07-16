@@ -1,41 +1,51 @@
 # focus-data-toolkit
 
 Generate provider-realistic **FOCUS 1.2 / 1.3** sample data (AWS, Azure, GCP),
-**convert** FOCUS 1.2/1.3 data to the four **FOCUS 1.4** datasets, and
-**validate** the results — in one dependency-free Python toolkit.
+**migrate** a FOCUS 1.2/1.3 Cost and Usage table to **FOCUS 1.4**, optionally
+**synthesize** the new 1.4 datasets for demos/tests, and **lint** the results —
+in one dependency-free Python toolkit.
 
 [FOCUS](https://focus.finops.org) (FinOps Open Cost and Usage Specification) is
 the open standard for cloud cost and usage data. FOCUS 1.4 (June 2026) defines
 four datasets: **Cost and Usage** (65 columns), **Contract Commitment**
 (30 columns), **Billing Period** (6 columns, new) and **Invoice Detail**
-(22 columns, new). No cloud provider exports the full 1.4 set yet — this
-toolkit builds it from the 1.2/1.3 data you already have.
+(22 columns, new).
 
-## Features
+## What this toolkit does — and does not — claim
 
-- **Generate** — deterministic, synthetic, PII-free FOCUS 1.2 (57-column) and
-  1.3 (65-column Cost and Usage + 13-column Contract Commitment) CSVs with
-  provider-realistic values: real service names, SKUs, regions, pricing units,
-  commitment models (Savings Plans / Reservations / CUDs), tax and credit
-  rows. A given `(rows, seed)` pair is byte-reproducible.
-- **Convert** — reshape a FOCUS 1.2/1.3 Cost and Usage table (and optional 1.3
-  Contract Commitment table) into the four FOCUS 1.4 datasets:
-  - version auto-detected from the header;
-  - deprecated `ProviderName`/`PublisherName` dropped, 1.4 columns added;
-  - Contract Commitment expanded from 13 to 30 columns;
-  - Billing Period and Invoice Detail **derived** from the Cost and Usage rows
-    (`sum(BilledCost)` reconciles by construction; every Cost and Usage row
-    back-links to its `InvoiceDetailId`);
-  - honest coverage: datasets that cannot be derived from your source are
-    reported as missing, never fabricated.
-- **Lint** — a built-in, model-driven FOCUS 1.4 **structural + semantic linter**
-  (`lint_focus_1_4_structure`): structural, format and single-row cross-field rules
-  from the committed FOCUS 1.4 data model. It is a linter, **not** a full FOCUS 1.4
-  conformance validator — a clean report means *well-formed*, not *fully conformant*
-  (it does not check cross-dataset referential integrity, and the official FinOps
-  validator does not yet support 1.4). A wrapper for the official
-  [FinOps FOCUS validator](https://github.com/finopsfoundation/focus_validator) (1.2/1.3)
-  is included.
+The toolkit is explicit about three very different operations:
+
+- **Schema migration** — transforming columns/formats where the mapping is exact
+  or explicitly documented. *Cost and Usage* migrates 1.2/1.3 → 1.4 essentially
+  losslessly (1.4 only adds nullable columns and drops two deprecated ones).
+- **Enrichment** — adding data from a complementary *authoritative* source
+  (e.g. a real invoice). Not yet ingested; the architecture reserves a place for it.
+- **Synthetic projection** — inventing plausible values for demos/tests/learning.
+  These results are **never** presented as real financial facts or as fully
+  FOCUS-conformant.
+
+The three new-in-1.4 datasets (**Billing Period**, **Invoice Detail**, and the
+1.4-expanded **Contract Commitment**) contain **Mandatory columns that are
+provider billing-system facts** — invoice status, payment terms, issuer-assigned
+ids, provider record timestamps, commitment commercial terms. These are **not
+present in, and not derivable from, a Cost and Usage table**. FOCUS 1.4 itself
+treats them as provider-emitted (it adds an *Invoice Reconciliation* feature and
+a *Rounding Variance Tolerance* appendix precisely because the issued invoice
+legitimately differs from summed usage). So an aggregation of `BilledCost` is a
+useful analytical summary — **not** a real invoice line.
+
+A structurally valid file is **not** automatically FOCUS-conformant.
+
+## Modes
+
+| Mode | Behaviour |
+|---|---|
+| **`strict`** (default) | Never invents provider facts. A canonical FOCUS 1.4 dataset is produced only when every Mandatory non-nullable column has a factual lineage (observed / renamed / derived / enriched). From a Cost-and-Usage source that means **only Cost and Usage** is produced; the other three are reported `NOT_PRODUCED` in the manifest, with the exact blocking columns. |
+| **`synthetic`** | Generates assumed values so you get all four datasets for demos/tests. Affected datasets are written with a `synthetic_` filename prefix and marked `PRODUCED_SYNTHETIC` in the manifest; the result is never labelled fully conformant. |
+
+Every conversion writes a deterministic **manifest** (`focus_1_4_manifest.json`)
+recording, per column, how each value was obtained
+(`OBSERVED` / `RENAMED` / `DERIVED` / `ENRICHED` / `ASSUMED` / `UNAVAILABLE`).
 
 The core package is **standard-library only** (Python ≥ 3.11).
 
@@ -56,73 +66,94 @@ focus-toolkit generate --provider aws --focus-version 1.3 --rows 1000 --seed 130
 Providers: `aws`, `azure`, `gcp`. Versions: `1.2`, `1.3`. Same rows+seed →
 byte-identical output.
 
-### 2. Convert FOCUS 1.2/1.3 to FOCUS 1.4
+### 2. Convert towards FOCUS 1.4
+
+**Strict (default)** — migrate what is genuinely migratable:
+
+```bash
+focus-toolkit convert \
+  --cost-and-usage out/focus_1_3_cost_and_usage_aws.csv \
+  --out ./focus-1.4
+# -> focus-1.4/focus_1_4_cost_and_usage.csv   (65 columns)
+# -> focus-1.4/focus_1_4_manifest.json        (why the other 3 were NOT produced)
+# exit code 3: strict result is intentionally incomplete
+```
+
+**Synthetic** — also generate the provider-emitted datasets for demos/tests:
 
 ```bash
 focus-toolkit convert \
   --cost-and-usage out/focus_1_3_cost_and_usage_aws.csv \
   --contract-commitment out/focus_1_3_contract_commitment_aws.csv \
-  --out ./focus-1.4
-# -> focus-1.4/focus_1_4_cost_and_usage.csv        (65 columns)
-# -> focus-1.4/focus_1_4_contract_commitment.csv   (30 columns)
-# -> focus-1.4/focus_1_4_billing_period.csv        (6 columns, derived)
-# -> focus-1.4/focus_1_4_invoice_detail.csv        (22 columns, derived)
+  --out ./focus-1.4 --mode synthetic
+# -> synthetic_focus_1_4_cost_and_usage.csv        (migration + assumed InvoiceDetailId back-link)
+# -> synthetic_focus_1_4_contract_commitment.csv   (assumed terms)
+# -> synthetic_focus_1_4_billing_period.csv        (assumed status/timestamps)
+# -> synthetic_focus_1_4_invoice_detail.csv        (assumed invoice facts)
+# -> focus_1_4_manifest.json
+# exit code 4: synthetic result contains ASSUMED values
 ```
 
+In synthetic mode Cost and Usage is also `synthetic_`-prefixed, because its
+`InvoiceDetailId` back-links to the (synthetic) Invoice Detail — every other
+column is a faithful migration, as the manifest's per-column lineage records. In
+strict mode Cost and Usage is emitted unprefixed with its `InvoiceDetailId` left null.
+
 Works the same on your **own** FOCUS 1.2/1.3 exports — the source version is
-detected from the CSV header. Every produced dataset is validated against the
-FOCUS 1.4 model before the command succeeds (skip with `--no-validate`).
+detected from the CSV header. CLI exit codes: `0` success without assumptions ·
+`1` lint violation · `2` invalid arguments · `3` incomplete strict result ·
+`4` synthetic result produced with assumptions.
 
-From a 1.2 source (which has no Contract Commitment dataset), coverage is
-declared partial: the three derivable datasets are produced, Contract
-Commitment is not invented.
-
-### 3. Validate
+### 3. Lint
 
 ```bash
-# built-in FOCUS 1.4 structural linter (not a full conformance validator)
-focus-toolkit validate focus-1.4/focus_1_4_invoice_detail.csv --dataset invoice-detail
+# built-in FOCUS 1.4 structural + semantic linter (not a full conformance validator)
+focus-toolkit validate focus-1.4/focus_1_4_cost_and_usage.csv --dataset cost-and-usage
 
-# official FinOps validator (optional extra, requires Python >= 3.12)
+# official FinOps validator (optional extra, requires Python >= 3.12; supports 1.2/1.3)
 pip install "focus-data-toolkit[validator] @ git+https://github.com/guymano/focus-data-toolkit"
 focus-toolkit validate --official --focus-version 1.2.0.1 my_focus_1_2_export.csv
 ```
 
 The official FinOps validator ships rule models for FOCUS 1.2/1.3 and does **not**
-yet support 1.4. Until it does, the built-in linter provides a structural + semantic
-check only — it cannot certify full FOCUS 1.4 conformance.
+yet support 1.4. Until it does, the built-in linter provides a structural +
+semantic check only — it cannot certify full FOCUS 1.4 conformance.
 
 ### Python API
 
 ```python
-from focus_data_toolkit import convert_to_focus_1_4, validate_focus_1_4
+from focus_data_toolkit import convert_to_focus_1_4, lint_focus_1_4_structure
 from focus_data_toolkit.convert import read_csv_rows
+from focus_data_toolkit.modes import Mode
 
-result = convert_to_focus_1_4(read_csv_rows("focus_1_3_cost_and_usage.csv"))
-print(result.source_version)          # "1.3"
-print(result.coverage)                # datasets actually produced
+result = convert_to_focus_1_4(read_csv_rows("focus_1_3_cost_and_usage.csv"))  # strict
+print(result.coverage)               # ('Cost and Usage',)
+print(result.not_produced)           # ('Contract Commitment', 'Billing Period', 'Invoice Detail')
+print(result.manifest["datasets"]["Invoice Detail"]["blocking_columns"])
+
+result = convert_to_focus_1_4(read_csv_rows("focus_1_3_cost_and_usage.csv"), mode=Mode.SYNTHETIC)
 rows = result.datasets["Invoice Detail"]
-print(validate_focus_1_4("Invoice Detail", rows).ok)
+print(lint_focus_1_4_structure("Invoice Detail", rows).levels_passed)
 ```
 
-## How the 1.4 derivations work
+## What is really migratable
 
-| 1.4 dataset | Source | Method |
+| 1.4 dataset | Real migration? | Notes |
 |---|---|---|
-| Cost and Usage | 1.2/1.3 Cost and Usage | Column mapping (1.2 is first lifted to the 1.3 shape; deprecated provider columns dropped; nullable 1.4 additions null; non-nullable `PricingCurrency*` backfilled from billing currency when the source left them null) |
-| Contract Commitment | 1.3 Contract Commitment | 13→30 expansion: derivable columns from the source (period, currency, cost), deterministic documented defaults for the rest (see `convert/contract_commitment.py`) |
-| Billing Period | derived | One row per distinct `(BillingPeriodStart, BillingPeriodEnd, InvoiceIssuerName)` |
-| Invoice Detail | derived | One row per `(InvoiceId, ChargeCategory)`; `BilledCost` is the exact Decimal sum of the matching Cost and Usage rows; `InvoiceDetailId` is a deterministic hash back-linked from Cost and Usage |
+| Cost and Usage | **Yes** | Column mapping (1.2 lifted to 1.3 shape; deprecated provider columns dropped; nullable 1.4 additions null; `PricingCurrency*` backfilled; `ContractApplied` re-cased 1.3→1.4). |
+| Contract Commitment | Partial → **synthetic** | The 13 source columns migrate; the 14 Mandatory 1.4 commercial terms are provider facts → assumed (synthetic only). |
+| Billing Period | **No** (synthetic) | Period keys derive from Cost and Usage; `BillingPeriodStatus` and the timestamps are provider billing-cycle state. |
+| Invoice Detail | **No** (synthetic) | `BilledCost` aggregates usage, but invoice status/terms/issuer-assigned id/timestamps are provider-issued. |
 
 Conversion is pure (no clock, no RNG): the same input always produces the same
-output bytes.
+output bytes, in both modes.
 
 ## Development
 
 ```bash
 git clone https://github.com/guymano/focus-data-toolkit && cd focus-data-toolkit
 pip install -e .[dev]
-pytest -q          # 37 tests: generators, detection, round-trip conformance, CLI
+pytest -q          # generators, detection, migration/lint, modes, manifest, CLI
 ruff check src tests
 ```
 

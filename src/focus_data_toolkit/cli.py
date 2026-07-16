@@ -20,8 +20,9 @@ from focus_data_toolkit.convert import (
     write_result,
 )
 from focus_data_toolkit.generators import FOCUS_VERSIONS, PROVIDERS, get_generator
-from focus_data_toolkit.model import FOCUS_1_4_DATASETS
+from focus_data_toolkit.manifest import render as render_manifest
 from focus_data_toolkit.model.validator import lint_focus_1_4_structure, resolve_dataset
+from focus_data_toolkit.modes import Mode
 
 
 def _cmd_generate(args: argparse.Namespace) -> int:
@@ -42,33 +43,45 @@ def _cmd_generate(args: argparse.Namespace) -> int:
 
 
 def _cmd_convert(args: argparse.Namespace) -> int:
+    mode = Mode(args.mode)
     cau_rows = read_csv_rows(args.cost_and_usage)
     cc_rows = read_csv_rows(args.contract_commitment) if args.contract_commitment else None
-    result = convert_to_focus_1_4(cau_rows, cc_rows, validate=not args.no_validate)
+    result = convert_to_focus_1_4(cau_rows, cc_rows, mode=mode, validate=not args.no_validate)
 
     written = write_result(result, args.out)
-    print(f"source detected: FOCUS {result.source_version}")
+    if args.manifest:
+        Path(args.manifest).write_text(render_manifest(result.manifest), encoding="utf-8")
+    print(f"source detected: FOCUS {result.source_version} (mode: {mode})")
     for path in written:
         print(f"wrote {path}")
-    missing = [n for n in FOCUS_1_4_DATASETS if n not in result.coverage]
-    if missing:
+
+    for name in result.not_produced:
+        entry = result.manifest["datasets"][name]
+        print(f"not produced [{name}]: {entry.get('reason', 'unavailable')}")
+
+    if mode is Mode.SYNTHETIC and result.assumptions_present:
         print(
-            "dataset coverage is partial (no source data for: "
-            + ", ".join(missing)
-            + ") — provide --contract-commitment to cover Contract Commitment"
+            "WARNING: synthetic mode — datasets marked PRODUCED_SYNTHETIC contain ASSUMED "
+            "values and are NOT fully FOCUS-conformant. See the manifest.",
+            file=sys.stderr,
         )
 
+    failed = False
     if not args.no_validate:
-        failed = False
         for name, report in result.reports.items():
-            status = "OK" if report.ok else f"{len(report.violations)} violation(s)"
-            print(f"validate [{name}]: {status}")
+            status = "lint OK" if report.ok else f"{len(report.violations)} violation(s)"
+            print(f"lint [{name}]: {status}")
             if not report.ok:
                 failed = True
                 for message in report.messages()[:20]:
                     print(f"  {message}")
-        if failed:
-            return 1
+
+    if failed:
+        return 1
+    if mode is Mode.SYNTHETIC and result.assumptions_present:
+        return 4
+    if mode is Mode.STRICT and result.not_produced:
+        return 3
     return 0
 
 
@@ -111,14 +124,24 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument("--out", default="out", help="output directory (default: ./out)")
     gen.set_defaults(func=_cmd_generate)
 
-    conv = sub.add_parser("convert", help="convert FOCUS 1.2/1.3 to the four 1.4 datasets")
+    conv = sub.add_parser("convert", help="convert FOCUS 1.2/1.3 towards the FOCUS 1.4 datasets")
     conv.add_argument("--cost-and-usage", required=True, help="FOCUS 1.2/1.3 Cost and Usage CSV")
     conv.add_argument(
         "--contract-commitment", help="optional FOCUS 1.3 Contract Commitment CSV (13 columns)"
     )
     conv.add_argument("--out", default="focus-1.4", help="output directory (default: ./focus-1.4)")
     conv.add_argument(
-        "--no-validate", action="store_true", help="skip built-in FOCUS 1.4 validation"
+        "--mode",
+        choices=[m.value for m in Mode],
+        default=Mode.STRICT.value,
+        help="strict (default): never invent provider facts; synthetic: generate assumed "
+        "values for demos/tests (labelled synthetic, not fully conformant)",
+    )
+    conv.add_argument(
+        "--manifest", help="also write the conversion manifest JSON to this path"
+    )
+    conv.add_argument(
+        "--no-validate", action="store_true", help="skip the built-in FOCUS 1.4 structural lint"
     )
     conv.set_defaults(func=_cmd_convert)
 
