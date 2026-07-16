@@ -15,8 +15,11 @@ are null.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from focus_data_toolkit.convert.contract_applied import migrate_1_3_to_1_4
 from focus_data_toolkit.model import dataset_columns
+from focus_data_toolkit.provenance import ColumnRule, Lineage
 
 DATASET = "Cost and Usage"
 
@@ -25,6 +28,40 @@ _DERIVED_FROM_1_2 = {
     "ServiceProviderName": "ProviderName",
     "HostProviderName": "PublisherName",
 }
+
+
+def cost_and_usage_provenance(
+    source_columns: Iterable[str], source_version: str, *, invoice_detail_linked: bool
+) -> dict[str, ColumnRule]:
+    """Return the per-column lineage of a converted Cost and Usage dataset.
+
+    ``invoice_detail_linked`` is True when an (synthetic) Invoice Detail dataset is being
+    produced, so ``InvoiceDetailId`` carries the back-link (assumed); otherwise it is null.
+    """
+    present = set(source_columns)
+    rules: dict[str, ColumnRule] = {}
+    for col in dataset_columns(DATASET):
+        if col == "ContractApplied":
+            rules[col] = (
+                ColumnRule(Lineage.DERIVED, "ContractApplied migrated 1.3->1.4")
+                if source_version == "1.3" and "ContractApplied" in present
+                else ColumnRule(Lineage.UNAVAILABLE, note="emitted null")
+            )
+        elif col in present:
+            rules[col] = ColumnRule(Lineage.OBSERVED, f"CostAndUsage.{col}")
+        elif source_version == "1.2" and col in _DERIVED_FROM_1_2:
+            rules[col] = ColumnRule(Lineage.RENAMED, _DERIVED_FROM_1_2[col])
+        elif col == "InvoiceDetailId":
+            rules[col] = (
+                ColumnRule(Lineage.DERIVED, "deterministic FK to the produced Invoice Detail")
+                if invoice_detail_linked
+                else ColumnRule(Lineage.UNAVAILABLE, note="emitted null (Invoice Detail not produced)")
+            )
+        elif col in ("PricingCurrency", "PricingCurrencyEffectiveCost"):
+            rules[col] = ColumnRule(Lineage.DERIVED, "backfilled from billing currency")
+        else:
+            rules[col] = ColumnRule(Lineage.UNAVAILABLE, note="emitted null")
+    return rules
 
 
 def _convert_contract_applied(raw: str | None, source_version: str) -> str:
