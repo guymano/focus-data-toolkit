@@ -31,11 +31,12 @@ from focus_data_toolkit.context import (
 from focus_data_toolkit.context.billing import BillingContext
 from focus_data_toolkit.context.provider import ProviderContext
 from focus_data_toolkit.convert import (
-    DATASET_FILENAMES,
+    OUTPUT_FORMATS,
     RUN_SIDECAR_FILENAME,
     SHA256SUMS_FILENAME,
     ConversionError,
     assemble_manifest,
+    output_filename_for,
     read_csv_rows,
 )
 from focus_data_toolkit.convert.billing_period import PROVENANCE as BILLING_PERIOD_PROVENANCE
@@ -76,20 +77,38 @@ def _dataset_is_assumed(name: str, provenance: dict, synthetic: bool) -> bool:
     return has_assumptions(prov) if synthetic else bool(strict_blockers(prov, cols))
 
 
-def _output_filename(name: str, provenance: dict, synthetic: bool) -> str:
-    prefix = "synthetic_" if _dataset_is_assumed(name, provenance, synthetic) else ""
-    return prefix + DATASET_FILENAMES[name]
+def _output_filename(name: str, provenance: dict, synthetic: bool, output_format: str) -> str:
+    assumed = _dataset_is_assumed(name, provenance, synthetic)
+    return output_filename_for(name, synthetic_prefix=assumed, output_format=output_format)
 
 
-def _lint_file(dataset: str, path: Path):
-    """Lint a produced CSV in bounded chunks, returning a merged LintReport."""
+def _open_writer(path: Path, schema: DatasetSchema, output_format: str, metadata=None):
+    """Open a format-appropriate row writer, returning ``(handle, writer)``."""
+    if output_format == "parquet":
+        from focus_data_toolkit.io.parquet_io import open_parquet_writer
+
+        return open_parquet_writer(path, schema, metadata=metadata)
+    return open_csv_writer(path, schema)
+
+
+def _open_reader(path: Path, output_format: str, *, dataset: str | None = None):
+    """Open a format-appropriate row reader."""
+    if output_format == "parquet":
+        from focus_data_toolkit.io.parquet_io import ParquetRowReader
+
+        return ParquetRowReader(path, dataset=dataset)
+    return CsvRowReader(path)
+
+
+def _lint_file(dataset: str, path: Path, output_format: str = "csv"):
+    """Lint a produced file in bounded chunks, returning a merged LintReport."""
     from focus_data_toolkit.model.validator import (
         _CHECKED_LEVELS,
         LintReport,
         lint_focus_1_4_structure,
     )
 
-    reader = CsvRowReader(path)
+    reader = _open_reader(path, output_format, dataset=dataset)
     violations: list = []
     total = 0
     levels = _CHECKED_LEVELS
@@ -130,19 +149,39 @@ def convert_files(
     validate: bool = True,
     on_exists: OnExists | str = OnExists.REFUSE,
     keep_temp: bool = False,
+    output_format: str = "csv",
 ) -> Path:
     """Stream-convert a Cost and Usage file to the FOCUS 1.4 datasets in ``out_dir``.
 
     The Cost and Usage file is read once; Invoice Detail / Billing Period aggregation happens
     on disk (SQLite) so memory stays bounded. Output is published atomically (nothing appears
-    until validation passes and checksums + manifest are written). Returns the published path.
+    until validation passes and checksums + manifest are written). ``output_format`` is ``csv``
+    (byte-exact) or ``parquet`` (value-exact decimal128; requires the ``[parquet]`` extra).
+    Returns the published path.
     """
     from focus_data_toolkit import __version__
     from focus_data_toolkit.convert import _resolve_source_version
 
+    if output_format not in OUTPUT_FORMATS:
+        raise ConversionError(
+            f"unsupported output format {output_format!r}; choose one of {', '.join(OUTPUT_FORMATS)}"
+        )
     mode = Mode(mode)
     synthetic = mode is Mode.SYNTHETIC
     generated_at = datetime.now(UTC).isoformat()
+
+    def _meta(dataset: str) -> dict | None:
+        if output_format != "parquet":
+            return None
+        from focus_data_toolkit.io.parquet_io import dataset_metadata
+
+        return dataset_metadata(
+            dataset,
+            version=version,
+            mode=mode.value,
+            conformance="see manifest",
+            tool_version=__version__,
+        )
 
     reader = CsvRowReader(cost_and_usage)
     try:
@@ -171,9 +210,12 @@ def convert_files(
 
     with AtomicOutputDir(out_dir, on_exists=on_exists, keep_temp=keep_temp) as out:
         cu_columns = dataset_columns("Cost and Usage")
-        cu_file = _output_filename("Cost and Usage", provenance, synthetic)
-        cu_handle, cu_writer = open_csv_writer(
-            out.path_for(cu_file), DatasetSchema("Cost and Usage", cu_columns)
+        cu_file = _output_filename("Cost and Usage", provenance, synthetic, output_format)
+        cu_handle, cu_writer = _open_writer(
+            out.path_for(cu_file),
+            DatasetSchema("Cost and Usage", cu_columns),
+            output_format,
+            metadata=_meta("Cost and Usage"),
         )
         index = ExternalIndexOpener(out.path_for(_INDEX_DB)) if synthetic else None
 
@@ -213,9 +255,12 @@ def convert_files(
 
         if synthetic:
             emitted = emitted_invoice_detail_columns()
-            id_file = _output_filename("Invoice Detail", provenance, synthetic)
-            id_handle, id_writer = open_csv_writer(
-                out.path_for(id_file), DatasetSchema("Invoice Detail", tuple(emitted))
+            id_file = _output_filename("Invoice Detail", provenance, synthetic, output_format)
+            id_handle, id_writer = _open_writer(
+                out.path_for(id_file),
+                DatasetSchema("Invoice Detail", tuple(emitted)),
+                output_format,
+                metadata=_meta("Invoice Detail"),
             )
             id_count = 0
             for grain, total in index.finalize_invoice_groups():
@@ -226,9 +271,12 @@ def convert_files(
             row_counts["Invoice Detail"] = id_count
 
             bp_columns = dataset_columns("Billing Period")
-            bp_file = _output_filename("Billing Period", provenance, synthetic)
-            bp_handle, bp_writer = open_csv_writer(
-                out.path_for(bp_file), DatasetSchema("Billing Period", bp_columns)
+            bp_file = _output_filename("Billing Period", provenance, synthetic, output_format)
+            bp_handle, bp_writer = _open_writer(
+                out.path_for(bp_file),
+                DatasetSchema("Billing Period", bp_columns),
+                output_format,
+                metadata=_meta("Billing Period"),
             )
             bp_count = 0
             for start, end, issuer in index.finalize_billing_periods():
@@ -251,9 +299,14 @@ def convert_files(
                     invoice_issuer_name=issuer,
                 )
                 cc_columns = dataset_columns("Contract Commitment")
-                cc_file = _output_filename("Contract Commitment", provenance, synthetic)
-                cc_handle, cc_writer = open_csv_writer(
-                    out.path_for(cc_file), DatasetSchema("Contract Commitment", cc_columns)
+                cc_file = _output_filename(
+                    "Contract Commitment", provenance, synthetic, output_format
+                )
+                cc_handle, cc_writer = _open_writer(
+                    out.path_for(cc_file),
+                    DatasetSchema("Contract Commitment", cc_columns),
+                    output_format,
+                    metadata=_meta("Contract Commitment"),
                 )
                 for r in cc_out:
                     cc_writer.write(r)
@@ -264,6 +317,7 @@ def convert_files(
 
         if index is not None:
             index.close()
+            out.discard(_INDEX_DB)  # scratch aggregation DB must never be published
 
         providers = [provider_seen[k] for k in sorted(provider_seen)]
         billing = [billing_seen[k] for k in sorted(billing_seen)]
@@ -285,6 +339,7 @@ def convert_files(
             provenance=provenance,
             source_available=source_available,
             row_counts=row_counts,
+            output_format=output_format,
         )
 
         # Remove any staged file whose dataset turned out NOT produced (e.g. zero derivable rows).
@@ -295,7 +350,7 @@ def convert_files(
         # Mandatory validation gate (chunked, bounded memory): never publish a lint failure.
         if validate:
             for name, fname in produced_output_files.items():
-                report = _lint_file(name, out.path_for(fname))
+                report = _lint_file(name, out.path_for(fname), output_format)
                 entry = manifest["datasets"][name]
                 if entry["conformance"] == manifest_mod.CONF_NOT_VALIDATED:
                     entry["conformance"] = (
@@ -307,10 +362,21 @@ def convert_files(
                         f"lint failed for {name}; final output not written to {out_dir}"
                     )
 
+        # Enroll each produced file (written via direct handles) for fsync + checksums.
+        for fname in produced_output_files.values():
+            out.add_data_file(fname)
+
         checksums = out.checksums()
         manifest_bytes = manifest_mod.render(manifest).encode("utf-8")
         sidecar = _run_metadata(
-            produced_output_files, row_counts, manifest, out.run_id, __version__, generated_at, mode
+            produced_output_files,
+            row_counts,
+            manifest,
+            out.run_id,
+            __version__,
+            generated_at,
+            mode,
+            output_format,
         )
         all_sums = dict(checksums)
         all_sums[manifest_mod.MANIFEST_FILENAME] = hashlib.sha256(manifest_bytes).hexdigest()
@@ -361,6 +427,7 @@ def _run_metadata(
     tool_version: str,
     generated_at: str,
     mode: Mode,
+    output_format: str = "csv",
 ) -> dict:
     files = []
     for name, filename in sorted(produced_output_files.items(), key=lambda kv: kv[1]):
@@ -369,7 +436,7 @@ def _run_metadata(
             {
                 "name": filename,
                 "dataset": name,
-                "format": "csv",
+                "format": output_format,
                 "row_count": row_counts.get(name),
                 "status": entry.get("status"),
                 "conformance": entry.get("conformance"),

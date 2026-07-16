@@ -139,6 +139,22 @@ class AtomicOutputDir:
     def write_text(self, name: str, text: str, *, is_data: bool = True) -> Path:
         return self.write_bytes(name, text.encode("utf-8"), is_data=is_data)
 
+    def add_data_file(self, name: str) -> Path:
+        """Register a staging file written directly (not via :meth:`write_bytes`).
+
+        The streaming path writes large datasets through incremental file handles to keep memory
+        bounded; this fsyncs the finished file and enrolls it in the checksum/size set so it is
+        durably persisted and covered by ``SHA256SUMS`` like any other data file.
+        """
+        path = self.path_for(name)
+        _fsync_file(path)
+        self._data_files.append(path)
+        return path
+
+    def discard(self, name: str) -> None:
+        """Delete a staging file (e.g. scratch state) so it is never published."""
+        self.path_for(name).unlink(missing_ok=True)
+
     def checksums(self) -> dict[str, str]:
         """SHA-256 of every data file written so far, keyed by file name (sorted)."""
         return {p.name: sha256_file(p) for p in sorted(self._data_files, key=lambda p: p.name)}

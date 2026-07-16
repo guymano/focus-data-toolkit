@@ -128,3 +128,39 @@ def test_validate_reports_violations(tmp_path, capsys):
     bad.write_text("BillingPeriodStart,BillingPeriodEnd\n2026-05-01T00:00:00Z,not-a-date\n")
     assert main(["validate", str(bad), "--dataset", "billing-period"]) == 1
     assert "violation" in capsys.readouterr().out
+
+
+def test_convert_parquet_output(tmp_path):
+    import pytest
+
+    pytest.importorskip("pyarrow")
+    import pyarrow.parquet as pq
+
+    src = _generate(tmp_path, "aws", "1.3", 40, 1302)
+    cau = src / "focus_1_3_cost_and_usage_aws.csv"
+    out14 = tmp_path / "pq"
+
+    # Parquet output routes through the streaming engine; synthetic -> exit 4.
+    rc = main(["convert", "--cost-and-usage", str(cau), "--out", str(out14),
+               "--mode", "synthetic", "--output-format", "parquet"])
+    assert rc == 4
+    produced = sorted(p.name for p in out14.glob("*.parquet"))
+    assert "synthetic_focus_1_4_cost_and_usage.parquet" in produced
+    assert not list(out14.glob("*.sqlite"))  # scratch DB never published
+    # Decimal columns are stored as decimal128, never float.
+    field = pq.ParquetFile(str(out14 / "synthetic_focus_1_4_cost_and_usage.parquet")).schema_arrow.field("BilledCost")
+    assert "decimal" in str(field.type)
+
+
+def test_convert_stream_csv_matches_eager(tmp_path):
+    src = _generate(tmp_path, "aws", "1.3", 50, 1302)
+    cau = src / "focus_1_3_cost_and_usage_aws.csv"
+
+    eager = tmp_path / "eager"
+    assert main(["convert", "--cost-and-usage", str(cau), "--out", str(eager), "--mode", "synthetic"]) == 4
+    streamed = tmp_path / "streamed"
+    assert main(["convert", "--cost-and-usage", str(cau), "--out", str(streamed),
+                 "--mode", "synthetic", "--stream"]) == 4
+
+    for name in sorted(p.name for p in eager.glob("*.csv")):
+        assert (eager / name).read_bytes() == (streamed / name).read_bytes(), name

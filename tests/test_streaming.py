@@ -48,6 +48,10 @@ def test_streaming_output_is_byte_identical_to_eager(tmp_path, mode):
     ref_manifest = json.loads((ref / "focus_1_4_manifest.json").read_text())
     streamed_manifest = json.loads((streamed / "focus_1_4_manifest.json").read_text())
     assert ref_manifest == streamed_manifest
+    # The scratch aggregation DB must never be published, and SHA256SUMS must cover every data
+    # file — byte-identical to the eager path (regression: streaming once shipped an empty one).
+    assert not (streamed / "_index.sqlite").exists()
+    assert (streamed / "SHA256SUMS").read_bytes() == (ref / "SHA256SUMS").read_bytes()
 
 
 def test_streaming_accepts_gzip_input(tmp_path):

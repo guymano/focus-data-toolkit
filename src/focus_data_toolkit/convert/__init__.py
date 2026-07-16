@@ -66,6 +66,17 @@ DATASET_FILENAMES = {
     "Invoice Detail": "focus_1_4_invoice_detail.csv",
 }
 
+# Output formats the pipeline can write; the CSV path stays byte-exact, Parquet is value-exact.
+OUTPUT_FORMATS = ("csv", "parquet")
+
+
+def output_filename_for(dataset: str, *, synthetic_prefix: bool, output_format: str = "csv") -> str:
+    """The output filename of ``dataset`` for a format (extension follows the format)."""
+    base = DATASET_FILENAMES[dataset]
+    if output_format == "parquet" and base.endswith(".csv"):
+        base = base[:-4] + ".parquet"
+    return f"synthetic_{base}" if synthetic_prefix else base
+
 
 class ConversionError(ValueError):
     """Raised when the source cannot be converted."""
@@ -181,11 +192,13 @@ def assemble_manifest(
     provenance: dict[str, dict[str, ColumnRule]],
     source_available: dict[str, bool],
     row_counts: dict[str, int],
+    output_format: str = "csv",
 ) -> tuple[dict, dict, dict[str, str]]:
     """Build the manifest entries + manifest from per-dataset provenance and row counts.
 
     Shared by the eager (:func:`convert_to_focus_1_4`) and streaming (``convert_files``) paths
-    so both emit an identical manifest for the same input. Returns
+    so both emit an identical manifest for the same input. ``output_format`` selects the output
+    filename extension (``csv`` default, or ``parquet``). Returns
     ``(entries, manifest, produced_output_files)`` where the last maps each produced dataset to
     its output filename.
     """
@@ -197,7 +210,6 @@ def assemble_manifest(
     for name in FOCUS_1_4_DATASETS:
         prov = provenance[name]
         cols = model["datasets"][name]["columns"]
-        base_filename = DATASET_FILENAMES[name]
 
         if not source_available[name]:
             entries[name] = manifest_mod.dataset_entry(
@@ -232,7 +244,9 @@ def assemble_manifest(
         assumed = has_assumptions(prov) if synthetic else bool(blockers)
         status = manifest_mod.PRODUCED_SYNTHETIC if assumed else manifest_mod.PRODUCED
         conformance = manifest_mod.CONF_SYNTHETIC if assumed else manifest_mod.CONF_NOT_VALIDATED
-        output_file = f"synthetic_{base_filename}" if assumed else base_filename
+        output_file = output_filename_for(
+            name, synthetic_prefix=assumed, output_format=output_format
+        )
         produced_output_files[name] = output_file
         entries[name] = manifest_mod.dataset_entry(
             status=status,
@@ -514,6 +528,7 @@ def write_result(
 
 __all__ = [
     "DATASET_FILENAMES",
+    "OUTPUT_FORMATS",
     "AtomicWriteError",
     "ConversionError",
     "ConversionResult",
@@ -523,6 +538,7 @@ __all__ = [
     "convert_files",
     "convert_to_focus_1_4",
     "detect_focus_version",
+    "output_filename_for",
     "read_csv_rows",
     "rows_to_csv_bytes",
     "write_result",
