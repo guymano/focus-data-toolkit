@@ -56,14 +56,21 @@ def dataset_entry(
 
 
 def build_manifest(
-    *, tool_version: str, source_version: str, mode: str, datasets: dict[str, dict]
+    *,
+    tool_version: str,
+    source_version: str,
+    mode: str,
+    datasets: dict[str, dict],
+    detection: dict | None = None,
+    contexts: dict | None = None,
+    diagnostics: list[dict] | None = None,
 ) -> dict:
     assumptions_present = any(
         entry["status"] in (PRODUCED, PRODUCED_SYNTHETIC)
         and any(col.get("lineage") == "ASSUMED" for col in entry.get("columns", {}).values())
         for entry in datasets.values()
     )
-    return {
+    manifest: dict = {
         "tool_version": tool_version,
         "source_version": source_version,
         "target_version": TARGET_VERSION,
@@ -71,6 +78,15 @@ def build_manifest(
         "assumptions_present": assumptions_present,
         "datasets": datasets,
     }
+    # Detection decision and per-row context summary are part of the deterministic business
+    # record (no clock/RNG). Diagnostics record non-fatal findings (e.g. ambiguous context).
+    if detection is not None:
+        manifest["detection"] = detection
+    if contexts is not None:
+        manifest["contexts"] = contexts
+    if diagnostics is not None:
+        manifest["diagnostics"] = diagnostics
+    return manifest
 
 
 def render(manifest: dict) -> str:

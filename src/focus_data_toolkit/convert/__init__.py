@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from focus_data_toolkit import manifest as manifest_mod
+from focus_data_toolkit.context import describe_source_contexts, representative_provider
 from focus_data_toolkit.convert.billing_period import PROVENANCE as BILLING_PERIOD_PROVENANCE
 from focus_data_toolkit.convert.billing_period import build_billing_periods
 from focus_data_toolkit.convert.contract_commitment import (
@@ -37,10 +38,13 @@ from focus_data_toolkit.convert.cost_and_usage import (
 from focus_data_toolkit.convert.detect import detect_focus_version
 from focus_data_toolkit.convert.invoice_detail import PROVENANCE as INVOICE_DETAIL_PROVENANCE
 from focus_data_toolkit.convert.invoice_detail import build_invoice_details
+from focus_data_toolkit.errors import Diagnostic, Severity
 from focus_data_toolkit.model import FOCUS_1_4_DATASETS, load_model
 from focus_data_toolkit.model.validator import LintReport, lint_focus_1_4_structure
 from focus_data_toolkit.modes import Mode
 from focus_data_toolkit.provenance import ColumnRule, has_assumptions, strict_blockers
+from focus_data_toolkit.schema import registry
+from focus_data_toolkit.schema.detection import SchemaDetectionResult, detect_focus_schema
 
 # Base output file name per dataset (stable, snake_case). Synthetic datasets are written
 # with a ``synthetic_`` prefix so they are unmistakable on disk.
@@ -66,6 +70,9 @@ class ConversionResult:
     provenance: dict[str, dict[str, ColumnRule]]
     manifest: dict
     reports: dict[str, LintReport] = field(default_factory=dict)
+    detection: SchemaDetectionResult | None = None
+    contexts: dict = field(default_factory=dict)
+    diagnostics: list[Diagnostic] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -89,15 +96,44 @@ class ConversionResult:
         return self.manifest["datasets"][dataset]["output_file"]
 
 
-def _provider_context(cau_rows: list[dict[str, str]], source_version: str) -> tuple[str, str]:
-    """Return ``(service_provider_name, invoice_issuer_name)`` from the source."""
-    first = cau_rows[0]
-    if source_version == "1.3":
-        service_provider = first.get("ServiceProviderName") or first.get("ProviderName", "")
+def _resolve_source_version(
+    cau_rows: list[dict[str, str]],
+    *,
+    source_version: str | None,
+    source_dataset: str | None,
+    mode: Mode,
+) -> tuple[str, SchemaDetectionResult]:
+    """Determine the convertible source version and record the detection decision.
+
+    ``source_version`` / ``source_dataset`` force the corresponding dimension. In strict mode
+    an ambiguous or low-confidence detection (that is not forced) is refused with a clear
+    error; a forced version incompatible with the header is always refused.
+    """
+    headers = cau_rows[0].keys()
+    detection = detect_focus_schema(headers, dataset=source_dataset, version=source_version)
+
+    if source_version is not None:
+        if detection.confidence == "LOW":
+            raise ConversionError(
+                f"forced source version {source_version!r} is incompatible with the header: "
+                + "; ".join(detection.notes)
+            )
+        version = registry.normalize_version(source_version)
     else:
-        service_provider = first.get("ProviderName", "")
-    issuer = first.get("InvoiceIssuerName") or service_provider
-    return service_provider, issuer
+        if mode is Mode.STRICT and source_dataset is None and detection.confidence != "HIGH":
+            raise ConversionError(
+                "strict mode refuses an ambiguous or low-confidence source schema (detected "
+                f"{detection.dataset} {detection.detected_version}, confidence "
+                f"{detection.confidence}); force it with --source-version / --source-dataset"
+            )
+        # detect_focus_version raises a clear error for non-CAU / 1.4 / non-FOCUS headers.
+        version = detect_focus_version(headers)
+
+    if version not in ("1.2", "1.3"):
+        raise ConversionError(
+            f"unsupported source version {version!r}; this tool converts FOCUS 1.2/1.3 -> 1.4"
+        )
+    return version, detection
 
 
 def convert_to_focus_1_4(
@@ -105,39 +141,75 @@ def convert_to_focus_1_4(
     cc_rows: list[dict[str, str]] | None = None,
     *,
     source_version: str | None = None,
+    source_dataset: str | None = None,
     mode: Mode | str = Mode.STRICT,
     validate: bool = True,
 ) -> ConversionResult:
     """Convert FOCUS 1.2/1.3 rows into the FOCUS 1.4 datasets for the given ``mode``.
 
     ``cau_rows`` is a FOCUS 1.2 or 1.3 Cost and Usage table; ``cc_rows`` is the optional
-    FOCUS 1.3 Contract Commitment table. Returns a :class:`ConversionResult` carrying the
-    produced datasets, per-column provenance, a manifest and (when ``validate``) lint
-    reports for the produced datasets.
+    FOCUS 1.3 Contract Commitment table. ``source_version`` / ``source_dataset`` force schema
+    detection. Returns a :class:`ConversionResult` carrying the produced datasets, per-column
+    provenance, the detected schema, a per-row context summary, diagnostics, a manifest and
+    (when ``validate``) lint reports.
     """
     if not cau_rows:
         raise ConversionError("no Cost and Usage rows to convert")
     mode = Mode(mode)
-    version = source_version or detect_focus_version(cau_rows[0].keys())
-    if version not in ("1.2", "1.3"):
-        raise ConversionError(f"unsupported source version {version!r}")
+    version, detection = _resolve_source_version(
+        cau_rows, source_version=source_version, source_dataset=source_dataset, mode=mode
+    )
     synthetic = mode is Mode.SYNTHETIC
-    service_provider, issuer = _provider_context(cau_rows, version)
     model = load_model()
     source_cols = set(cau_rows[0].keys())
+
+    # Provider/issuer context is derived from the whole source, never the first row. A single
+    # representative is needed only to enrich synthetic Contract Commitment (whose 1.3 source
+    # carries no provider); ambiguity is surfaced as a diagnostic, never resolved silently.
+    contexts = describe_source_contexts(cau_rows, version)
+    provider_ctx, provider_ambiguous = representative_provider(cau_rows, version)
+    issuers = sorted(
+        {(r.get("InvoiceIssuerName") or "").strip() for r in cau_rows}
+        - {""}
+    )
+    issuer = issuers[0] if issuers else provider_ctx.service_provider_name
+    diagnostics: list[Diagnostic] = []
 
     # Synthetic-only builders (Billing Period / Invoice Detail / Contract Commitment are
     # never strictly producible from a Cost-and-Usage source).
     if synthetic:
-        invoice_rows, id_mapping = build_invoice_details(cau_rows, invoice_issuer_name=issuer)
-        billing_rows = build_billing_periods(cau_rows, invoice_issuer_name=issuer)
-        commitment_rows = (
-            convert_contract_commitment(
-                cc_rows, service_provider_name=service_provider, invoice_issuer_name=issuer
+        invoice_rows, id_mapping = build_invoice_details(cau_rows)
+        billing_rows = build_billing_periods(cau_rows)
+        if cc_rows:
+            commitment_rows = convert_contract_commitment(
+                cc_rows,
+                service_provider_name=provider_ctx.service_provider_name,
+                invoice_issuer_name=issuer,
             )
-            if cc_rows
-            else None
-        )
+            if provider_ambiguous:
+                diagnostics.append(
+                    Diagnostic(
+                        code="FDT-CTX-001",
+                        severity=Severity.WARNING,
+                        message="source carries multiple provider contexts; a representative "
+                        "was chosen to enrich synthetic Contract Commitment",
+                        datasets=("Contract Commitment",),
+                        context={"chosen_service_provider": provider_ctx.service_provider_name},
+                    )
+                )
+            if len(issuers) > 1:
+                diagnostics.append(
+                    Diagnostic(
+                        code="FDT-CTX-002",
+                        severity=Severity.WARNING,
+                        message="source carries multiple invoice issuers; a representative was "
+                        "chosen to enrich synthetic Contract Commitment",
+                        datasets=("Contract Commitment",),
+                        context={"chosen_invoice_issuer": issuer},
+                    )
+                )
+        else:
+            commitment_rows = None
     else:
         invoice_rows, id_mapping, billing_rows, commitment_rows = None, {}, None, None
 
@@ -224,6 +296,9 @@ def convert_to_focus_1_4(
         source_version=version,
         mode=mode.value,
         datasets=entries,
+        detection=detection.as_dict(),
+        contexts=contexts,
+        diagnostics=[d.as_dict() for d in diagnostics],
     )
 
     result = ConversionResult(
@@ -232,6 +307,9 @@ def convert_to_focus_1_4(
         datasets=produced,
         provenance=provenance,
         manifest=manifest,
+        detection=detection,
+        contexts=contexts,
+        diagnostics=diagnostics,
     )
     if validate:
         for name, rows in produced.items():

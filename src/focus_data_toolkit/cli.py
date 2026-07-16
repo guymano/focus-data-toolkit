@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from focus_data_toolkit.convert import (
+    ConversionError,
     convert_to_focus_1_4,
     read_csv_rows,
     write_result,
@@ -46,12 +47,30 @@ def _cmd_convert(args: argparse.Namespace) -> int:
     mode = Mode(args.mode)
     cau_rows = read_csv_rows(args.cost_and_usage)
     cc_rows = read_csv_rows(args.contract_commitment) if args.contract_commitment else None
-    result = convert_to_focus_1_4(cau_rows, cc_rows, mode=mode, validate=not args.no_validate)
+    try:
+        result = convert_to_focus_1_4(
+            cau_rows,
+            cc_rows,
+            source_version=args.source_version,
+            source_dataset=args.source_dataset,
+            mode=mode,
+            validate=not args.no_validate,
+        )
+    except ConversionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
     written = write_result(result, args.out)
     if args.manifest:
         Path(args.manifest).write_text(render_manifest(result.manifest), encoding="utf-8")
-    print(f"source detected: FOCUS {result.source_version} (mode: {mode})")
+    confidence = result.detection.confidence if result.detection else "?"
+    print(
+        f"source detected: FOCUS {result.source_version} "
+        f"(dataset {result.detection.dataset if result.detection else '?'}, "
+        f"confidence {confidence}, mode: {mode})"
+    )
+    for diag in result.diagnostics:
+        print(f"note {diag.code}: {diag.message}", file=sys.stderr)
     for path in written:
         print(f"wrote {path}")
 
@@ -130,6 +149,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--contract-commitment", help="optional FOCUS 1.3 Contract Commitment CSV (13 columns)"
     )
     conv.add_argument("--out", default="focus-1.4", help="output directory (default: ./focus-1.4)")
+    conv.add_argument(
+        "--source-version",
+        help="force the FOCUS source version (1.2 or 1.3) instead of auto-detecting it",
+    )
+    conv.add_argument(
+        "--source-dataset",
+        help="force the source dataset (e.g. cost-and-usage) instead of auto-detecting it",
+    )
     conv.add_argument(
         "--mode",
         choices=[m.value for m in Mode],

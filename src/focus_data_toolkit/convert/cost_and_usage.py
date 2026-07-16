@@ -18,6 +18,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from focus_data_toolkit.convert.contract_applied import migrate_1_3_to_1_4
+from focus_data_toolkit.convert.invoice_detail import GrainKey, invoice_detail_grain_key
 from focus_data_toolkit.model import dataset_columns
 from focus_data_toolkit.provenance import ColumnRule, Lineage
 
@@ -90,13 +91,13 @@ def convert_cost_and_usage(
     rows: list[dict[str, str]],
     source_version: str,
     *,
-    invoice_detail_ids: dict[tuple[str, str], str] | None = None,
+    invoice_detail_ids: dict[GrainKey, str] | None = None,
 ) -> list[dict[str, str]]:
     """Return ``rows`` reshaped to the FOCUS 1.4 Cost and Usage column set.
 
-    ``invoice_detail_ids`` maps ``(InvoiceId, ChargeCategory)`` to the
-    ``InvoiceDetailId`` assigned by the Invoice Detail builder, so converted
-    rows link back to their invoice line item.
+    ``invoice_detail_ids`` maps each Invoice Detail business-grain key to the
+    ``InvoiceDetailId`` assigned by the Invoice Detail builder, so converted rows link back
+    to their invoice line item on exactly the same key.
     """
     target = dataset_columns(DATASET)
     ids = invoice_detail_ids or {}
@@ -111,9 +112,8 @@ def convert_cost_and_usage(
             elif source_version == "1.2" and col in _DERIVED_FROM_1_2:
                 converted[col] = row.get(_DERIVED_FROM_1_2[col], "")
             elif col == "InvoiceDetailId":
-                # Key must match the Invoice Detail builder's (stripped) grouping key.
-                key = ((row.get("InvoiceId") or "").strip(), (row.get("ChargeCategory") or "").strip())
-                converted[col] = ids.get(key, "")
+                # Same business-grain key the Invoice Detail builder grouped on.
+                converted[col] = ids.get(invoice_detail_grain_key(row), "")
             else:
                 # New-in-1.4 or 1.3-only columns absent from the source: null.
                 converted[col] = ""
