@@ -26,6 +26,9 @@ CONF_LOW = "LOW"
 _AMBIGUITY_DELTA = 0.04
 # Below this best-similarity floor the header is treated as "not FOCUS" (no dataset).
 _DATASET_FLOOR = 0.20
+# When a version is forced, the user's choice is respected down to a much lower floor (a
+# sparse-but-real projection is valid); only near-zero overlap (a non-FOCUS file) is rejected.
+_FORCED_OVERLAP_FLOOR = 0.05
 
 
 @dataclass(frozen=True)
@@ -201,8 +204,15 @@ def detect_focus_schema(
         # The version is locked by the user. Only columns that belong to *another* version of
         # this dataset (``additional_focus``) make the forced version genuinely impossible;
         # merely missing columns are a completeness issue the lint reports, not a reason to
-        # override an explicit choice.
-        if additional_focus:
+        # override an explicit choice. But a header with essentially no overlap (e.g. a
+        # non-FOCUS file) must still be rejected even when a version is forced.
+        if best.jaccard < _FORCED_OVERLAP_FLOOR:
+            confidence = CONF_LOW
+            notes.append(
+                f"header has no meaningful overlap with the forced schema "
+                f"{best.dataset} {forced_version}"
+            )
+        elif additional_focus:
             confidence = CONF_LOW
             notes.append(
                 f"header is incompatible with forced version {forced_version} "

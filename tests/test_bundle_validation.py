@@ -222,6 +222,66 @@ def test_correction_reference_present_ok():
     assert "FDT-CORR-001" not in codes(report)
 
 
+def test_zero_reconciliation_tolerance_is_respected():
+    bundle = {
+        "Cost and Usage": [cu(BilledCost="10.005", InvoiceDetailId="A")],
+        "Invoice Detail": [invd(InvoiceDetailId="A", BilledCost="10.00")],
+    }
+    report = validate_dataset_bundle(
+        bundle, invoice_detail_authoritative=True, rounding_tolerance=Decimal("0")
+    )
+    assert "FDT-CROSS-030" in codes(report)  # 0.005 exceeds a zero tolerance
+
+
+def test_invoice_detail_fk_without_target_is_not_executable():
+    report = validate_dataset_bundle({"Cost and Usage": [cu(InvoiceDetailId="x_fdt_idl_v1_abc")]})
+    assert "FDT-BUNDLE-001" in codes(report)
+
+
+def test_contract_applied_fk_without_target_is_not_executable():
+    report = validate_dataset_bundle(
+        {"Cost and Usage": [cu(InvoiceDetailId="", ContractApplied=contract_applied("CM-1"))]}
+    )
+    assert "FDT-BUNDLE-001" in codes(report)
+
+
+def test_duplicate_contract_commitment_id():
+    report = validate_dataset_bundle(
+        {"Contract Commitment": [{"ContractCommitmentId": "CM-1"}, {"ContractCommitmentId": "CM-1"}]}
+    )
+    assert "FDT-CROSS-001" in codes(report)
+
+
+def test_non_finite_percentage_does_not_crash():
+    report = validate_dataset_bundle(
+        {"Contract Commitment": [{"ContractCommitmentId": "CM-1", "ContractCommitmentDiscountPercentage": "NaN"}]}
+    )
+    assert isinstance(report.ok, bool)
+    assert "FDT-CROSS-051" not in codes(report)
+
+
+def test_naive_commitment_date_does_not_crash():
+    report = validate_dataset_bundle(
+        {
+            "Contract Commitment": [
+                {
+                    "ContractCommitmentId": "CM-1",
+                    "ContractCommitmentPeriodStart": "2026-06-01T00:00:00",  # naive (no Z)
+                    "ContractCommitmentPeriodEnd": "2026-05-01T00:00:00Z",  # aware
+                }
+            ]
+        }
+    )
+    assert isinstance(report.ok, bool)  # mixed naive/aware must not raise TypeError
+
+
+def test_cross_015_is_error_severity():
+    from focus_data_toolkit.errors import Severity
+    from focus_data_toolkit.validate import codes as codes_mod
+
+    assert codes_mod.default_severity("FDT-CROSS-015") is Severity.ERROR
+
+
 def test_report_is_json_serialisable():
     report = validate_dataset_bundle({"Cost and Usage": [cu()], "Invoice Detail": [invd()]})
     payload = json.dumps(report.as_dict())

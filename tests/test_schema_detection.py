@@ -119,6 +119,12 @@ def test_forced_version_incompatible():
     assert "InvoiceDetailId" in result.additional_focus_columns
 
 
+def test_forced_version_on_non_focus_header_is_low():
+    # Forcing a version does not override a header with essentially no FOCUS overlap.
+    result = detect_focus_schema(["Date", "Amount", "Account"], version="1.3")
+    assert result.confidence == "LOW"
+
+
 def test_forced_dataset():
     result = detect_focus_schema(CAU_1_3, dataset="cost-and-usage")
     assert result.dataset == "Cost and Usage"

@@ -53,6 +53,34 @@ def check_unique_invoice_detail_ids(invoice_detail: Rows) -> list[Diagnostic]:
     return out
 
 
+def check_unique_contract_commitment_ids(contract_commitment: Rows) -> list[Diagnostic]:
+    """ContractCommitmentId must be unique (ContractApplied resolves commitments by this id)."""
+    seen: dict[str, int] = {}
+    out: list[Diagnostic] = []
+    for i, row in enumerate(contract_commitment, start=1):
+        commitment_id = (row.get("ContractCommitmentId") or "").strip()
+        if not commitment_id:
+            continue
+        if commitment_id in seen:
+            out.append(
+                Diagnostic(
+                    code="FDT-CROSS-001",
+                    severity=Severity.ERROR,
+                    message=f"ContractCommitmentId {commitment_id!r} is not unique in Contract "
+                    f"Commitment (rows {seen[commitment_id]} and {i})",
+                    datasets=("Contract Commitment",),
+                    dataset="Contract Commitment",
+                    line_number=i,
+                    column="ContractCommitmentId",
+                    value=commitment_id,
+                    record_keys={"ContractCommitmentId": commitment_id},
+                )
+            )
+        else:
+            seen[commitment_id] = i
+    return out
+
+
 def check_cost_and_usage_invoice_detail_fk(
     cost_and_usage: Rows, invoice_detail: Rows
 ) -> list[Diagnostic]:

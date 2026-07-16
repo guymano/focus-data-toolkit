@@ -11,6 +11,7 @@ from decimal import Decimal
 from focus_data_toolkit.context import (
     describe_source_contexts,
     distinct_provider_contexts,
+    representative_provider,
 )
 from focus_data_toolkit.convert import convert_to_focus_1_4
 from focus_data_toolkit.convert.billing_period import build_billing_periods
@@ -87,6 +88,18 @@ def test_provider_context_is_per_row_not_first_row():
     assert len(contexts) == 2
     services = {c.service_provider_name for c in contexts}
     assert services == {"AWS", "Datadog"}
+
+
+def test_representative_provider_prefers_complete_context():
+    # One row has blank provider fields, another is complete: the complete one wins so
+    # synthetic Contract Commitment enrichment does not get a blank ServiceProviderName.
+    rows = [
+        cau(ServiceProviderName="", HostProviderName=""),
+        cau(ServiceProviderName="AWS", HostProviderName="AWS"),
+    ]
+    ctx, ambiguous = representative_provider(rows, "1.3")
+    assert ctx.service_provider_name == "AWS"
+    assert ambiguous is True
 
 
 def test_billing_period_issuer_not_backfilled_from_first_row():

@@ -115,7 +115,15 @@ class AtomicOutputDir:
 
     # -- writing ---------------------------------------------------------------
     def path_for(self, name: str) -> Path:
-        return self._tmp / name
+        # Reject absolute paths and '..' so a caller-supplied name cannot escape the staging
+        # directory (which would write outside the atomic flow and the checksum set). Relative
+        # subdirectories are allowed, e.g. for Parquet partitioning.
+        candidate = Path(name)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            raise AtomicWriteError(
+                f"unsafe output name {name!r}: must be a relative path without '..'"
+            )
+        return self._tmp / candidate
 
     def write_bytes(self, name: str, data: bytes, *, is_data: bool = True) -> Path:
         """Write ``data`` into the staging dir, flush and fsync it."""
@@ -162,6 +170,13 @@ class AtomicOutputDir:
             os.replace(self._tmp, target)
             _fsync_dir(target.parent)
             return
+        # The destination was checked at __enter__, but another run may have created it while
+        # this one was staging. Re-honour the refuse policy at publish time rather than
+        # clobbering a concurrently-published result.
+        if self.on_exists is OnExists.REFUSE:
+            raise DestinationExistsError(
+                f"destination {target} appeared during staging (on_exists=refuse)"
+            )
         # target exists -> swap: move it aside, move the new one in, then delete the old.
         trash = self._parent / f".trash-{self.run_id}"
         os.replace(target, trash)

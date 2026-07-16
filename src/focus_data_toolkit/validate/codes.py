@@ -47,7 +47,7 @@ CATALOG: dict[str, CodeSpec] = dict([
     _s("FDT-CROSS-010", Severity.ERROR, "ContractApplied references an unknown ContractCommitmentId"),
     _s("FDT-CROSS-011", Severity.ERROR, "referenced Contract Commitment not found"),
     _s("FDT-CROSS-014", Severity.ERROR, "Cost and Usage InvoiceDetailId not found in Invoice Detail"),
-    _s("FDT-CROSS-015", Severity.WARNING, "reference target present but a linked attribute differs"),
+    _s("FDT-CROSS-015", Severity.ERROR, "linked record differs on an identifying attribute (wrong invoice line)"),
     _s("FDT-CROSS-020", Severity.ERROR, "currency mismatch between linked records"),
     _s("FDT-CROSS-021", Severity.ERROR, "billing period mismatch between linked records"),
     _s("FDT-CROSS-022", Severity.ERROR, "invoice issuer mismatch between linked records"),

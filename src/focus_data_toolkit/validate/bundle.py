@@ -97,9 +97,17 @@ def validate_dataset_bundle(
         checks.append(name)
         diagnostics.extend(produced)
 
+    def _refs_present(rows: list, column: str) -> bool:
+        return any((r.get(column) or "").strip() for r in rows)
+
     # Referential integrity.
     if invd:
         run("unique_invoice_detail_ids", referential.check_unique_invoice_detail_ids(invd))
+    if cc:
+        run(
+            "unique_contract_commitment_ids",
+            referential.check_unique_contract_commitment_ids(cc),
+        )
     if cu and invd:
         run(
             "cost_and_usage_invoice_detail_fk",
@@ -109,15 +117,40 @@ def validate_dataset_bundle(
             "cost_and_usage_invoice_detail_consistency",
             referential.check_cost_and_usage_invoice_detail_consistency(cu, invd),
         )
+    elif cu and _refs_present(cu, "InvoiceDetailId"):
+        # References exist but their target table is absent -> the FK check cannot resolve them.
+        diagnostics.append(
+            _note(
+                "FDT-BUNDLE-001",
+                Severity.NOT_EXECUTABLE,
+                "Cost and Usage InvoiceDetailId references cannot be checked: the Invoice Detail "
+                "dataset is absent from the bundle",
+                ("Cost and Usage", "Invoice Detail"),
+            )
+        )
     if cu and cc:
         run("contract_applied_fk", referential.check_contract_applied_fk(cu, cc))
+    elif cu and _refs_present(cu, "ContractApplied"):
+        diagnostics.append(
+            _note(
+                "FDT-BUNDLE-001",
+                Severity.NOT_EXECUTABLE,
+                "Cost and Usage ContractApplied references cannot be checked: the Contract "
+                "Commitment dataset is absent from the bundle",
+                ("Cost and Usage", "Contract Commitment"),
+            )
+        )
     if cu and bp:
         run("billing_period_coverage", referential.check_billing_period_coverage(cu, bp))
 
     # Reconciliation (only for an authoritative Invoice Detail).
     if cu and invd:
         if invoice_detail_authoritative:
-            tolerance = rounding_tolerance or reconciliation.DEFAULT_TOLERANCE
+            tolerance = (
+                rounding_tolerance
+                if rounding_tolerance is not None
+                else reconciliation.DEFAULT_TOLERANCE
+            )
             run(
                 "reconcile_invoice_detail",
                 reconciliation.reconcile_invoice_detail(cu, invd, tolerance=tolerance),

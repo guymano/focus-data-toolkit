@@ -111,6 +111,18 @@ def test_convert_forced_wrong_dataset_exits_2(tmp_path, capsys):
     assert rc == 2
 
 
+def test_convert_contract_commitment_as_cau_exits_2(tmp_path):
+    # A Contract Commitment CSV passed as --cost-and-usage must be rejected even when the
+    # version is forced (it is not a Cost and Usage source).
+    src = _generate(tmp_path, "aws", "1.3", 20, 1302)
+    cc = src / "focus_1_3_contract_commitment_aws.csv"
+    rc = main(
+        ["convert", "--cost-and-usage", str(cc), "--out", str(tmp_path / "v14"),
+         "--source-version", "1.3"]
+    )
+    assert rc == 2
+
+
 def test_validate_reports_violations(tmp_path, capsys):
     bad = tmp_path / "bad.csv"
     bad.write_text("BillingPeriodStart,BillingPeriodEnd\n2026-05-01T00:00:00Z,not-a-date\n")

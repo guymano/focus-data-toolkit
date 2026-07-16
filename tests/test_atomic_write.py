@@ -86,6 +86,26 @@ def test_keep_temp_retains_staging_on_error(tmp_path):
     assert _temp_dirs(tmp_path)  # kept for diagnosis
 
 
+def test_refuse_is_rechecked_at_publish(tmp_path):
+    dest = tmp_path / "out"
+    with pytest.raises(DestinationExistsError):
+        with AtomicOutputDir(dest, on_exists=OnExists.REFUSE) as out:
+            out.write_bytes("a.csv", b"x")
+            dest.mkdir()  # a concurrent run publishes the destination during staging
+            out.commit()
+    assert dest.exists()  # the concurrently-created destination is not clobbered
+    assert not _temp_dirs(tmp_path)
+
+
+def test_path_traversal_names_are_rejected(tmp_path):
+    with pytest.raises(AtomicWriteError):
+        with AtomicOutputDir(tmp_path / "out1") as out:
+            out.write_bytes("../escape.csv", b"x")
+    with pytest.raises(AtomicWriteError):
+        with AtomicOutputDir(tmp_path / "out2") as out:
+            out.write_bytes("/abs.csv", b"x")
+
+
 def test_validation_failure_aborts_publish(tmp_path):
     dest = tmp_path / "out"
 

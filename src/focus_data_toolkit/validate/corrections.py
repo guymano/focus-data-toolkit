@@ -30,9 +30,13 @@ _PERIOD_PAIRS = (
 
 def _parse_dt(value: str) -> datetime | None:
     try:
-        return datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
     except ValueError:
         return None
+    # Require a timezone (FOCUS Date/Time is UTC 'Z'). A naive value is malformed for this
+    # lifecycle check; returning None avoids a naive-vs-aware TypeError on comparison and
+    # lets the per-dataset linter report the bad Date/Time format.
+    return parsed if parsed.tzinfo is not None else None
 
 
 def check_contract_commitment_periods(contract_commitment: Rows) -> list[Diagnostic]:
@@ -72,6 +76,8 @@ def check_contract_commitment_percentages(contract_commitment: Rows) -> list[Dia
                 value = Decimal(raw)
             except InvalidOperation:
                 continue  # value-format is the per-dataset linter's job
+            if not value.is_finite():
+                continue  # NaN/Infinity is a format issue for the linter, not a range error
             if value < 0 or value > 1:
                 out.append(
                     Diagnostic(

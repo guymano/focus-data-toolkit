@@ -154,6 +154,14 @@ def _resolve_source_version(
         except ValueError as exc:
             raise ConversionError(str(exc)) from exc
 
+    # This converter only accepts a Cost and Usage source. Forcing a version does not bypass
+    # this: a Contract Commitment header passed as --cost-and-usage --source-version 1.3 must be
+    # rejected, not converted into an empty manifest.
+    if detection.dataset != "Cost and Usage":
+        raise ConversionError(
+            "this converter requires a FOCUS Cost and Usage source; detected "
+            f"{detection.dataset or 'no FOCUS dataset'} (confidence {detection.confidence})"
+        )
     if version not in ("1.2", "1.3"):
         raise ConversionError(
             f"unsupported source version {version!r}; this tool converts FOCUS 1.2/1.3 -> 1.4"

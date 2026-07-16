@@ -69,4 +69,12 @@ def representative_provider(
     contexts = distinct_provider_contexts(rows, source_version)
     if not contexts:
         return ProviderContext("", ""), False
-    return contexts[0], len(contexts) > 1
+    # Prefer a usable representative: a fully complete context, else one with a non-empty
+    # service provider, else the first. This avoids enriching with a blank provider (which
+    # would fail the lint) when the same source also carries a complete provider elsewhere.
+    chosen = (
+        next((c for c in contexts if c.is_complete), None)
+        or next((c for c in contexts if c.service_provider_name), None)
+        or contexts[0]
+    )
+    return chosen, len(contexts) > 1
