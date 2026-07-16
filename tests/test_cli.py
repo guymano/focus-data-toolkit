@@ -52,17 +52,19 @@ def test_convert_synthetic_produces_all_with_synthetic_prefix(tmp_path, capsys):
     )
     assert rc == 4  # synthetic result with assumptions
 
+    # All four synthetic-mode files carry the synthetic_ prefix (Cost and Usage too,
+    # because its InvoiceDetailId back-link into the synthetic Invoice Detail is assumed).
     produced = sorted(p.name for p in out14.glob("*.csv"))
     assert produced == [
-        "focus_1_4_cost_and_usage.csv",
         "synthetic_focus_1_4_billing_period.csv",
         "synthetic_focus_1_4_contract_commitment.csv",
+        "synthetic_focus_1_4_cost_and_usage.csv",
         "synthetic_focus_1_4_invoice_detail.csv",
     ]
     manifest = json.loads((out14 / "focus_1_4_manifest.json").read_text())
     assert manifest["mode"] == "synthetic"
     assert manifest["assumptions_present"] is True
-    assert manifest["datasets"]["Cost and Usage"]["status"] == "PRODUCED"
+    assert manifest["datasets"]["Cost and Usage"]["status"] == "PRODUCED_SYNTHETIC"
     assert manifest["datasets"]["Invoice Detail"]["status"] == "PRODUCED_SYNTHETIC"
 
     err = capsys.readouterr().err

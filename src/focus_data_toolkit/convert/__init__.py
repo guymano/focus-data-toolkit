@@ -158,7 +158,7 @@ def convert_to_focus_1_4(
     }
     source_available = {
         "Cost and Usage": True,
-        "Contract Commitment": cc_rows is not None,
+        "Contract Commitment": bool(cc_rows),  # None or empty -> no source dataset
         "Billing Period": True,
         "Invoice Detail": True,
     }
@@ -191,9 +191,22 @@ def convert_to_focus_1_4(
             continue
 
         rows = built_rows[name] or []
+        if not rows:
+            # The source carried no rows this dataset can be derived from (e.g. no
+            # InvoiceId anywhere). Do not advertise a produced-but-empty (headerless) file.
+            entries[name] = manifest_mod.dataset_entry(
+                status=manifest_mod.NOT_PRODUCED,
+                conformance=manifest_mod.CONF_INCOMPLETE,
+                provenance=prov,
+                reason="source rows yield no derivable rows for this dataset",
+            )
+            continue
+
         assumed = has_assumptions(prov) if synthetic else bool(blockers)
         status = manifest_mod.PRODUCED_SYNTHETIC if assumed else manifest_mod.PRODUCED
-        conformance = manifest_mod.CONF_SYNTHETIC if assumed else manifest_mod.CONF_STRUCTURAL_LINT
+        # Conformance for a factual dataset is only known after the lint runs (below);
+        # start it as NOT_VALIDATED. Synthetic datasets are never a lint claim.
+        conformance = manifest_mod.CONF_SYNTHETIC if assumed else manifest_mod.CONF_NOT_VALIDATED
         output_file = f"synthetic_{base_filename}" if assumed else base_filename
         produced[name] = rows
         entries[name] = manifest_mod.dataset_entry(
@@ -222,8 +235,16 @@ def convert_to_focus_1_4(
     )
     if validate:
         for name, rows in produced.items():
-            if rows:
-                result.reports[name] = lint_focus_1_4_structure(name, rows)
+            report = lint_focus_1_4_structure(name, rows)
+            result.reports[name] = report
+            entry = result.manifest["datasets"][name]
+            # Only a factual dataset advertises a lint conclusion; set it now that the
+            # lint has actually run (synthetic entries keep their SYNTHETIC label).
+            if entry["conformance"] == manifest_mod.CONF_NOT_VALIDATED:
+                entry["conformance"] = (
+                    manifest_mod.CONF_STRUCTURAL_LINT if report.ok
+                    else manifest_mod.CONF_LINT_FAILED
+                )
     return result
 
 

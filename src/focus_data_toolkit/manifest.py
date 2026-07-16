@@ -22,7 +22,9 @@ PRODUCED_SYNTHETIC = "PRODUCED_SYNTHETIC"
 NOT_PRODUCED = "NOT_PRODUCED"
 
 # Conformance labels (never "fully conformant": see model/validator.py levels).
-CONF_STRUCTURAL_LINT = "STRUCTURAL_LINT"  # produced from factual lineage, passed lint
+CONF_STRUCTURAL_LINT = "STRUCTURAL_LINT"  # produced from factual lineage, passed the lint
+CONF_LINT_FAILED = "LINT_FAILED"          # produced from factual lineage, but the lint failed
+CONF_NOT_VALIDATED = "NOT_VALIDATED"      # produced but lint not run (validate=False)
 CONF_SYNTHETIC = "SYNTHETIC"              # produced with assumed values
 CONF_INCOMPLETE = "INCOMPLETE"            # not produced
 

@@ -28,8 +28,23 @@ def test_synthetic_datasets_are_flagged_and_never_fully_conformant(synthetic_res
     assert m["assumptions_present"] is True
 
 
-def test_cost_and_usage_stays_a_clean_conversion(synthetic_result):
+def test_cost_and_usage_is_synthetic_only_via_invoice_backlink(synthetic_result):
+    # In synthetic mode Cost and Usage is labelled synthetic solely because its
+    # InvoiceDetailId back-links to the (synthetic) Invoice Detail. Every other column
+    # is a faithful migration (no other assumed lineage).
     entry = synthetic_result.manifest["datasets"]["Cost and Usage"]
+    assert entry["status"] == "PRODUCED_SYNTHETIC"
+    assert entry["conformance"] == "SYNTHETIC"
+    assumed = [c for c, p in entry["columns"].items() if p["lineage"] == "ASSUMED"]
+    assert assumed == ["InvoiceDetailId"]
+
+
+def test_strict_cost_and_usage_is_clean(source_tables):
+    from focus_data_toolkit.convert import convert_to_focus_1_4
+    from focus_data_toolkit.modes import Mode
+
+    cau, cc = source_tables[("aws", "1.3")]
+    entry = convert_to_focus_1_4(cau, cc, mode=Mode.STRICT).manifest["datasets"]["Cost and Usage"]
     assert entry["status"] == "PRODUCED"
     assert entry["conformance"] == "STRUCTURAL_LINT"
 

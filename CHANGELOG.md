@@ -37,6 +37,15 @@ conformance defects.
 - `convert_to_focus_1_4` gained a `mode` parameter; `ConversionResult` gained
   `mode`, `provenance`, `manifest`, `not_produced`, `assumptions_present`.
 - README rewritten to separate schema migration / enrichment / synthetic projection.
+- In synthetic mode the Cost and Usage `InvoiceDetailId` back-link (a locally generated id)
+  is lineage `ASSUMED`, so synthetic Cost and Usage is labelled `PRODUCED_SYNTHETIC` and
+  `synthetic_`-prefixed; in strict mode it stays null. `PricingCurrency` /
+  `PricingCurrencyEffectiveCost` are lineage `DERIVED` (source value; nulls backfilled), not
+  `OBSERVED`.
+- Manifest conformance for a factual dataset is set **after** the lint runs:
+  `STRUCTURAL_LINT` (passed), `LINT_FAILED` (failed), or `NOT_VALIDATED` (`--no-validate`).
+- A derivable dataset whose source yields no rows (e.g. no `InvoiceId`, or an empty Contract
+  Commitment source) is reported `NOT_PRODUCED` instead of writing a headerless empty file.
 
 ### Fixed — FOCUS conformance of generated JSON columns
 

@@ -86,13 +86,18 @@ focus-toolkit convert \
   --cost-and-usage out/focus_1_3_cost_and_usage_aws.csv \
   --contract-commitment out/focus_1_3_contract_commitment_aws.csv \
   --out ./focus-1.4 --mode synthetic
-# -> focus_1_4_cost_and_usage.csv                 (real migration)
-# -> synthetic_focus_1_4_contract_commitment.csv  (assumed terms)
-# -> synthetic_focus_1_4_billing_period.csv       (assumed status/timestamps)
-# -> synthetic_focus_1_4_invoice_detail.csv       (assumed invoice facts)
+# -> synthetic_focus_1_4_cost_and_usage.csv        (migration + assumed InvoiceDetailId back-link)
+# -> synthetic_focus_1_4_contract_commitment.csv   (assumed terms)
+# -> synthetic_focus_1_4_billing_period.csv        (assumed status/timestamps)
+# -> synthetic_focus_1_4_invoice_detail.csv        (assumed invoice facts)
 # -> focus_1_4_manifest.json
 # exit code 4: synthetic result contains ASSUMED values
 ```
+
+In synthetic mode Cost and Usage is also `synthetic_`-prefixed, because its
+`InvoiceDetailId` back-links to the (synthetic) Invoice Detail — every other
+column is a faithful migration, as the manifest's per-column lineage records. In
+strict mode Cost and Usage is emitted unprefixed with its `InvoiceDetailId` left null.
 
 Works the same on your **own** FOCUS 1.2/1.3 exports — the source version is
 detected from the CSV header. CLI exit codes: `0` success without assumptions ·
