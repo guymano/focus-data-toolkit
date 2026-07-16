@@ -22,6 +22,7 @@ import csv
 import hashlib
 import io
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -107,7 +108,7 @@ class ConversionResult:
 
 
 def _resolve_source_version(
-    cau_rows: list[dict[str, str]],
+    headers: Iterable[str],
     *,
     source_version: str | None,
     source_dataset: str | None,
@@ -115,11 +116,11 @@ def _resolve_source_version(
 ) -> tuple[str, SchemaDetectionResult]:
     """Determine the convertible source version and record the detection decision.
 
-    ``source_version`` / ``source_dataset`` force the corresponding dimension. In strict mode
-    an ambiguous or low-confidence detection (that is not forced) is refused with a clear
-    error; a forced version incompatible with the header is always refused.
+    ``headers`` is the source column set. ``source_version`` / ``source_dataset`` force the
+    corresponding dimension. In strict mode an ambiguous or low-confidence detection (that is
+    not forced) is refused with a clear error; a forced version incompatible with the header is
+    always refused.
     """
-    headers = cau_rows[0].keys()
     # A bad --source-version/--source-dataset value raises ValueError from normalisation;
     # surface it as a ConversionError so the CLI exits with the invalid-argument code, not a
     # traceback.
@@ -169,6 +170,90 @@ def _resolve_source_version(
     return version, detection
 
 
+def assemble_manifest(
+    *,
+    version: str,
+    mode: Mode,
+    synthetic: bool,
+    detection: SchemaDetectionResult,
+    contexts: dict,
+    diagnostics: list[Diagnostic],
+    provenance: dict[str, dict[str, ColumnRule]],
+    source_available: dict[str, bool],
+    row_counts: dict[str, int],
+) -> tuple[dict, dict, dict[str, str]]:
+    """Build the manifest entries + manifest from per-dataset provenance and row counts.
+
+    Shared by the eager (:func:`convert_to_focus_1_4`) and streaming (``convert_files``) paths
+    so both emit an identical manifest for the same input. Returns
+    ``(entries, manifest, produced_output_files)`` where the last maps each produced dataset to
+    its output filename.
+    """
+    from focus_data_toolkit import __version__
+
+    model = load_model()
+    entries: dict[str, dict] = {}
+    produced_output_files: dict[str, str] = {}
+    for name in FOCUS_1_4_DATASETS:
+        prov = provenance[name]
+        cols = model["datasets"][name]["columns"]
+        base_filename = DATASET_FILENAMES[name]
+
+        if not source_available[name]:
+            entries[name] = manifest_mod.dataset_entry(
+                status=manifest_mod.NOT_PRODUCED,
+                conformance=manifest_mod.CONF_INCOMPLETE,
+                provenance=prov,
+                reason="no source dataset available for this FOCUS 1.4 dataset",
+            )
+            continue
+
+        blockers = strict_blockers(prov, cols)
+        if blockers and not synthetic:
+            entries[name] = manifest_mod.dataset_entry(
+                status=manifest_mod.NOT_PRODUCED,
+                conformance=manifest_mod.CONF_INCOMPLETE,
+                provenance=prov,
+                reason="Mandatory provider-issued fields unavailable from Cost and Usage",
+                blocking_columns=blockers,
+            )
+            continue
+
+        count = row_counts.get(name) or 0
+        if not count:
+            entries[name] = manifest_mod.dataset_entry(
+                status=manifest_mod.NOT_PRODUCED,
+                conformance=manifest_mod.CONF_INCOMPLETE,
+                provenance=prov,
+                reason="source rows yield no derivable rows for this dataset",
+            )
+            continue
+
+        assumed = has_assumptions(prov) if synthetic else bool(blockers)
+        status = manifest_mod.PRODUCED_SYNTHETIC if assumed else manifest_mod.PRODUCED
+        conformance = manifest_mod.CONF_SYNTHETIC if assumed else manifest_mod.CONF_NOT_VALIDATED
+        output_file = f"synthetic_{base_filename}" if assumed else base_filename
+        produced_output_files[name] = output_file
+        entries[name] = manifest_mod.dataset_entry(
+            status=status,
+            conformance=conformance,
+            provenance=prov,
+            row_count=count,
+            output_file=output_file,
+        )
+
+    manifest = manifest_mod.build_manifest(
+        tool_version=__version__,
+        source_version=version,
+        mode=mode.value,
+        datasets=entries,
+        detection=detection.as_dict(),
+        contexts=contexts,
+        diagnostics=[d.as_dict() for d in diagnostics],
+    )
+    return entries, manifest, produced_output_files
+
+
 def convert_to_focus_1_4(
     cau_rows: list[dict[str, str]],
     cc_rows: list[dict[str, str]] | None = None,
@@ -190,10 +275,9 @@ def convert_to_focus_1_4(
         raise ConversionError("no Cost and Usage rows to convert")
     mode = Mode(mode)
     version, detection = _resolve_source_version(
-        cau_rows, source_version=source_version, source_dataset=source_dataset, mode=mode
+        cau_rows[0].keys(), source_version=source_version, source_dataset=source_dataset, mode=mode
     )
     synthetic = mode is Mode.SYNTHETIC
-    model = load_model()
     source_cols = set(cau_rows[0].keys())
 
     # Provider/issuer context is derived from the whole source, never the first row. A single
@@ -267,72 +351,22 @@ def convert_to_focus_1_4(
         "Billing Period": True,
         "Invoice Detail": True,
     }
+    row_counts = {name: len(built_rows[name] or []) for name in FOCUS_1_4_DATASETS}
 
-    produced: dict[str, list[dict[str, str]]] = {}
-    entries: dict[str, dict] = {}
-    for name in FOCUS_1_4_DATASETS:
-        prov = provenance[name]
-        cols = model["datasets"][name]["columns"]
-        base_filename = DATASET_FILENAMES[name]
-
-        if not source_available[name]:
-            entries[name] = manifest_mod.dataset_entry(
-                status=manifest_mod.NOT_PRODUCED,
-                conformance=manifest_mod.CONF_INCOMPLETE,
-                provenance=prov,
-                reason="no source dataset available for this FOCUS 1.4 dataset",
-            )
-            continue
-
-        blockers = strict_blockers(prov, cols)
-        if blockers and not synthetic:
-            entries[name] = manifest_mod.dataset_entry(
-                status=manifest_mod.NOT_PRODUCED,
-                conformance=manifest_mod.CONF_INCOMPLETE,
-                provenance=prov,
-                reason="Mandatory provider-issued fields unavailable from Cost and Usage",
-                blocking_columns=blockers,
-            )
-            continue
-
-        rows = built_rows[name] or []
-        if not rows:
-            # The source carried no rows this dataset can be derived from (e.g. no
-            # InvoiceId anywhere). Do not advertise a produced-but-empty (headerless) file.
-            entries[name] = manifest_mod.dataset_entry(
-                status=manifest_mod.NOT_PRODUCED,
-                conformance=manifest_mod.CONF_INCOMPLETE,
-                provenance=prov,
-                reason="source rows yield no derivable rows for this dataset",
-            )
-            continue
-
-        assumed = has_assumptions(prov) if synthetic else bool(blockers)
-        status = manifest_mod.PRODUCED_SYNTHETIC if assumed else manifest_mod.PRODUCED
-        # Conformance for a factual dataset is only known after the lint runs (below);
-        # start it as NOT_VALIDATED. Synthetic datasets are never a lint claim.
-        conformance = manifest_mod.CONF_SYNTHETIC if assumed else manifest_mod.CONF_NOT_VALIDATED
-        output_file = f"synthetic_{base_filename}" if assumed else base_filename
-        produced[name] = rows
-        entries[name] = manifest_mod.dataset_entry(
-            status=status,
-            conformance=conformance,
-            provenance=prov,
-            row_count=len(rows),
-            output_file=output_file,
-        )
-
-    from focus_data_toolkit import __version__
-
-    manifest = manifest_mod.build_manifest(
-        tool_version=__version__,
-        source_version=version,
-        mode=mode.value,
-        datasets=entries,
-        detection=detection.as_dict(),
+    _entries, manifest, produced_output_files = assemble_manifest(
+        version=version,
+        mode=mode,
+        synthetic=synthetic,
+        detection=detection,
         contexts=contexts,
-        diagnostics=[d.as_dict() for d in diagnostics],
+        diagnostics=diagnostics,
+        provenance=provenance,
+        source_available=source_available,
+        row_counts=row_counts,
     )
+    produced: dict[str, list[dict[str, str]]] = {
+        name: built_rows[name] or [] for name in produced_output_files
+    }
 
     result = ConversionResult(
         source_version=version,
@@ -485,9 +519,14 @@ __all__ = [
     "ConversionResult",
     "DestinationExistsError",
     "OnExists",
+    "assemble_manifest",
+    "convert_files",
     "convert_to_focus_1_4",
     "detect_focus_version",
     "read_csv_rows",
     "rows_to_csv_bytes",
     "write_result",
 ]
+
+# Imported last (streaming imports names from this module, which are now all defined).
+from focus_data_toolkit.convert.streaming import convert_files  # noqa: E402

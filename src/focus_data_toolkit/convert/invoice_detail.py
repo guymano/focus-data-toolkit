@@ -122,26 +122,25 @@ def invoice_detail_id(grain_key: GrainKey) -> str:
     return f"{_LOCAL_ID_NAMESPACE}_{_ID_ALGO_VERSION}_{digest}"
 
 
-def invoice_detail_row_from_group(
+def invoice_detail_row(
     grain_key: GrainKey,
-    members: Sequence[Mapping[str, str]],
+    billed_total: Decimal,
     detail_id: str,
     emitted: Sequence[str],
 ) -> dict[str, str]:
-    """Build one Invoice Detail row from a business-grain group (pure function).
+    """Build one Invoice Detail row from its grain key and pre-summed billed cost.
 
     Every identity field comes from the grain key itself (not an arbitrary member row), so the
-    row is fully determined by ``(grain_key, member costs)``. Shared by the eager and the
-    streaming pipelines, which is what makes them provably equivalent.
+    row is fully determined by ``(grain_key, billed_total)``. Shared by the eager and the
+    streaming pipelines (which sums in SQLite), which is what makes them provably equivalent.
     """
     issuer, invoice_id, account, currency, period_start, period_end, charge_category = grain_key
-    billed = sum((Decimal(m.get("BilledCost") or "0") for m in members), Decimal(0))
     values = {
         "InvoiceDetailId": detail_id,
         "InvoiceId": invoice_id,
         "ReferenceInvoiceId": invoice_id,
         "ChargeCategory": charge_category,
-        "BilledCost": str(billed.quantize(_COST_QUANTUM)),
+        "BilledCost": str(billed_total.quantize(_COST_QUANTUM)),
         "BillingAccountId": account,
         "BillingCurrency": currency,
         "BillingPeriodStart": period_start,
@@ -157,6 +156,22 @@ def invoice_detail_row_from_group(
         "PaymentTerms": "Net 30",
     }
     return {col: values.get(col, "") for col in emitted}
+
+
+def invoice_detail_row_from_group(
+    grain_key: GrainKey,
+    members: Sequence[Mapping[str, str]],
+    detail_id: str,
+    emitted: Sequence[str],
+) -> dict[str, str]:
+    """Build one Invoice Detail row from an in-memory business-grain group (pure function)."""
+    billed = sum((Decimal(m.get("BilledCost") or "0") for m in members), Decimal(0))
+    return invoice_detail_row(grain_key, billed, detail_id, emitted)
+
+
+def emitted_invoice_detail_columns() -> list[str]:
+    """The Invoice Detail columns actually emitted (omitting the unfilled conditional ones)."""
+    return [c for c in dataset_columns(DATASET) if c not in _OMITTED_CONDITIONAL]
 
 
 def build_invoice_details(

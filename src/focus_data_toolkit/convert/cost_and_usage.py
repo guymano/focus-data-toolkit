@@ -87,6 +87,42 @@ def _convert_contract_applied(raw: str | None, source_version: str) -> str:
     return migrate_1_3_to_1_4(text)
 
 
+def convert_cost_and_usage_row(
+    row: dict[str, str],
+    source_version: str,
+    *,
+    detail_id: str = "",
+    target: tuple[str, ...] | None = None,
+) -> dict[str, str]:
+    """Convert one source row to the FOCUS 1.4 Cost and Usage shape (pure function).
+
+    ``detail_id`` is the already-resolved ``InvoiceDetailId`` back-link (empty in strict mode
+    or for rows with no invoice). Shared by the eager and streaming pipelines so both produce
+    identical output.
+    """
+    columns = target if target is not None else dataset_columns(DATASET)
+    converted: dict[str, str] = {}
+    for col in columns:
+        if col == "ContractApplied":
+            converted[col] = _convert_contract_applied(row.get(col), source_version)
+        elif col in row:
+            converted[col] = row[col]
+        elif source_version == "1.2" and col in _DERIVED_FROM_1_2:
+            converted[col] = row.get(_DERIVED_FROM_1_2[col], "")
+        elif col == "InvoiceDetailId":
+            converted[col] = detail_id
+        else:
+            # New-in-1.4 or 1.3-only columns absent from the source: null.
+            converted[col] = ""
+    # FOCUS 1.4 makes the pricing-currency pair non-nullable. When a 1.x source leaves it
+    # null (e.g. tax or credit rows), pricing happened in the billing currency, so backfill.
+    if not converted.get("PricingCurrency"):
+        converted["PricingCurrency"] = converted.get("BillingCurrency", "")
+    if not converted.get("PricingCurrencyEffectiveCost"):
+        converted["PricingCurrencyEffectiveCost"] = converted.get("EffectiveCost", "")
+    return converted
+
+
 def convert_cost_and_usage(
     rows: list[dict[str, str]],
     source_version: str,
@@ -101,28 +137,12 @@ def convert_cost_and_usage(
     """
     target = dataset_columns(DATASET)
     ids = invoice_detail_ids or {}
-    out: list[dict[str, str]] = []
-    for row in rows:
-        converted: dict[str, str] = {}
-        for col in target:
-            if col == "ContractApplied":
-                converted[col] = _convert_contract_applied(row.get(col), source_version)
-            elif col in row:
-                converted[col] = row[col]
-            elif source_version == "1.2" and col in _DERIVED_FROM_1_2:
-                converted[col] = row.get(_DERIVED_FROM_1_2[col], "")
-            elif col == "InvoiceDetailId":
-                # Same business-grain key the Invoice Detail builder grouped on.
-                converted[col] = ids.get(invoice_detail_grain_key(row), "")
-            else:
-                # New-in-1.4 or 1.3-only columns absent from the source: null.
-                converted[col] = ""
-        # FOCUS 1.4 makes the pricing-currency pair non-nullable. When a 1.x
-        # source leaves it null (e.g. tax or credit rows), pricing happened in
-        # the billing currency, so backfill from the billing-currency values.
-        if not converted.get("PricingCurrency"):
-            converted["PricingCurrency"] = converted.get("BillingCurrency", "")
-        if not converted.get("PricingCurrencyEffectiveCost"):
-            converted["PricingCurrencyEffectiveCost"] = converted.get("EffectiveCost", "")
-        out.append(converted)
-    return out
+    return [
+        convert_cost_and_usage_row(
+            row,
+            source_version,
+            detail_id=ids.get(invoice_detail_grain_key(row), ""),
+            target=target,
+        )
+        for row in rows
+    ]
