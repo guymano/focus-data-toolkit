@@ -36,6 +36,8 @@ from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
+from focus_data_toolkit.focus_json import dumps_object
+
 # --------------------------------------------------------------------------- #
 # Dataset 1 — Cost and Usage (65 columns)
 # --------------------------------------------------------------------------- #
@@ -233,7 +235,7 @@ _SERVICES: tuple[_ServiceSpec, ...] = (
         "Microsoft.Storage/storageAccounts", "Storage", "GB-Months",
         "Hot LRS data stored", Decimal("0.0184"), Decimal("50"), Decimal("8000"),
         "stor", "monthly", False, False,
-        {"x_StorageClass": "Hot", "x_Redundancy": "LRS"},
+        {"StorageClass": "Hot", "Redundancy": "LRS"},
     ),
     _ServiceSpec(
         "Azure SQL Database", "Databases", "Relational Databases", "SQL Database",
@@ -357,21 +359,24 @@ def _contract_id_for(commit_id: str) -> str:
 def _contract_applied(
     commit_id: str, contract_id: str, applied_cost: str, applied_qty: str, applied_unit: str
 ) -> str:
-    """FOCUS 1.3 ContractApplied JSON object: an Elements array linking the row to the
-    Contract Commitment dataset via ``ContractCommitmentId`` plus the applied amount."""
-    return json.dumps(
+    """FOCUS 1.3 ContractApplied JSON object (contractapplied.md @ v1.3): a top-level
+    ``Elements`` array linking the row to the Contract Commitment dataset via
+    ``ContractCommitmentID``. The applied cost/quantity are JSON numbers."""
+    return dumps_object(
         {
             "Elements": [
                 {
-                    "ContractCommitmentId": commit_id,
-                    "ContractId": contract_id,
-                    "AppliedCost": applied_cost,
-                    "AppliedQuantity": applied_qty,
-                    "AppliedUnit": applied_unit,
+                    "ContractID": contract_id,
+                    "ContractCommitmentID": commit_id,
+                    "ContractCommitmentAppliedCost": applied_cost,
+                    "ContractCommitmentAppliedQuantity": applied_qty,
+                    "ContractCommitmentAppliedUnit": applied_unit,
                 }
             ]
         },
-        separators=(",", ":"),
+        numeric_keys=frozenset(
+            {"ContractCommitmentAppliedCost", "ContractCommitmentAppliedQuantity"}
+        ),
     )
 
 
@@ -517,13 +522,17 @@ def _split_allocation_row(rng: random.Random, i: int) -> dict[str, str]:
     row["AllocatedMethodId"] = method_id
     # FOCUS 1.3 split allocation details: an Elements array, each entry exposing the
     # allocated ratio and the usage that drove the split (plus x_ method metadata).
+    # FOCUS AllocatedRatio / UsageQuantity are Numeric -> emitted as JSON numbers.
     element = {
         "AllocatedRatio": _s(quantity),
         "UsageUnit": spec.pricing_unit,
         "UsageQuantity": _s(quantity),
         **method_details,
     }
-    row["AllocatedMethodDetails"] = json.dumps({"Elements": [element]}, separators=(",", ":"))
+    row["AllocatedMethodDetails"] = dumps_object(
+        {"Elements": [element]},
+        numeric_keys=frozenset({"AllocatedRatio", "UsageQuantity"}),
+    )
     row["AllocatedResourceId"] = (
         f"/subscriptions/{ctx['sub_id']}/resourceGroups/rg-{ctx['sub_name']}"
         f"/providers/Microsoft.ContainerService/managedClusters/aks-{_hexid(rng, 6)}"

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from focus_data_toolkit.model import FOCUS_1_4_DATASETS, dataset_columns, load_model
-from focus_data_toolkit.model.validator import validate_focus_1_4
+from focus_data_toolkit.model.validator import lint_focus_1_4_structure
 
 
 def test_model_has_the_four_datasets():
@@ -18,7 +18,7 @@ def test_expected_column_counts():
 
 
 def test_validator_flags_missing_mandatory_column():
-    report = validate_focus_1_4(
+    report = lint_focus_1_4_structure(
         "Billing Period",
         [
             {
@@ -36,5 +36,5 @@ def test_validator_flags_missing_mandatory_column():
 
 
 def test_validator_flags_empty_dataset():
-    report = validate_focus_1_4("Invoice Detail", [])
+    report = lint_focus_1_4_structure("Invoice Detail", [])
     assert not report.ok

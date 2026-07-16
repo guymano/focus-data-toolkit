@@ -1,33 +1,31 @@
-"""Reference FOCUS 1.4 validator (model-driven).
+"""Reference FOCUS 1.4 **structural linter** (model-driven).
 
-Validates that data presented as a FOCUS 1.4 dataset (Cost and Usage / Billing
-Period / Contract Commitment / Invoice Detail) conforms to the FOCUS 1.4 data
-model committed in ``focus_1_4_model.json`` (derived from the FinOps "FOCUS 1.4
-Data Model" workbook by ``extract_focus_1_4_model.py``).
+This is a *linter*, not a full FOCUS 1.4 conformance validator. It checks that data
+presented as a FOCUS 1.4 dataset is well-formed against the committed 1.4 data model
+(``focus_1_4_model.json``) at two levels — and it can assert **only** those two:
 
-Checks:
-* **Structural (per row)** — required (Mandatory) columns present in each row;
-  unknown non-``x_`` columns flagged; nullability from ``Allows Nulls``.
-* **Format** — NumericFormat (no leading ``+``/exponent), Date/Time (literal
-  ISO-8601 ``...Z``), Currency (ISO 4217 code set), Allowed-Values enums (incl.
-  the 82 ServiceSubcategory values), Unit, JSON Object / Key-Value (unique keys;
-  Key-Value values are scalar; ``x_`` custom-key rule for SkuPriceDetails).
-* **Conditional (cross-field)** — Cost and Usage: Tax nulls, consumption gating,
-  dependency nulls, ServiceSubcategory↔parent ServiceCategory, no Usage-Based
-  ChargeFrequency on Purchase, and *condition-aware* required columns
-  (PricingCategory / SkuId / SkuPriceId enforced only when the matching
-  applicability condition is declared via ``supported_conditions``). Other
-  datasets: ``LastUpdated >= Created``; Contract Commitment upfront-percentage
-  bound to payment model.
+* ``STRUCTURAL_VALID`` — required (Mandatory) columns present; unknown non-``x_``
+  columns flagged; nullability; and value **format** (NumericFormat incl. scientific
+  notation, Date/Time UTC ``…Z``, Currency ISO 4217, Allowed-Values enums, Unit, and
+  JSON/Key-Value well-formedness with the ``x_`` custom-key rule).
+* ``SEMANTIC_VALID`` — single-row cross-field rules (Tax nulls, consumption gating,
+  ``LastUpdated >= Created``, ServiceSubcategory↔ServiceCategory, upfront-percentage vs
+  payment model, condition-aware required columns, ContractApplied deep structure).
 
-Validation only (no transformation): the committed model JSON is the artifact
-of record and ships with the package.
+It does **not** assert ``CROSS_DATASET_VALID`` (referential integrity across the four
+datasets) or ``OFFICIALLY_VALIDATED`` (the FinOps ``focus_validator``, which does not yet
+support 1.4). A clean ``LintReport`` therefore means *structurally and semantically
+well-formed*, **not** fully FOCUS-conformant.
+
+``validate_focus_1_4`` is retained as a deprecated alias of
+``lint_focus_1_4_structure``.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import warnings
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
@@ -35,22 +33,27 @@ from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
 
+from focus_data_toolkit.model.focus_json_keys import (
+    XPREFIX_ENFORCED_ELEMENTS_COLUMNS,
+    XPREFIX_ENFORCED_KEYVALUE_COLUMNS,
+)
+
 _HERE = Path(__file__).resolve().parent
 _MODEL_PATH = _HERE / "focus_1_4_model.json"
 _ISO_4217_PATH = _HERE / "iso_4217_currencies.json"
+
+# Validation levels this linter can assert. CROSS_DATASET_VALID / OFFICIALLY_VALIDATED
+# are intentionally NOT checked here (documented in the module docstring).
+LEVEL_STRUCTURAL = "STRUCTURAL_VALID"
+LEVEL_SEMANTIC = "SEMANTIC_VALID"
+LEVEL_CROSS_DATASET = "CROSS_DATASET_VALID"
+LEVEL_OFFICIAL = "OFFICIALLY_VALIDATED"
+_CHECKED_LEVELS: tuple[str, ...] = (LEVEL_STRUCTURAL, LEVEL_SEMANTIC)
 
 # Applicability conditions (FOCUS 1.4 Applicability Criteria) that gate the
 # "conditionally required" columns. Callers pass the subset they declare.
 COND_MULTIPLE_PRICING_CATEGORIES = "SupportsMultiplePricingCategories"
 COND_UNIT_PRICING = "SupportsUnitPricing"
-
-_FOCUS_SKU_PRICE_KEYS = frozenset(
-    {
-        "CoreCount", "MemorySize", "InstanceType", "InstanceSeries", "OperatingSystem",
-        "DiskType", "DiskSpace", "DiskMaxIops", "GpuCount", "NetworkMaxIops",
-        "NetworkMaxThroughput",
-    }
-)
 
 _DATASET_ALIASES = {
     "cost and usage": "Cost and Usage", "costandusage": "Cost and Usage", "cau": "Cost and Usage",
@@ -60,9 +63,11 @@ _DATASET_ALIASES = {
     "invoice detail": "Invoice Detail", "invoicedetail": "Invoice Detail", "ind": "Invoice Detail",
 }
 
-# NumericFormat: optional minus, digits, optional fractional. No leading '+', no exponent.
-_NUMERIC_RE = re.compile(r"-?\d+(\.\d+)?")
-# DateTimeFormat: literal YYYY-MM-DDTHH:mm:ss[.fff]Z (UTC 'Z' only).
+# NumericFormat (FOCUS attribute): integer, decimal, or scientific E-notation "mEn".
+# The exponent sign is expressed ONLY when negative (no leading '+' on mantissa or
+# exponent). So 35.2E-7 is valid; 35.2E+7 and +333 are not.
+_NUMERIC_RE = re.compile(r"-?\d+(\.\d+)?(E-?\d+)?")
+# DateTimeFormat: literal YYYY-MM-DDTHH:mm:ss[.fff]Z (UTC 'Z' only, ISO 8601).
 _DATETIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
 
 
@@ -73,25 +78,42 @@ class Violation:
     message: str
     column: str | None = None
     row_index: int | None = None
+    level: str = LEVEL_STRUCTURAL
 
 
 @dataclass(frozen=True)
-class ValidationReport:
+class LintReport:
     dataset: str
     row_count: int
     violations: tuple[Violation, ...]
+    levels_checked: tuple[str, ...] = _CHECKED_LEVELS
 
     @property
     def ok(self) -> bool:
+        """No structural/semantic lint violations. NOT a full FOCUS conformance claim."""
         return not self.violations
+
+    def passed(self, level: str) -> bool:
+        """True if ``level`` was checked and has no violations."""
+        if level not in self.levels_checked:
+            return False
+        return not any(v.level == level for v in self.violations)
+
+    @property
+    def levels_passed(self) -> tuple[str, ...]:
+        return tuple(level for level in self.levels_checked if self.passed(level))
 
     def messages(self) -> list[str]:
         return [
-            f"[{v.rule}] {v.column or '-'}"
+            f"[{v.level}:{v.rule}] {v.column or '-'}"
             + (f" row {v.row_index}" if v.row_index is not None else "")
             + f": {v.message}"
             for v in self.violations
         ]
+
+
+# Backwards-compatible alias (the class was previously ``ValidationReport``).
+ValidationReport = LintReport
 
 
 @lru_cache(maxsize=1)
@@ -160,6 +182,52 @@ def _is_utc_datetime(value: str) -> bool:
     return True
 
 
+def _keys_are_focus_or_prefixed(keys: Iterable[str], focus_keys: frozenset[str]) -> bool:
+    return all(k in focus_keys or k.startswith("x_") for k in keys)
+
+
+def _validate_contract_applied(value: str) -> str | None:
+    # Lazy import avoids an import cycle (convert -> model.validator -> convert).
+    from focus_data_toolkit.convert.contract_applied import ContractAppliedError, parse
+
+    try:
+        parse(value, version="1.4")
+    except ContractAppliedError:
+        return "invalid_contract_applied"
+    return None
+
+
+def _validate_json_column(column: str, value: str, value_format: str) -> str | None:
+    obj, err = _load_json_object(value)
+    if err:
+        return err
+    if value_format == "Key-Value":
+        if not all(v is None or isinstance(v, str | int | float | bool) for v in obj.values()):
+            return "key_value_value_not_scalar"
+        focus_keys = XPREFIX_ENFORCED_KEYVALUE_COLUMNS.get(column)
+        if focus_keys is not None and not _keys_are_focus_or_prefixed(obj, focus_keys):
+            return "custom_key_not_prefixed"
+        return None
+    # JSON Object columns.
+    if column == "ContractApplied":
+        return _validate_contract_applied(value)
+    entry = XPREFIX_ENFORCED_ELEMENTS_COLUMNS.get(column)
+    if entry is not None:
+        array_key, focus_keys = entry
+        # Top-level custom keys (alongside the array) must be x_-prefixed too.
+        if not all(k == array_key or k.startswith("x_") for k in obj):
+            return "custom_key_not_prefixed"
+        elements = obj.get(array_key)
+        if not isinstance(elements, list):
+            return "missing_elements_array"
+        for element in elements:
+            if not isinstance(element, dict):
+                return "element_not_object"
+            if not _keys_are_focus_or_prefixed(element, focus_keys):
+                return "custom_key_not_prefixed"
+    return None
+
+
 def _format_violation(spec: dict, column: str, value: str) -> str | None:
     """Return a rule name if non-empty ``value`` violates the column's format."""
     value_format = spec.get("value_format") or ""
@@ -189,18 +257,7 @@ def _format_violation(spec: dict, column: str, value: str) -> str | None:
             return "bad_unit"
         return None
     if value_format in ("JSON Object", "Key-Value") or data_type == "JSON":
-        obj, err = _load_json_object(value)
-        if err:
-            return err
-        if value_format == "Key-Value" and not all(
-            v is None or isinstance(v, str | int | float | bool) for v in obj.values()
-        ):
-            return "key_value_value_not_scalar"
-        if column == "SkuPriceDetails" and not all(
-            k in _FOCUS_SKU_PRICE_KEYS or k.startswith("x_") for k in obj
-        ):
-            return "sku_price_details_custom_key_not_prefixed"
-        return None
+        return _validate_json_column(column, value, value_format)
     if value_format == "Expected Format":
         return None if re.search(r"\d", value) and re.search(r"[A-Za-z]", value) \
             else "bad_expected_format"
@@ -208,7 +265,7 @@ def _format_violation(spec: dict, column: str, value: str) -> str | None:
 
 
 # --------------------------------------------------------------------------- #
-# Cross-field (single-row) rules — each returns (column, rule, message) tuples.
+# Cross-field (single-row, SEMANTIC) rules — each returns (column, rule, message) tuples.
 # --------------------------------------------------------------------------- #
 def _cost_and_usage(row: dict, model: dict, supported: frozenset[str]) -> list[tuple]:
     def empty(col: str) -> bool:
@@ -309,18 +366,22 @@ _CROSS_FIELD: dict[str, list[Callable]] = {
 }
 
 
-def validate_focus_1_4(
+def lint_focus_1_4_structure(
     dataset: str,
     rows: list[dict[str, str]],
     *,
     model: dict | None = None,
     supported_conditions: Iterable[str] | None = None,
-) -> ValidationReport:
-    """Validate ``rows`` against the FOCUS 1.4 model for ``dataset``.
+) -> LintReport:
+    """Structurally + semantically lint ``rows`` against the FOCUS 1.4 model.
 
-    ``supported_conditions`` declares the FOCUS applicability conditions the
-    provider supports; conditionally-required columns are enforced only for the
-    conditions present here (default: none enforced, so sparse-but-valid rows pass).
+    This is a linter, not a full conformance validator: a clean report asserts
+    ``STRUCTURAL_VALID`` and ``SEMANTIC_VALID`` only (see :data:`LEVEL_CROSS_DATASET`
+    / :data:`LEVEL_OFFICIAL`, which are never asserted here).
+
+    ``supported_conditions`` declares the FOCUS applicability conditions the provider
+    supports; conditionally-required columns are enforced only for those conditions
+    (default: none enforced, so sparse-but-valid rows pass).
     """
     name = resolve_dataset(dataset)
     model = model or load_model()
@@ -328,12 +389,12 @@ def validate_focus_1_4(
     columns: dict = model["datasets"][name]["columns"]
     violations: list[Violation] = []
 
-    def add(rule, message, column=None, row_index=None):
-        violations.append(Violation(name, rule, message, column, row_index))
+    def add(rule, message, column=None, row_index=None, level=LEVEL_STRUCTURAL):
+        violations.append(Violation(name, rule, message, column, row_index, level))
 
     if not rows:
         add("empty_dataset", "no rows provided")
-        return ValidationReport(name, 0, tuple(violations))
+        return LintReport(name, 0, tuple(violations))
 
     present = set().union(*(set(r.keys()) for r in rows))
     for key in sorted(present):
@@ -357,6 +418,30 @@ def validate_focus_1_4(
                 add(rule, f"invalid value {value!r}", col, i)
         for fn in cross_field:
             for col, rule, msg in fn(row, model, supported):
-                add(rule, msg, col, i)
+                add(rule, msg, col, i, level=LEVEL_SEMANTIC)
 
-    return ValidationReport(name, len(rows), tuple(violations))
+    return LintReport(name, len(rows), tuple(violations))
+
+
+def validate_focus_1_4(
+    dataset: str,
+    rows: list[dict[str, str]],
+    *,
+    model: dict | None = None,
+    supported_conditions: Iterable[str] | None = None,
+) -> LintReport:
+    """Deprecated alias of :func:`lint_focus_1_4_structure`.
+
+    This is a structural + semantic **linter**, not a full FOCUS 1.4 conformance
+    validator; ``report.ok`` means the lint passed, not that the data is fully
+    FOCUS-conformant.
+    """
+    warnings.warn(
+        "validate_focus_1_4 is deprecated; use lint_focus_1_4_structure. It is a "
+        "structural + semantic linter, not a full FOCUS 1.4 conformance validator.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return lint_focus_1_4_structure(
+        dataset, rows, model=model, supported_conditions=supported_conditions
+    )

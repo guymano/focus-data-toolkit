@@ -12,7 +12,7 @@ from focus_data_toolkit.convert.contract_commitment import convert_contract_comm
 from focus_data_toolkit.convert.cost_and_usage import convert_cost_and_usage
 from focus_data_toolkit.convert.detect import detect_focus_version
 from focus_data_toolkit.convert.invoice_detail import build_invoice_details
-from focus_data_toolkit.model.validator import ValidationReport, validate_focus_1_4
+from focus_data_toolkit.model.validator import LintReport, lint_focus_1_4_structure
 
 # Output file name per dataset (stable, snake_case).
 DATASET_FILENAMES = {
@@ -33,7 +33,7 @@ class ConversionResult:
 
     source_version: str
     datasets: dict[str, list[dict[str, str]]]
-    reports: dict[str, ValidationReport] = field(default_factory=dict)
+    reports: dict[str, LintReport] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -99,7 +99,7 @@ def convert_to_focus_1_4(
     if validate:
         for name, rows in datasets.items():
             if rows:
-                result.reports[name] = validate_focus_1_4(name, rows)
+                result.reports[name] = lint_focus_1_4_structure(name, rows)
     return result
 
 

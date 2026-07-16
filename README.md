@@ -28,10 +28,14 @@ toolkit builds it from the 1.2/1.3 data you already have.
     back-links to its `InvoiceDetailId`);
   - honest coverage: datasets that cannot be derived from your source are
     reported as missing, never fabricated.
-- **Validate** — a built-in, model-driven FOCUS 1.4 conformance validator
-  (structural, format and cross-field rules from the committed FOCUS 1.4 data
-  model), plus a wrapper for the official
-  [FinOps FOCUS validator](https://github.com/finopsfoundation/focus_validator).
+- **Lint** — a built-in, model-driven FOCUS 1.4 **structural + semantic linter**
+  (`lint_focus_1_4_structure`): structural, format and single-row cross-field rules
+  from the committed FOCUS 1.4 data model. It is a linter, **not** a full FOCUS 1.4
+  conformance validator — a clean report means *well-formed*, not *fully conformant*
+  (it does not check cross-dataset referential integrity, and the official FinOps
+  validator does not yet support 1.4). A wrapper for the official
+  [FinOps FOCUS validator](https://github.com/finopsfoundation/focus_validator) (1.2/1.3)
+  is included.
 
 The core package is **standard-library only** (Python ≥ 3.11).
 
@@ -76,7 +80,7 @@ Commitment is not invented.
 ### 3. Validate
 
 ```bash
-# built-in FOCUS 1.4 model validator
+# built-in FOCUS 1.4 structural linter (not a full conformance validator)
 focus-toolkit validate focus-1.4/focus_1_4_invoice_detail.csv --dataset invoice-detail
 
 # official FinOps validator (optional extra, requires Python >= 3.12)
@@ -84,9 +88,9 @@ pip install "focus-data-toolkit[validator] @ git+https://github.com/guymano/focu
 focus-toolkit validate --official --focus-version 1.2.0.1 my_focus_1_2_export.csv
 ```
 
-The official validator ships rule models for FOCUS 1.2/1.3; FinOps has
-announced 1.4 rule-model support for later in 2026 — until then the built-in
-model validator is the 1.4 conformance gate.
+The official FinOps validator ships rule models for FOCUS 1.2/1.3 and does **not**
+yet support 1.4. Until it does, the built-in linter provides a structural + semantic
+check only — it cannot certify full FOCUS 1.4 conformance.
 
 ### Python API
 

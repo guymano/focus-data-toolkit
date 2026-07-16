@@ -39,8 +39,11 @@ _OMITTED_CONDITIONAL = frozenset(
     }
 )
 
+# InvoiceDetailGrain is Key-Value Format; non-FOCUS-defined keys MUST be x_-prefixed
+# (invoicedetailgrain.md @ v1.4). This grain is a synthetic aggregation descriptor, not
+# a real invoice-line grain, so both keys are custom (x_).
 _GRAIN = json.dumps(
-    {"GroupedBy": "InvoiceId, ChargeCategory", "Source": "FOCUS 1.x Cost and Usage"},
+    {"x_GroupedBy": "InvoiceId,ChargeCategory", "x_DerivedFrom": "FOCUS 1.x Cost and Usage aggregation"},
     separators=(",", ":"),
 )
 

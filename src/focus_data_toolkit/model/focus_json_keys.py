@@ -1,0 +1,112 @@
+"""FOCUS-defined property keys for JSON / Key-Value typed columns.
+
+Sourced verbatim from the frozen FOCUS specification tags
+(``FinOps-Open-Cost-and-Usage-Spec/FOCUS_Spec`` at ``v1.3`` / ``v1.4``). These
+registries drive the ``x_`` custom-key rule: inside a FOCUS JSON column, any key
+that is **not** a FOCUS-defined property MUST be prefixed with ``x_`` (FOCUS
+attributes ``CustomColumnHandling`` / per-column ``KeyValueFormat`` /
+``JsonObjectFormat``).
+
+Important exceptions: ``Tags`` and ``AllocatedTags`` are Key-Value columns whose
+keys are arbitrary user tag names — the ``x_`` rule does **not** apply to them
+(FOCUS ``tags.md``: a single user-defined tag scheme carries no prefix). They are
+deliberately absent from :data:`XPREFIX_ENFORCED_COLUMNS`.
+"""
+
+from __future__ import annotations
+
+# --- Key-Value columns with a FOCUS-defined property set ------------------- #
+
+# SkuPriceDetails FOCUS-defined properties (identical in v1.3 and v1.4):
+# skupricedetails.md "FOCUS-Defined Properties" table — 13 keys.
+SKU_PRICE_DETAILS_KEYS: frozenset[str] = frozenset(
+    {
+        "CoreCount",
+        "DiskMaxIops",
+        "DiskSpace",
+        "DiskType",
+        "GpuCount",
+        "InstanceType",
+        "InstanceSeries",
+        "MemorySize",
+        "NetworkMaxIops",
+        "NetworkMaxThroughput",
+        "OperatingSystem",
+        "Redundancy",
+        "StorageClass",
+    }
+)
+
+# InvoiceDetailGrain FOCUS-defined properties (v1.4 invoicedetailgrain.md).
+# Each links to a Cost and Usage column; the JSON key is that column's Column ID.
+INVOICE_DETAIL_GRAIN_KEYS: frozenset[str] = frozenset(
+    {
+        "ContractId",
+        "RegionId",
+        "ResourceId",
+        "ResourceType",
+        "ServiceName",
+        "SkuId",
+        "SkuMeter",
+        "SkuPriceId",
+        "SubAccountId",
+    }
+)
+
+# --- JSON-Object columns with a top-level ``Elements`` array --------------- #
+
+# ContractApplied element keys. The identifier keys changed casing between
+# versions (contractapplied.md @ v1.3 vs v1.4); the three metric keys are stable.
+CONTRACT_APPLIED_ELEMENT_KEYS_1_3: frozenset[str] = frozenset(
+    {
+        "ContractID",
+        "ContractCommitmentID",
+        "ContractCommitmentAppliedCost",
+        "ContractCommitmentAppliedQuantity",
+        "ContractCommitmentAppliedUnit",
+    }
+)
+CONTRACT_APPLIED_ELEMENT_KEYS_1_4: frozenset[str] = frozenset(
+    {
+        "ContractId",
+        "ContractCommitmentId",
+        "ContractCommitmentAppliedCost",
+        "ContractCommitmentAppliedQuantity",
+        "ContractCommitmentAppliedUnit",
+    }
+)
+
+# AllocatedMethodDetails element keys (allocatedmethoddetails.md, v1.3 & v1.4).
+ALLOCATED_METHOD_DETAILS_ELEMENT_KEYS: frozenset[str] = frozenset(
+    {
+        "AllocatedRatio",
+        "UsageUnit",
+        "UsageQuantity",
+    }
+)
+
+# CommitmentProgramEligibilityDetails element keys
+# (commitmentprogrameligibilitydetails.md @ v1.4; top-level array key is
+# ``CommitmentPrograms``, not ``Elements``).
+COMMITMENT_PROGRAM_ELIGIBILITY_ELEMENT_KEYS: frozenset[str] = frozenset({"ProgramType"})
+
+# Columns whose custom keys MUST be ``x_``-prefixed, mapped to their FOCUS-defined
+# key set. Key-Value columns match keys at the top level. Array-of-objects columns
+# map to ``(top_level_array_key, element_focus_keys)``: top-level keys must be the
+# array key or ``x_``-prefixed, and element keys must be FOCUS-defined or
+# ``x_``-prefixed (custom properties are allowed at both levels per the v1.4 column
+# docs). ``ContractApplied`` is validated in depth by
+# ``focus_data_toolkit.convert.contract_applied.parse`` and is therefore absent
+# here. Tags / AllocatedTags are intentionally excluded (arbitrary tag keys are
+# allowed).
+XPREFIX_ENFORCED_KEYVALUE_COLUMNS: dict[str, frozenset[str]] = {
+    "SkuPriceDetails": SKU_PRICE_DETAILS_KEYS,
+    "InvoiceDetailGrain": INVOICE_DETAIL_GRAIN_KEYS,
+}
+XPREFIX_ENFORCED_ELEMENTS_COLUMNS: dict[str, tuple[str, frozenset[str]]] = {
+    "AllocatedMethodDetails": ("Elements", ALLOCATED_METHOD_DETAILS_ELEMENT_KEYS),
+    "CommitmentProgramEligibilityDetails": (
+        "CommitmentPrograms",
+        COMMITMENT_PROGRAM_ELIGIBILITY_ELEMENT_KEYS,
+    ),
+}

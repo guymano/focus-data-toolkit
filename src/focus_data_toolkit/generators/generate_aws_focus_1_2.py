@@ -179,7 +179,7 @@ _SERVICES: tuple[_ServiceSpec, ...] = (
         "AmazonS3", "Storage", "Object Storage", "S3 Bucket", "bucket",
         "Storage", "GB-Months", "S3 Standard storage", Decimal("0.023"),
         Decimal("50"), Decimal("8000"), "bucket-", "monthly", False, False,
-        {"x_StorageClass": "Standard", "x_Redundancy": "LRS"},
+        {"StorageClass": "Standard", "Redundancy": "LRS"},
     ),
     _ServiceSpec(
         "AmazonRDS", "Databases", "Relational Databases", "RDS Instance", "db",

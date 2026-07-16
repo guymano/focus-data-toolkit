@@ -1,0 +1,6 @@
+{
+  "_source": "FOCUS_Spec v1.4 specification/attributes/numeric_format.md (Examples)",
+  "_note": "E-notation mEn permitted; exponent sign only when negative; no leading '+'.",
+  "valid": ["4", "-3", "1.234", "-100.2", "0", "35.2E-7", "1.5E-3", "35.2E7"],
+  "invalid": ["35.2E+7", "1.5E+3", "35.24 x 10^7", "2.3^3", "3,432,342", "+333", "abc"]
+}

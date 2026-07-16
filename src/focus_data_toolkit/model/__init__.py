@@ -7,7 +7,12 @@ the JSON is the artifact of record for this package.
 
 from __future__ import annotations
 
-from focus_data_toolkit.model.validator import load_model, resolve_dataset
+from focus_data_toolkit.model.validator import (
+    lint_focus_1_4_structure,
+    load_model,
+    resolve_dataset,
+    validate_focus_1_4,
+)
 
 FOCUS_1_4_DATASETS: tuple[str, ...] = (
     "Cost and Usage",
@@ -27,4 +32,12 @@ def column_spec(dataset: str, column: str) -> dict:
     return load_model()["datasets"][resolve_dataset(dataset)]["columns"][column]
 
 
-__all__ = ["FOCUS_1_4_DATASETS", "column_spec", "dataset_columns", "load_model", "resolve_dataset"]
+__all__ = [
+    "FOCUS_1_4_DATASETS",
+    "column_spec",
+    "dataset_columns",
+    "lint_focus_1_4_structure",
+    "load_model",
+    "resolve_dataset",
+    "validate_focus_1_4",
+]

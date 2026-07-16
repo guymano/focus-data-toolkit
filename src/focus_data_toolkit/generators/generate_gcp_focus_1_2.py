@@ -179,7 +179,7 @@ _SERVICES: tuple[_ServiceSpec, ...] = (
         "Cloud Storage", "Storage", "Object Storage", "Storage Bucket",
         "storage.googleapis.com", "buckets", "Storage", "GB-Months",
         "Standard storage", Decimal("0.020"), Decimal("50"), Decimal("8000"),
-        "bucket-", "monthly", False, False, {"x_StorageClass": "Standard"},
+        "bucket-", "monthly", False, False, {"StorageClass": "Standard"},
     ),
     _ServiceSpec(
         "Cloud SQL", "Databases", "Relational Databases", "Cloud SQL Instance",
