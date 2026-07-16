@@ -21,9 +21,12 @@ DEFAULT_TOLERANCE = Decimal("0.01")
 
 def _dec(value: str | None) -> Decimal:
     try:
-        return Decimal((value or "0").strip() or "0")
+        parsed = Decimal((value or "0").strip() or "0")
     except InvalidOperation:
         return Decimal(0)
+    # NaN / Infinity parse successfully but would raise InvalidOperation on comparison; a
+    # malformed numeric value must not crash reconciliation (the linter flags its format).
+    return parsed if parsed.is_finite() else Decimal(0)
 
 
 def reconcile_invoice_detail(

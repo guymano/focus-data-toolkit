@@ -30,6 +30,7 @@ def invd(**over: str) -> dict[str, str]:
     base = {
         "InvoiceDetailId": "x_fdt_idl_v1_deadbeefdeadbeef",
         "InvoiceId": "INV-1",
+        "ChargeCategory": "Usage",
         "BillingAccountId": "BA-1",
         "BillingCurrency": "USD",
         "BillingPeriodStart": P1,
@@ -117,6 +118,35 @@ def test_contract_applied_valid_reference_ok():
         }
     )
     assert "FDT-CROSS-010" not in codes(report)
+
+
+def test_wrong_invoice_line_is_flagged():
+    # Same amount, but the linked Invoice Detail belongs to a different invoice/category.
+    report = validate_dataset_bundle(
+        {
+            "Cost and Usage": [cu(InvoiceId="INV-1", ChargeCategory="Usage")],
+            "Invoice Detail": [invd(InvoiceId="INV-999", ChargeCategory="Tax")],
+        }
+    )
+    assert "FDT-CROSS-015" in codes(report)
+
+
+def test_correction_self_reference_is_rejected():
+    # A correction whose x_CorrectionOf points at its own key, with no surviving original.
+    report = validate_dataset_bundle(
+        {"Cost and Usage": [cu(ChargeClass="Correction", x_ChargeKey="k1", x_CorrectionOf="k1")]}
+    )
+    assert "FDT-CORR-001" in codes(report)
+
+
+def test_non_finite_billed_cost_does_not_crash():
+    # NaN parses as a Decimal but must not crash reconciliation.
+    bundle = {
+        "Cost and Usage": [cu(BilledCost="NaN", InvoiceDetailId="A")],
+        "Invoice Detail": [invd(InvoiceDetailId="A", BilledCost="10.00")],
+    }
+    report = validate_dataset_bundle(bundle, invoice_detail_authoritative=True)
+    assert isinstance(report.ok, bool)  # completed without raising
 
 
 def test_reconciliation_runs_only_when_authoritative():

@@ -120,24 +120,39 @@ def _resolve_source_version(
     error; a forced version incompatible with the header is always refused.
     """
     headers = cau_rows[0].keys()
-    detection = detect_focus_schema(headers, dataset=source_dataset, version=source_version)
+    # A bad --source-version/--source-dataset value raises ValueError from normalisation;
+    # surface it as a ConversionError so the CLI exits with the invalid-argument code, not a
+    # traceback.
+    try:
+        detection = detect_focus_schema(headers, dataset=source_dataset, version=source_version)
+    except ValueError as exc:
+        raise ConversionError(f"invalid --source-version/--source-dataset: {exc}") from exc
+
+    forced = source_version is not None or source_dataset is not None
+    if forced and detection.confidence == "LOW":
+        raise ConversionError(
+            "forced source schema is incompatible with the header (detected "
+            f"{detection.dataset} {detection.detected_version}, confidence LOW): "
+            + "; ".join(detection.notes)
+        )
 
     if source_version is not None:
-        if detection.confidence == "LOW":
-            raise ConversionError(
-                f"forced source version {source_version!r} is incompatible with the header: "
-                + "; ".join(detection.notes)
-            )
-        version = registry.normalize_version(source_version)
+        try:
+            version = registry.normalize_version(source_version)
+        except ValueError as exc:
+            raise ConversionError(f"invalid --source-version {source_version!r}: {exc}") from exc
     else:
-        if mode is Mode.STRICT and source_dataset is None and detection.confidence != "HIGH":
+        if mode is Mode.STRICT and not forced and detection.confidence != "HIGH":
             raise ConversionError(
                 "strict mode refuses an ambiguous or low-confidence source schema (detected "
                 f"{detection.dataset} {detection.detected_version}, confidence "
                 f"{detection.confidence}); force it with --source-version / --source-dataset"
             )
-        # detect_focus_version raises a clear error for non-CAU / 1.4 / non-FOCUS headers.
-        version = detect_focus_version(headers)
+        # detect_focus_version raises a clear ValueError for non-CAU / 1.4 / non-FOCUS headers.
+        try:
+            version = detect_focus_version(headers)
+        except ValueError as exc:
+            raise ConversionError(str(exc)) from exc
 
     if version not in ("1.2", "1.3"):
         raise ConversionError(

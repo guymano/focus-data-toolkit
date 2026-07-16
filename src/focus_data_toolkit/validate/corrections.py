@@ -89,25 +89,35 @@ def check_contract_commitment_percentages(contract_commitment: Rows) -> list[Dia
     return out
 
 
+def _is_correction(row: Mapping[str, str]) -> bool:
+    return (row.get("ChargeClass") or "").strip().casefold() == "correction"
+
+
 def check_correction_references(cost_and_usage: Rows) -> list[Diagnostic]:
-    """A correction line's ``x_CorrectionOf`` must point at a still-present original charge."""
-    known_keys = {
+    """A correction line's ``x_CorrectionOf`` must point at a still-present *original* charge.
+
+    The lookup is built only from non-correction originals, and a correction that references
+    its own key is rejected — otherwise a correction with ``x_ChargeKey == x_CorrectionOf`` and
+    no surviving original would pass, defeating the auditability guarantee.
+    """
+    original_keys = {
         (r.get("x_ChargeKey") or "").strip()
         for r in cost_and_usage
-        if (r.get("x_ChargeKey") or "").strip()
+        if not _is_correction(r) and (r.get("x_ChargeKey") or "").strip()
     }
     out: list[Diagnostic] = []
     for i, row in enumerate(cost_and_usage, start=1):
         ref = (row.get("x_CorrectionOf") or "").strip()
         if not ref:
             continue
-        if ref not in known_keys:
+        self_key = (row.get("x_ChargeKey") or "").strip()
+        if ref == self_key or ref not in original_keys:
             out.append(
                 Diagnostic(
                     code="FDT-CORR-001",
                     severity=Severity.ERROR,
                     message=f"correction row {i} references original charge {ref!r} that is not "
-                    "present (original must remain auditable)",
+                    "present as an original (original must remain auditable)",
                     datasets=("Cost and Usage",),
                     dataset="Cost and Usage",
                     line_number=i,

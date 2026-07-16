@@ -114,7 +114,11 @@ def detect_focus_schema(
     so a bad forced choice yields a low confidence the caller can reject). Unknown forced
     values raise ``ValueError``.
     """
-    header_list = [h for h in headers]
+    all_headers = list(headers)
+    # A malformed CSV row with surplus fields makes ``csv.DictReader`` emit a ``None`` key;
+    # drop non-string header names (and record it) rather than crashing on ``.startswith``.
+    header_list = [h for h in all_headers if isinstance(h, str)]
+    malformed = len(all_headers) - len(header_list)
     header_set = frozenset(header_list)
     extension = tuple(sorted(h for h in header_set if h.startswith("x_")))
     focus_all = registry.all_focus_columns()
@@ -182,7 +186,15 @@ def detect_focus_schema(
             notes=("header does not match any known FOCUS dataset/version",),
         )
 
-    exact_match = not best.missing and not best.additional_focus and not unknown
+    # A FOCUS column that belongs to a *different* dataset (e.g. PaymentTerms on a Cost and
+    # Usage header) is neither "additional focus of this dataset" nor "unknown"; count it as a
+    # mismatch so it breaks exact_match and caps confidence (strict must not silently drop it).
+    foreign_focus = tuple(
+        sorted((header_set & focus_all) - registry.all_dataset_columns(best.dataset))
+    )
+    additional_focus = tuple(sorted(set(best.additional_focus) | set(foreign_focus)))
+
+    exact_match = not best.missing and not additional_focus and not unknown and not malformed
 
     # Confidence.
     if forced_version is not None:
@@ -190,23 +202,36 @@ def detect_focus_schema(
         # this dataset (``additional_focus``) make the forced version genuinely impossible;
         # merely missing columns are a completeness issue the lint reports, not a reason to
         # override an explicit choice.
-        if best.additional_focus:
+        if additional_focus:
             confidence = CONF_LOW
             notes.append(
                 f"header is incompatible with forced version {forced_version} "
-                f"(columns from another version: {', '.join(best.additional_focus)})"
+                f"(columns not in this schema: {', '.join(additional_focus)})"
             )
         elif best.missing or best.mandatory_coverage < 0.999:
             confidence = CONF_MEDIUM  # compatible but incomplete (lint will flag specifics)
         else:
             confidence = CONF_HIGH
-    elif best.jaccard >= 0.9 and best.mandatory_coverage >= 0.999 and not ambiguous and not unknown:
+    elif (
+        best.jaccard >= 0.9
+        and best.mandatory_coverage >= 0.999
+        and not ambiguous
+        and not unknown
+        and not additional_focus
+        and not malformed
+    ):
         confidence = CONF_HIGH
     elif best.jaccard >= 0.6 and best.mandatory_coverage >= 0.8:
         confidence = CONF_MEDIUM
     else:
         confidence = CONF_LOW
 
+    if malformed:
+        notes.append(f"{malformed} malformed (non-string) header name(s) ignored")
+    if foreign_focus:
+        notes.append(
+            "FOCUS columns from another dataset present: " + ", ".join(foreign_focus)
+        )
     if ambiguous and confidence == CONF_HIGH:
         confidence = CONF_MEDIUM
     if unknown and confidence == CONF_HIGH:
@@ -230,7 +255,7 @@ def detect_focus_schema(
         exact_match=exact_match,
         score=round(best.jaccard, 4),
         missing_columns=best.missing,
-        additional_focus_columns=best.additional_focus,
+        additional_focus_columns=additional_focus,
         extension_columns=extension,
         unknown_columns=unknown,
         ambiguous_candidates=ambiguous,

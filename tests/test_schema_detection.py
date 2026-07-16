@@ -162,6 +162,31 @@ def test_detect_focus_version_rejects_1_4():
         detect_focus_version(CAU_1_4)
 
 
+def test_foreign_dataset_column_is_flagged():
+    # PaymentTerms is an Invoice Detail column; on a Cost and Usage header it must not be
+    # silently ignored (it would otherwise be dropped in strict conversion).
+    result = detect_focus_schema([*CAU_1_3, "PaymentTerms"])
+    assert result.confidence != "HIGH"
+    assert not result.exact_match
+    assert "PaymentTerms" in result.additional_focus_columns
+
+
+def test_malformed_none_header_does_not_crash():
+    # csv.DictReader emits a None key for surplus fields; detection must not raise.
+    result = detect_focus_schema([*CAU_1_3, None])
+    assert result.dataset == "Cost and Usage"
+    assert not result.exact_match
+    assert any("malformed" in note for note in result.notes)
+
+
+def test_1_2_missing_provider_columns_not_high_confidence():
+    # A 1.2 header without ProviderName/PublisherName cannot derive the 1.4-Mandatory
+    # ServiceProviderName/HostProviderName, so it must not be HIGH confidence.
+    result = detect_focus_schema([c for c in CAU_1_2 if c not in ("ProviderName", "PublisherName")])
+    assert result.confidence != "HIGH"
+    assert {"ProviderName", "PublisherName"} <= set(result.missing_columns)
+
+
 def test_detection_result_is_json_serialisable():
     import json
 

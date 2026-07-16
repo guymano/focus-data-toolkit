@@ -99,5 +99,27 @@ def test_negative_correction_allocation_reconciles():
     assert validate_split_allocation(rows) == []
 
 
+def test_mixed_units_across_elements_in_one_row():
+    details = (
+        '{"Elements":[{"AllocatedRatio":0.5,"UsageUnit":"Hours"},'
+        '{"AllocatedRatio":0.5,"UsageUnit":"GB"}]}'
+    )
+    row = {
+        "x_SplitOriginId": "G1",
+        "x_SplitOriginCost": "100.00",
+        "AllocatedMethodId": "split-even",
+        "AllocatedResourceId": "a",
+        "AllocatedMethodDetails": details,
+        "BilledCost": "100.00",
+    }
+    assert "FDT-ALLOC-007" in codes([row])
+
+
+def test_non_finite_ratio_is_flagged_incomplete():
+    row = alloc("G1", "100.00", "1.0", "100.00", "a")
+    row["AllocatedMethodDetails"] = '{"Elements":[{"AllocatedRatio":Infinity,"UsageUnit":"Hours"}]}'
+    assert "FDT-ALLOC-005" in codes([row])
+
+
 def test_no_allocation_rows_is_a_noop():
     assert validate_split_allocation([{"BilledCost": "10.00", "ChargeCategory": "Usage"}]) == []

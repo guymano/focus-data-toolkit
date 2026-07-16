@@ -163,7 +163,12 @@ def check_billing_period_coverage(
     return out
 
 
+# Attributes that must agree between a Cost and Usage row and the Invoice Detail line it
+# links to. InvoiceId / ChargeCategory identify *which* invoice line the row belongs to: a
+# same-amount line under a different invoice must not be silently accepted.
 _CONSISTENCY_COLUMNS = {
+    "InvoiceId": "FDT-CROSS-015",
+    "ChargeCategory": "FDT-CROSS-015",
     "BillingCurrency": "FDT-CROSS-020",
     "BillingPeriodStart": "FDT-CROSS-021",
     "BillingPeriodEnd": "FDT-CROSS-021",
@@ -175,7 +180,8 @@ _CONSISTENCY_COLUMNS = {
 def check_cost_and_usage_invoice_detail_consistency(
     cost_and_usage: Rows, invoice_detail: Rows
 ) -> list[Diagnostic]:
-    """A Cost and Usage row's issuer/account/currency/period must match its Invoice Detail line."""
+    """A Cost and Usage row's invoice/category/issuer/account/currency/period must match its
+    Invoice Detail line (so a row cannot be attached to the wrong invoice line)."""
     index = {
         (r.get("InvoiceDetailId") or "").strip(): r
         for r in invoice_detail

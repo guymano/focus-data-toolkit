@@ -23,11 +23,15 @@ from focus_data_toolkit.model import FOCUS_1_4_DATASETS, load_model, resolve_dat
 # FOCUS versions this toolkit reasons about for detection/conversion.
 SUPPORTED_VERSIONS: tuple[str, ...] = ("1.2", "1.3", "1.4")
 
-# dataset -> {column: (introduced_in, removed_in)} for columns removed by 1.4.
-REMOVED_COLUMNS: dict[str, dict[str, tuple[str, str]]] = {
+# dataset -> {column: (introduced_in, removed_in, mandatory_before)} for columns removed by
+# 1.4. ``mandatory_before`` is the version at which the column stopped being required because
+# a replacement arrived; a 1.2 Cost and Usage source needs ProviderName / PublisherName to
+# derive the 1.4-Mandatory ServiceProviderName / HostProviderName (which do not exist until
+# 1.3), so they are mandatory for versions < 1.3.
+REMOVED_COLUMNS: dict[str, dict[str, tuple[str, str, str]]] = {
     "Cost and Usage": {
-        "ProviderName": ("0.5", "1.4"),
-        "PublisherName": ("0.5", "1.4"),
+        "ProviderName": ("0.5", "1.4", "1.3"),
+        "PublisherName": ("0.5", "1.4", "1.3"),
     },
 }
 
@@ -58,7 +62,7 @@ def version_columns(dataset: str, version: str) -> frozenset[str]:
     cols = load_model()["datasets"][dataset]["columns"]
     tv = version_tuple(version)
     present = {c for c, spec in cols.items() if version_tuple(spec["version"]) <= tv}
-    for col, (intro, removed) in REMOVED_COLUMNS.get(dataset, {}).items():
+    for col, (intro, removed, _mandatory_before) in REMOVED_COLUMNS.get(dataset, {}).items():
         if version_tuple(intro) <= tv < version_tuple(removed):
             present.add(col)
     return frozenset(present)
@@ -68,15 +72,21 @@ def version_columns(dataset: str, version: str) -> frozenset[str]:
 def mandatory_columns(dataset: str, version: str) -> frozenset[str]:
     """Mandatory FOCUS columns of ``dataset`` present at ``version``.
 
-    Feature level is taken from the 1.4 model (a reasonable approximation for detection).
+    Feature level is taken from the 1.4 model; removed columns that were required at
+    ``version`` (before a replacement arrived) are added so detection does not accept a source
+    that cannot fill the 1.4-Mandatory columns it derives.
     """
     cols = load_model()["datasets"][dataset]["columns"]
     tv = version_tuple(version)
-    return frozenset(
+    mandatory = {
         c
         for c, spec in cols.items()
         if version_tuple(spec["version"]) <= tv and spec.get("feature_level") == "Mandatory"
-    )
+    }
+    for col, (intro, _removed, mandatory_before) in REMOVED_COLUMNS.get(dataset, {}).items():
+        if version_tuple(intro) <= tv < version_tuple(mandatory_before):
+            mandatory.add(col)
+    return frozenset(mandatory)
 
 
 @cache

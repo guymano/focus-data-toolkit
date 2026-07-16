@@ -32,35 +32,41 @@ DEFAULT_COST_TOLERANCE = Decimal("0.01")
 
 def _dec(value: str | None) -> Decimal | None:
     try:
-        return Decimal((value or "").strip())
+        parsed = Decimal((value or "").strip())
     except InvalidOperation:
         return None
+    return parsed if parsed.is_finite() else None
 
 
-def _row_ratio_and_unit(row: Mapping[str, str]) -> tuple[Decimal | None, str | None]:
-    """Extract (summed AllocatedRatio, UsageUnit) from a row's AllocatedMethodDetails JSON."""
+def _row_ratio_and_units(row: Mapping[str, str]) -> tuple[Decimal | None, frozenset[str]]:
+    """Extract (summed AllocatedRatio, set of UsageUnits) from a row's AllocatedMethodDetails.
+
+    Every element's ``UsageUnit`` is collected — not just the first — so a row mixing units
+    across its elements is caught by the group's single-unit check.
+    """
     text = (row.get("AllocatedMethodDetails") or "").strip()
     if not text:
-        return None, None
+        return None, frozenset()
     try:
         obj = json.loads(text, parse_float=Decimal, parse_int=Decimal)
     except (ValueError, TypeError):
-        return None, None
+        return None, frozenset()
     elements = obj.get("Elements") if isinstance(obj, dict) else None
     if not isinstance(elements, list) or not elements:
-        return None, None
+        return None, frozenset()
     ratio = Decimal(0)
-    unit: str | None = None
+    units: set[str] = set()
     for el in elements:
         if not isinstance(el, dict):
-            return None, None
+            return None, frozenset(units)
         raw = el.get("AllocatedRatio")
-        if not isinstance(raw, Decimal):
-            return None, unit
+        if not isinstance(raw, Decimal) or not raw.is_finite():
+            return None, frozenset(units)
         ratio += raw
-        if unit is None:
-            unit = el.get("UsageUnit")
-    return ratio, unit
+        unit = el.get("UsageUnit")
+        if unit:
+            units.add(unit)
+    return ratio, frozenset(units)
 
 
 def validate_split_allocation(
@@ -112,12 +118,11 @@ def _validate_group(
     origin_costs: set[Decimal] = set()
 
     for _i, row in members:
-        ratio, unit = _row_ratio_and_unit(row)
+        ratio, row_units = _row_ratio_and_units(row)
         if ratio is None:
             return [incomplete("a row has no usable AllocatedRatio", "AllocatedMethodDetails")]
         ratios.append(ratio)
-        if unit:
-            units.add(unit)
+        units |= row_units
         methods.add((row.get("AllocatedMethodId") or "").strip())
         resources.append((row.get("AllocatedResourceId") or "").strip())
         cost = _dec(row.get("BilledCost"))
