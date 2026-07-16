@@ -19,8 +19,11 @@ obtained.
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
+import json
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 from focus_data_toolkit import manifest as manifest_mod
@@ -39,6 +42,13 @@ from focus_data_toolkit.convert.detect import detect_focus_version
 from focus_data_toolkit.convert.invoice_detail import PROVENANCE as INVOICE_DETAIL_PROVENANCE
 from focus_data_toolkit.convert.invoice_detail import build_invoice_details
 from focus_data_toolkit.errors import Diagnostic, Severity
+from focus_data_toolkit.io.atomic_writer import (
+    AtomicOutputDir,
+    AtomicWriteError,
+    DestinationExistsError,
+    OnExists,
+    sha256sums_text,
+)
 from focus_data_toolkit.model import FOCUS_1_4_DATASETS, load_model
 from focus_data_toolkit.model.validator import LintReport, lint_focus_1_4_structure
 from focus_data_toolkit.modes import Mode
@@ -343,25 +353,115 @@ def rows_to_csv_bytes(rows: list[dict[str, str]]) -> bytes:
     return buf.getvalue().encode("utf-8")
 
 
-def write_result(result: ConversionResult, out_dir: str | Path) -> list[Path]:
-    """Write every produced dataset plus the manifest to ``out_dir``; return the paths."""
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    written: list[Path] = []
-    for name, rows in result.datasets.items():
-        path = out / result.output_filename(name)
-        path.write_bytes(rows_to_csv_bytes(rows))
-        written.append(path)
-    manifest_path = out / manifest_mod.MANIFEST_FILENAME
-    manifest_path.write_text(manifest_mod.render(result.manifest), encoding="utf-8")
-    written.append(manifest_path)
+RUN_SIDECAR_FILENAME = "_run.json"
+SHA256SUMS_FILENAME = "SHA256SUMS"
+
+
+def _run_metadata(
+    result: ConversionResult,
+    checksums: dict[str, str],
+    sizes: dict[str, int],
+    run_id: str,
+    tool_version: str,
+    generated_at: str,
+) -> dict:
+    """Operational metadata sidecar — kept OUT of the deterministic business manifest.
+
+    Carries the run id, wall-clock timestamp and per-file checksums/sizes/row-counts, so the
+    business datasets and manifest stay byte-reproducible while operational facts are recorded.
+    """
+    file_to_dataset = {result.output_filename(name): name for name in result.datasets}
+    files = []
+    for filename in sorted(checksums):
+        dataset = file_to_dataset.get(filename)
+        entry = result.manifest["datasets"].get(dataset, {}) if dataset else {}
+        files.append(
+            {
+                "name": filename,
+                "dataset": dataset,
+                "format": "csv",
+                "row_count": len(result.datasets.get(dataset, [])) if dataset else None,
+                "size_bytes": sizes.get(filename),
+                "sha256": checksums[filename],
+                "status": entry.get("status"),
+                "conformance": entry.get("conformance"),
+            }
+        )
+    return {
+        "run_id": run_id,
+        "generated_at": generated_at,
+        "toolkit_version": tool_version,
+        "mode": result.mode.value,
+        "source_version": result.source_version,
+        "manifest": manifest_mod.MANIFEST_FILENAME,
+        "files": files,
+    }
+
+
+def write_result(
+    result: ConversionResult,
+    out_dir: str | Path,
+    *,
+    on_exists: OnExists | str = OnExists.REFUSE,
+    keep_temp: bool = False,
+    require_valid: bool = True,
+) -> list[Path]:
+    """Write every produced dataset plus the manifest to ``out_dir`` **atomically**.
+
+    Files are staged in a temporary directory on the same filesystem; only after mandatory
+    validation passes and the manifest, checksums and operational sidecar are written is the
+    directory published with a single atomic rename. On any error the staging directory is
+    removed and ``out_dir`` is left untouched (existing results are never partially clobbered).
+
+    ``on_exists`` chooses the policy when ``out_dir`` already exists (refuse / replace /
+    version). ``require_valid`` refuses to publish when the built-in lint failed. Returns the
+    published dataset + manifest paths.
+    """
+    from focus_data_toolkit import __version__
+
+    generated_at = datetime.now(UTC).isoformat()
+    data_files = [
+        (result.output_filename(name), rows_to_csv_bytes(rows))
+        for name, rows in result.datasets.items()
+    ]
+
+    with AtomicOutputDir(out_dir, on_exists=on_exists, keep_temp=keep_temp) as out:
+        for name, data in data_files:
+            out.write_bytes(name, data)
+
+        # Mandatory validation gate: never publish a lint-failing result.
+        if require_valid and result.reports and not result.ok:
+            failed = sorted(n for n, r in result.reports.items() if not r.ok)
+            raise AtomicWriteError(
+                f"lint failed for {failed}; final output not written to {out_dir}"
+            )
+
+        checksums = out.checksums()
+        manifest_bytes = manifest_mod.render(result.manifest).encode("utf-8")
+        sidecar = _run_metadata(
+            result, checksums, out.sizes(), out.run_id, __version__, generated_at
+        )
+        all_sums = dict(checksums)
+        all_sums[manifest_mod.MANIFEST_FILENAME] = hashlib.sha256(manifest_bytes).hexdigest()
+        final_files = {
+            manifest_mod.MANIFEST_FILENAME: manifest_bytes,
+            RUN_SIDECAR_FILENAME: (json.dumps(sidecar, indent=2, sort_keys=True) + "\n").encode(),
+            SHA256SUMS_FILENAME: sha256sums_text(all_sums).encode("utf-8"),
+        }
+        target = out.commit(final_files=final_files)
+
+    written = [target / name for name, _ in data_files]
+    written.append(target / manifest_mod.MANIFEST_FILENAME)
     return written
 
 
 __all__ = [
     "DATASET_FILENAMES",
+    "AtomicWriteError",
     "ConversionError",
     "ConversionResult",
+    "DestinationExistsError",
+    "OnExists",
     "convert_to_focus_1_4",
     "detect_focus_version",
     "read_csv_rows",
