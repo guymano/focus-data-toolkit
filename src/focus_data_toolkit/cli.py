@@ -21,7 +21,7 @@ from focus_data_toolkit.convert import (
 )
 from focus_data_toolkit.generators import FOCUS_VERSIONS, PROVIDERS, get_generator
 from focus_data_toolkit.model import FOCUS_1_4_DATASETS
-from focus_data_toolkit.model.validator import resolve_dataset, validate_focus_1_4
+from focus_data_toolkit.model.validator import lint_focus_1_4_structure, resolve_dataset
 
 
 def _cmd_generate(args: argparse.Namespace) -> int:
@@ -82,8 +82,15 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         return run_official_validator(args.file, args.focus_version)
 
     rows = read_csv_rows(args.file)
-    report = validate_focus_1_4(resolve_dataset(args.dataset.replace("-", " ")), rows)
-    print(f"{args.file}: {'OK' if report.ok else f'{len(report.violations)} violation(s)'}")
+    report = lint_focus_1_4_structure(resolve_dataset(args.dataset.replace("-", " ")), rows)
+    status = (
+        f"structural+semantic lint OK ({', '.join(report.levels_passed)})"
+        if report.ok
+        else f"{len(report.violations)} violation(s)"
+    )
+    print(f"{args.file}: {status}")
+    if report.ok:
+        print("  note: structural lint only — not a full FOCUS 1.4 conformance check")
     for message in report.messages()[:50]:
         print(f"  {message}")
     return 0 if report.ok else 1

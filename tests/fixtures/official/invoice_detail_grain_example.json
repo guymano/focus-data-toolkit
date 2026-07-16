@@ -1,0 +1,5 @@
+{
+  "ServiceName": "Elastic Cloud Server",
+  "ResourceType": "Cloud Host",
+  "x_BillingMode": "Pay-per-Use"
+}
