@@ -71,6 +71,9 @@ CATALOG: dict[str, CodeSpec] = dict([
     _s("FDT-CORR-002", Severity.ERROR, "net sum of a correction set does not reconcile"),
     _s("FDT-CORR-003", Severity.ERROR, "correction overwrites an original row (no audit trail)"),
     _s("FDT-CORR-004", Severity.ERROR, "invoice status transition is not allowed"),
+    # --- bundle coverage (a check could not run / does not apply) ----------------
+    _s("FDT-BUNDLE-001", Severity.NOT_EXECUTABLE, "a cross-dataset check could not run (data absent)"),
+    _s("FDT-BUNDLE-002", Severity.NOT_APPLICABLE, "a cross-dataset check does not apply to this bundle"),
     # --- io / format -------------------------------------------------------------
     _s("FDT-IO-001", Severity.ERROR, "malformed input record (wrong field count)"),
     _s("FDT-IO-002", Severity.ERROR, "decimal value exceeds the target Parquet scale/precision"),
