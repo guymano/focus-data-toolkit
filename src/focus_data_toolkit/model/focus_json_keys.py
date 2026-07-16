@@ -85,15 +85,28 @@ ALLOCATED_METHOD_DETAILS_ELEMENT_KEYS: frozenset[str] = frozenset(
     }
 )
 
+# CommitmentProgramEligibilityDetails element keys
+# (commitmentprogrameligibilitydetails.md @ v1.4; top-level array key is
+# ``CommitmentPrograms``, not ``Elements``).
+COMMITMENT_PROGRAM_ELIGIBILITY_ELEMENT_KEYS: frozenset[str] = frozenset({"ProgramType"})
+
 # Columns whose custom keys MUST be ``x_``-prefixed, mapped to their FOCUS-defined
-# key set. Key-Value columns match keys at the top level; ``Elements`` columns
-# match keys inside each element object. Tags / AllocatedTags are intentionally
-# excluded (arbitrary tag keys are allowed).
+# key set. Key-Value columns match keys at the top level. Array-of-objects columns
+# map to ``(top_level_array_key, element_focus_keys)``: top-level keys must be the
+# array key or ``x_``-prefixed, and element keys must be FOCUS-defined or
+# ``x_``-prefixed (custom properties are allowed at both levels per the v1.4 column
+# docs). ``ContractApplied`` is validated in depth by
+# ``focus_data_toolkit.convert.contract_applied.parse`` and is therefore absent
+# here. Tags / AllocatedTags are intentionally excluded (arbitrary tag keys are
+# allowed).
 XPREFIX_ENFORCED_KEYVALUE_COLUMNS: dict[str, frozenset[str]] = {
     "SkuPriceDetails": SKU_PRICE_DETAILS_KEYS,
     "InvoiceDetailGrain": INVOICE_DETAIL_GRAIN_KEYS,
 }
-XPREFIX_ENFORCED_ELEMENTS_COLUMNS: dict[str, frozenset[str]] = {
-    "ContractApplied": CONTRACT_APPLIED_ELEMENT_KEYS_1_4,
-    "AllocatedMethodDetails": ALLOCATED_METHOD_DETAILS_ELEMENT_KEYS,
+XPREFIX_ENFORCED_ELEMENTS_COLUMNS: dict[str, tuple[str, frozenset[str]]] = {
+    "AllocatedMethodDetails": ("Elements", ALLOCATED_METHOD_DETAILS_ELEMENT_KEYS),
+    "CommitmentProgramEligibilityDetails": (
+        "CommitmentPrograms",
+        COMMITMENT_PROGRAM_ELIGIBILITY_ELEMENT_KEYS,
+    ),
 }

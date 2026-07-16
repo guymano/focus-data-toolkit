@@ -84,6 +84,49 @@ def test_allocated_method_details_elements_keys():
     )
 
 
+def test_allocated_method_details_top_level_custom_keys():
+    # v1.4 allows custom props alongside Elements, but they MUST be x_-prefixed.
+    ok = json.dumps({"Elements": [{"AllocatedRatio": 0.5}], "x_Note": "n"})
+    assert "custom_key_not_prefixed" not in _rules_for(
+        "Cost and Usage", {"AllocatedMethodDetails": ok}, "AllocatedMethodDetails"
+    )
+    bad = json.dumps({"Elements": [{"AllocatedRatio": 0.5}], "Bogus": 1})
+    assert "custom_key_not_prefixed" in _rules_for(
+        "Cost and Usage", {"AllocatedMethodDetails": bad}, "AllocatedMethodDetails"
+    )
+
+
+def test_commitment_program_eligibility_details_keys():
+    ok = json.dumps({"CommitmentPrograms": [{"ProgramType": "Resource Reservation"}]})
+    rules = _rules_for(
+        "Cost and Usage", {"CommitmentProgramEligibilityDetails": ok}, "CommitmentProgramEligibilityDetails"
+    )
+    assert "custom_key_not_prefixed" not in rules and "missing_elements_array" not in rules
+    # Non-FOCUS keys (top-level or nested) must be x_-prefixed.
+    bad_nested = json.dumps({"CommitmentPrograms": [{"ProgramType": "X", "Bogus": 1}]})
+    assert "custom_key_not_prefixed" in _rules_for(
+        "Cost and Usage", {"CommitmentProgramEligibilityDetails": bad_nested},
+        "CommitmentProgramEligibilityDetails",
+    )
+    bad_top = json.dumps({"CommitmentPrograms": [{"ProgramType": "X"}], "Bogus": 1})
+    assert "custom_key_not_prefixed" in _rules_for(
+        "Cost and Usage", {"CommitmentProgramEligibilityDetails": bad_top},
+        "CommitmentProgramEligibilityDetails",
+    )
+
+
+def test_contract_applied_1_4_metric_exclusivity_flagged():
+    # An element carrying both cost and quantity violates the 1.4 oneOf.
+    both = (
+        '{"Elements":[{"ContractId":"c","ContractCommitmentId":"x",'
+        '"ContractCommitmentAppliedCost":1,'
+        '"ContractCommitmentAppliedQuantity":2,"ContractCommitmentAppliedUnit":"Hours"}]}'
+    )
+    assert "invalid_contract_applied" in _rules_for(
+        "Cost and Usage", {"ContractApplied": both}, "ContractApplied"
+    )
+
+
 def test_contract_applied_structure_validated():
     good = (
         '{"Elements":[{"ContractId":"c","ContractCommitmentId":"x",'

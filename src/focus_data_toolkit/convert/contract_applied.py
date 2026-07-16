@@ -10,11 +10,19 @@ objects. The identifier keys are **cased differently** across versions
 
 The three metric keys — ``ContractCommitmentAppliedCost``,
 ``ContractCommitmentAppliedQuantity``, ``ContractCommitmentAppliedUnit`` — are stable
-across versions; the cost/quantity values are Numeric (JSON numbers). Custom keys
-(top level or inside elements) MUST be ``x_``-prefixed.
+across versions; the cost/quantity values are Numeric (JSON **numbers**, never quoted
+strings). Custom keys (top level or inside elements) MUST be ``x_``-prefixed.
 
-The internal model is version-neutral; version only affects (de)serialization casing,
-so ``migrate_1_3_to_1_4`` is ``parse(v1.3) -> serialize(v1.4)``.
+**1.4 metric exclusivity** (``ContractAppliedObjectSchema`` @ ``v1.4``, ``oneOf``):
+an element carries *either* ``AppliedCost`` (quantity/unit absent-or-null) *or*
+``AppliedQuantity``+``AppliedUnit`` (cost absent-or-null) — never both. FOCUS 1.3
+only requires *at least one* form, so a legal 1.3 element may carry all three
+metrics; :func:`migrate_1_3_to_1_4` then keeps the **cost** branch (the reconciling
+financial amount) and preserves quantity/unit losslessly as the custom keys
+``x_ContractCommitmentAppliedQuantity`` / ``x_ContractCommitmentAppliedUnit``.
+
+The internal model is version-neutral; version affects (de)serialization casing and
+the 1.4-only exclusivity rule.
 """
 
 from __future__ import annotations
@@ -22,7 +30,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from focus_data_toolkit.focus_json import dumps_object, is_json_number_literal
+from focus_data_toolkit.focus_json import JsonNumber, dumps_object
 
 _METRIC_COST = "ContractCommitmentAppliedCost"
 _METRIC_QTY = "ContractCommitmentAppliedQuantity"
@@ -34,6 +42,8 @@ _ID_KEYS = {
     "1.3": {"contract": "ContractID", "commitment": "ContractCommitmentID"},
     "1.4": {"contract": "ContractId", "commitment": "ContractCommitmentId"},
 }
+# The 1.4 ContractAppliedObjectSchema restricts each element to one metric branch.
+_EXCLUSIVE_METRICS_VERSIONS = frozenset({"1.4"})
 
 
 class ContractAppliedError(ValueError):
@@ -71,22 +81,23 @@ def _no_dup(pairs: list[tuple[str, object]]) -> dict:
 
 
 def _require_str(value: object, key: str) -> str:
-    if not isinstance(value, str) or not value:
+    if not isinstance(value, str) or isinstance(value, JsonNumber) or not value:
         raise ContractAppliedError(f"{key} must be a non-empty string")
     return value
 
 
 def _numeric_text(value: object, key: str) -> str:
-    """Coerce a JSON number/int/numeric-string to its exact numeric text."""
-    if isinstance(value, bool) or value is None:
-        raise ContractAppliedError(f"{key} must be numeric")
-    text = value if isinstance(value, str) else repr(value)
-    if not is_json_number_literal(text):
-        raise ContractAppliedError(f"{key} must be a numeric value, got {value!r}")
-    return text
+    """Return the exact numeric text of a JSON **number** token; reject anything else."""
+    if isinstance(value, JsonNumber):
+        return str(value)
+    if isinstance(value, str):
+        raise ContractAppliedError(f"{key} must be a JSON number, not a quoted string")
+    raise ContractAppliedError(f"{key} must be a JSON number, got {value!r}")
 
 
-def _parse_element(obj: object, ids: dict[str, str], index: int) -> ContractAppliedElement:
+def _parse_element(
+    obj: object, ids: dict[str, str], index: int, *, exclusive_metrics: bool
+) -> ContractAppliedElement:
     if not isinstance(obj, dict):
         raise ContractAppliedError(f"Elements[{index}] must be an object")
     focus_keys = {ids["contract"], ids["commitment"], *_METRICS}
@@ -108,6 +119,11 @@ def _parse_element(obj: object, ids: dict[str, str], index: int) -> ContractAppl
         raise ContractAppliedError(
             f"Elements[{index}] must provide {_METRIC_UNIT} when {_METRIC_QTY} is present"
         )
+    if exclusive_metrics and cost is not None and qty is not None:
+        raise ContractAppliedError(
+            f"Elements[{index}] must not provide both {_METRIC_COST} and {_METRIC_QTY} "
+            "(FOCUS 1.4 ContractAppliedObjectSchema oneOf)"
+        )
     return ContractAppliedElement(
         contract_id=contract_id,
         contract_commitment_id=commitment_id,
@@ -123,7 +139,9 @@ def parse(text: str, *, version: str = "1.4") -> ContractApplied:
     if version not in _ID_KEYS:
         raise ContractAppliedError(f"unsupported ContractApplied version {version!r}")
     try:
-        obj = json.loads(text, object_pairs_hook=_no_dup, parse_float=str, parse_int=str)
+        obj = json.loads(
+            text, object_pairs_hook=_no_dup, parse_float=JsonNumber, parse_int=JsonNumber
+        )
     except _DuplicateKey as exc:
         raise ContractAppliedError(f"duplicate JSON key {exc.key!r}") from None
     except json.JSONDecodeError as exc:
@@ -139,8 +157,12 @@ def parse(text: str, *, version: str = "1.4") -> ContractApplied:
     if not elements:
         raise ContractAppliedError("'Elements' array must not be empty")
     ids = _ID_KEYS[version]
+    exclusive = version in _EXCLUSIVE_METRICS_VERSIONS
     return ContractApplied(
-        elements=tuple(_parse_element(e, ids, i) for i, e in enumerate(elements)),
+        elements=tuple(
+            _parse_element(e, ids, i, exclusive_metrics=exclusive)
+            for i, e in enumerate(elements)
+        ),
         custom={k: v for k, v in obj.items() if k.startswith("x_")},
     )
 
@@ -148,13 +170,20 @@ def parse(text: str, *, version: str = "1.4") -> ContractApplied:
 def to_json(ca: ContractApplied, *, version: str = "1.4") -> str:
     """Serialize ``ca`` to a compact ContractApplied JSON string for ``version``.
 
-    Numeric metric values are emitted as JSON numbers (not quoted strings).
+    Numeric metric values are emitted as JSON numbers (not quoted strings). For 1.4
+    an element carrying both metric branches is refused (oneOf exclusivity).
     """
     if version not in _ID_KEYS:
         raise ContractAppliedError(f"unsupported ContractApplied version {version!r}")
     ids = _ID_KEYS[version]
+    exclusive = version in _EXCLUSIVE_METRICS_VERSIONS
     elements: list[dict] = []
-    for el in ca.elements:
+    for i, el in enumerate(ca.elements):
+        if exclusive and el.applied_cost is not None and el.applied_quantity is not None:
+            raise ContractAppliedError(
+                f"Elements[{i}] carries both metric branches; FOCUS {version} allows only "
+                "one (ContractAppliedObjectSchema oneOf)"
+            )
         obj: dict[str, object] = {
             ids["contract"]: el.contract_id,
             ids["commitment"]: el.contract_commitment_id,
@@ -172,6 +201,35 @@ def to_json(ca: ContractApplied, *, version: str = "1.4") -> str:
     return dumps_object(top, numeric_keys=_NUMERIC_METRIC_KEYS)
 
 
+def _to_1_4_exclusive(el: ContractAppliedElement) -> ContractAppliedElement:
+    """Reduce a 1.3 element to one 1.4 metric branch (see the module docstring).
+
+    When both branches are populated, the cost branch is kept and quantity/unit are
+    preserved losslessly as ``x_``-prefixed custom keys.
+    """
+    if el.applied_cost is None or el.applied_quantity is None:
+        return el
+    custom = dict(el.custom)
+    custom[f"x_{_METRIC_QTY}"] = JsonNumber(el.applied_quantity)
+    if el.applied_unit is not None:
+        custom[f"x_{_METRIC_UNIT}"] = el.applied_unit
+    return ContractAppliedElement(
+        contract_id=el.contract_id,
+        contract_commitment_id=el.contract_commitment_id,
+        applied_cost=el.applied_cost,
+        custom=custom,
+    )
+
+
 def migrate_1_3_to_1_4(text: str) -> str:
-    """Migrate a FOCUS 1.3 ContractApplied JSON string to the 1.4 schema (re-cased IDs)."""
-    return to_json(parse(text, version="1.3"), version="1.4")
+    """Migrate a FOCUS 1.3 ContractApplied JSON string to the 1.4 schema.
+
+    Re-cases the identifier keys and enforces the 1.4 metric exclusivity (both-branch
+    1.3 elements keep cost; quantity/unit move to ``x_`` custom keys, losslessly).
+    """
+    ca = parse(text, version="1.3")
+    ca = ContractApplied(
+        elements=tuple(_to_1_4_exclusive(el) for el in ca.elements),
+        custom=ca.custom,
+    )
+    return to_json(ca, version="1.4")

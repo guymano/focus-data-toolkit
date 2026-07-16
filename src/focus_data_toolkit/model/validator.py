@@ -211,9 +211,13 @@ def _validate_json_column(column: str, value: str, value_format: str) -> str | N
     # JSON Object columns.
     if column == "ContractApplied":
         return _validate_contract_applied(value)
-    focus_keys = XPREFIX_ENFORCED_ELEMENTS_COLUMNS.get(column)
-    if focus_keys is not None:
-        elements = obj.get("Elements")
+    entry = XPREFIX_ENFORCED_ELEMENTS_COLUMNS.get(column)
+    if entry is not None:
+        array_key, focus_keys = entry
+        # Top-level custom keys (alongside the array) must be x_-prefixed too.
+        if not all(k == array_key or k.startswith("x_") for k in obj):
+            return "custom_key_not_prefixed"
+        elements = obj.get(array_key)
         if not isinstance(elements, list):
             return "missing_elements_array"
         for element in elements:

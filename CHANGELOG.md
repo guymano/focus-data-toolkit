@@ -30,12 +30,17 @@ first (conformance & linter repositioning). Modes / provenance / manifest follow
 
 - **Scientific notation** is now accepted per FOCUS `NumericFormat` (E-notation `mEn`,
   negative-only exponent sign; `35.2E-7` valid, `35.2E+7` invalid). The old regex rejected
-  all scientific notation.
+  all scientific notation. Numeric literals reject leading zeros (`01`), which are invalid
+  JSON numbers.
 - The **`x_` custom-key rule** is enforced across JSON columns via a FOCUS-defined key
   registry (`SkuPriceDetails`, `InvoiceDetailGrain`, `ContractApplied`,
-  `AllocatedMethodDetails`), and is **not** applied to `Tags`/`AllocatedTags` (arbitrary
-  tag keys are allowed).
-- `ContractApplied` is now structurally validated (Elements, keys, types).
+  `AllocatedMethodDetails`, `CommitmentProgramEligibilityDetails`), covering both element
+  keys **and top-level custom keys** of array-of-objects columns, and is **not** applied to
+  `Tags`/`AllocatedTags` (arbitrary tag keys are allowed).
+- `ContractApplied` is structurally validated (Elements, keys, types). Quoted numeric
+  strings for metric fields are rejected (the schema types them as JSON numbers), and the
+  FOCUS 1.4 metric exclusivity (`ContractAppliedObjectSchema` `oneOf`: cost *xor*
+  quantity+unit) is enforced.
 
 ### Changed
 
@@ -43,8 +48,10 @@ first (conformance & linter repositioning). Modes / provenance / manifest follow
   `validate_focus_1_4` → **`lint_focus_1_4_structure`**, with explicit levels
   (`STRUCTURAL_VALID`, `SEMANTIC_VALID`); it never asserts cross-dataset or official
   conformance. `validate_focus_1_4` is retained as a **deprecated alias**.
-- Conversion of `ContractApplied` from a 1.3 source now **migrates** it to the 1.4 schema
-  (re-cased identifier keys) instead of copying it verbatim.
+- Conversion of `ContractApplied` from a 1.3 source now **migrates** it to the 1.4 schema:
+  re-cased identifier keys, and — since 1.3 permits all metrics but 1.4's `oneOf` does not
+  — a 1.3 element carrying both cost and quantity keeps the cost branch, preserving
+  quantity/unit losslessly as `x_ContractCommitmentAppliedQuantity`/`…Unit`.
 - New typed API `focus_data_toolkit.convert.contract_applied` (parse / validate / migrate).
 - Fixed a whitespace-mismatch bug in the Cost-and-Usage → Invoice Detail back-link key.
 - README/docs no longer describe the linter as a full conformance validator.
