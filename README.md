@@ -119,6 +119,30 @@ The official FinOps validator ships rule models for FOCUS 1.2/1.3 and does **not
 yet support 1.4. Until it does, the built-in linter provides a structural +
 semantic check only — it cannot certify full FOCUS 1.4 conformance.
 
+### Working with real client data (0.3.0 / P1)
+
+For consolidated, multi-provider, multi-issuer, multi-currency exports:
+
+- **Schema detection** identifies the dataset *and* version (1.2/1.3/1.4) with a confidence,
+  and reports missing / extension (`x_`) / unknown columns. Strict mode refuses an ambiguous
+  source; force it with `--source-version` / `--source-dataset`.
+- **Grouping keys** use the full billing grain (issuer, invoice, account, currency, period,
+  charge category), so lines from different issuers/accounts/currencies are never merged.
+  Locally generated ids are `x_fdt_…`-prefixed and never presented as issuer-assigned.
+- **Cross-dataset validation** (`validate_dataset_bundle`) checks referential integrity,
+  currency/period/issuer coherence, invoice reconciliation (with a rounding tolerance) and
+  Split Cost Allocation — separately from the per-dataset linter.
+- **Atomic writes**: output appears only after validation succeeds and checksums + manifest
+  are written; nothing partial is left on error. `--on-exists refuse|replace|version`.
+
+```python
+from focus_data_toolkit import convert_to_focus_1_4, detect_focus_schema, validate_bundle
+
+detection = detect_focus_schema(headers)          # dataset, version, confidence, ...
+report = validate_bundle({"Cost and Usage": cu_rows, "Invoice Detail": invd_rows})
+print(report.ok, report.counts())                 # cross-dataset findings, JSON-serialisable
+```
+
 ### Python API
 
 ```python
