@@ -15,6 +15,10 @@ import sys
 from pathlib import Path
 
 from focus_data_toolkit.convert import (
+    AtomicWriteError,
+    ConversionError,
+    DestinationExistsError,
+    OnExists,
     convert_to_focus_1_4,
     read_csv_rows,
     write_result,
@@ -46,18 +50,59 @@ def _cmd_convert(args: argparse.Namespace) -> int:
     mode = Mode(args.mode)
     cau_rows = read_csv_rows(args.cost_and_usage)
     cc_rows = read_csv_rows(args.contract_commitment) if args.contract_commitment else None
-    result = convert_to_focus_1_4(cau_rows, cc_rows, mode=mode, validate=not args.no_validate)
+    try:
+        result = convert_to_focus_1_4(
+            cau_rows,
+            cc_rows,
+            source_version=args.source_version,
+            source_dataset=args.source_dataset,
+            mode=mode,
+            validate=not args.no_validate,
+        )
+    except ConversionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
-    written = write_result(result, args.out)
+    confidence = result.detection.confidence if result.detection else "?"
+    print(
+        f"source detected: FOCUS {result.source_version} "
+        f"(dataset {result.detection.dataset if result.detection else '?'}, "
+        f"confidence {confidence}, mode: {mode})"
+    )
+    for diag in result.diagnostics:
+        print(f"note {diag.code}: {diag.message}", file=sys.stderr)
+
+    # Mandatory lint gate: a lint-failing result is never written to disk.
+    if not args.no_validate and not result.ok:
+        for name, report in result.reports.items():
+            status = "lint OK" if report.ok else f"{len(report.violations)} violation(s)"
+            print(f"lint [{name}]: {status}")
+            for message in report.messages()[:20]:
+                print(f"  {message}")
+        print("output not written: mandatory lint failed", file=sys.stderr)
+        return 1
+
+    try:
+        written = write_result(
+            result, args.out, on_exists=OnExists(args.on_exists), keep_temp=args.keep_temp
+        )
+    except DestinationExistsError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except AtomicWriteError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
     if args.manifest:
         Path(args.manifest).write_text(render_manifest(result.manifest), encoding="utf-8")
-    print(f"source detected: FOCUS {result.source_version} (mode: {mode})")
     for path in written:
         print(f"wrote {path}")
-
     for name in result.not_produced:
         entry = result.manifest["datasets"][name]
         print(f"not produced [{name}]: {entry.get('reason', 'unavailable')}")
+    if not args.no_validate:
+        for name in result.reports:
+            print(f"lint [{name}]: lint OK")
 
     if mode is Mode.SYNTHETIC and result.assumptions_present:
         print(
@@ -65,20 +110,6 @@ def _cmd_convert(args: argparse.Namespace) -> int:
             "values and are NOT fully FOCUS-conformant. See the manifest.",
             file=sys.stderr,
         )
-
-    failed = False
-    if not args.no_validate:
-        for name, report in result.reports.items():
-            status = "lint OK" if report.ok else f"{len(report.violations)} violation(s)"
-            print(f"lint [{name}]: {status}")
-            if not report.ok:
-                failed = True
-                for message in report.messages()[:20]:
-                    print(f"  {message}")
-
-    if failed:
-        return 1
-    if mode is Mode.SYNTHETIC and result.assumptions_present:
         return 4
     if mode is Mode.STRICT and result.not_produced:
         return 3
@@ -131,6 +162,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     conv.add_argument("--out", default="focus-1.4", help="output directory (default: ./focus-1.4)")
     conv.add_argument(
+        "--source-version",
+        help="force the FOCUS source version (1.2 or 1.3) instead of auto-detecting it",
+    )
+    conv.add_argument(
+        "--source-dataset",
+        help="force the source dataset (e.g. cost-and-usage) instead of auto-detecting it",
+    )
+    conv.add_argument(
         "--mode",
         choices=[m.value for m in Mode],
         default=Mode.STRICT.value,
@@ -142,6 +181,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     conv.add_argument(
         "--no-validate", action="store_true", help="skip the built-in FOCUS 1.4 structural lint"
+    )
+    conv.add_argument(
+        "--on-exists",
+        choices=[e.value for e in OnExists],
+        default=OnExists.REFUSE.value,
+        help="policy when the output directory already exists: refuse (default), replace "
+        "(atomic swap) or version (new versioned subdirectory)",
+    )
+    conv.add_argument(
+        "--keep-temp",
+        action="store_true",
+        help="keep the staging directory on error for diagnosis",
     )
     conv.set_defaults(func=_cmd_convert)
 

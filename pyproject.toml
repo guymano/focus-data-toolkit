@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "focus-data-toolkit"
-version = "0.2.0"
-description = "Generate provider-realistic FOCUS 1.2/1.3 sample data (AWS, Azure, GCP) and convert it to the four FOCUS 1.4 datasets, with built-in conformance validation."
+version = "0.3.0"
+description = "Generate provider-realistic FOCUS 1.2/1.3 sample data (AWS, Azure, GCP) and convert it to the four FOCUS 1.4 datasets, with schema detection, cross-dataset validation and atomic writes."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -22,11 +22,18 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
+# Parquet read/write (P1.6, Phase B). PyArrow is the only new runtime dependency and is
+# used solely for columnar I/O with exact decimal128 — the core stays standard-library only.
+parquet = ["pyarrow>=15,<21"]
+# The "scale" extra is intentionally an alias of "parquet": external state for large inputs
+# (dedup / aggregation / joins) is handled by the stdlib sqlite3, so no extra engine is added.
+scale = ["focus-data-toolkit[parquet]"]
 # The official FinOps FOCUS validator (not published on PyPI in a recent
 # version; installed from GitHub). Requires Python >= 3.12.
 validator = [
     "focus_validator @ git+https://github.com/finopsfoundation/focus_validator",
 ]
+all = ["focus-data-toolkit[parquet,validator]"]
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
@@ -52,3 +59,9 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Heavy scale/performance tests are marked `slow` and excluded from the default run;
+# run them explicitly with `pytest -m slow`.
+addopts = "-m 'not slow'"
+markers = [
+    "slow: large-scale / performance tests (excluded from the default run)",
+]

@@ -89,6 +89,40 @@ def test_convert_from_1_2_strict_reports_not_produced(tmp_path, capsys):
     assert "not produced [Contract Commitment]" in out
 
 
+def test_convert_invalid_source_version_exits_2(tmp_path, capsys):
+    src = _generate(tmp_path, "aws", "1.3", 20, 1302)
+    cau = src / "focus_1_3_cost_and_usage_aws.csv"
+    rc = main(
+        ["convert", "--cost-and-usage", str(cau), "--out", str(tmp_path / "v14"),
+         "--source-version", "foo"]
+    )
+    assert rc == 2
+    assert "error" in capsys.readouterr().err.lower()
+
+
+def test_convert_forced_wrong_dataset_exits_2(tmp_path, capsys):
+    src = _generate(tmp_path, "aws", "1.3", 20, 1302)
+    cau = src / "focus_1_3_cost_and_usage_aws.csv"
+    # Forcing a dataset the header clearly is not must be rejected (exit 2), not converted.
+    rc = main(
+        ["convert", "--cost-and-usage", str(cau), "--out", str(tmp_path / "v14"),
+         "--source-dataset", "invoice-detail"]
+    )
+    assert rc == 2
+
+
+def test_convert_contract_commitment_as_cau_exits_2(tmp_path):
+    # A Contract Commitment CSV passed as --cost-and-usage must be rejected even when the
+    # version is forced (it is not a Cost and Usage source).
+    src = _generate(tmp_path, "aws", "1.3", 20, 1302)
+    cc = src / "focus_1_3_contract_commitment_aws.csv"
+    rc = main(
+        ["convert", "--cost-and-usage", str(cc), "--out", str(tmp_path / "v14"),
+         "--source-version", "1.3"]
+    )
+    assert rc == 2
+
+
 def test_validate_reports_violations(tmp_path, capsys):
     bad = tmp_path / "bad.csv"
     bad.write_text("BillingPeriodStart,BillingPeriodEnd\n2026-05-01T00:00:00Z,not-a-date\n")
