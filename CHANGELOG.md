@@ -6,8 +6,37 @@ All notable changes to this project are documented here. This project adheres to
 ## [0.2.0] — unreleased
 
 The 0.2.0 line makes the toolkit honest about what it produces and fixes real FOCUS
-conformance defects. It is delivered as two stacked changes; this section covers the
-first (conformance & linter repositioning). Modes / provenance / manifest follow.
+conformance defects.
+
+### Added — modes, provenance & manifest
+
+- **Conversion modes** (`--mode`, `focus_data_toolkit.modes.Mode`):
+  - `strict` (**new default**) never invents provider-issued financial facts. A
+    canonical FOCUS 1.4 dataset is produced only when every Mandatory non-nullable
+    column has a factual lineage. From a Cost-and-Usage source, only Cost and Usage is
+    produced; Billing Period, Invoice Detail and the 1.4-expanded Contract Commitment are
+    reported `NOT_PRODUCED` with their blocking columns.
+  - `synthetic` generates assumed values for demos/tests; affected datasets are written
+    with a `synthetic_` filename prefix and marked `PRODUCED_SYNTHETIC`, never fully
+    conformant.
+- **Value provenance / lineage** (`focus_data_toolkit.provenance`): every produced column
+  is classified `OBSERVED` / `RENAMED` / `DERIVED` / `ENRICHED` / `ASSUMED` /
+  `UNAVAILABLE`. Any `ASSUMED` column prevents a full-conformance claim.
+- **Deterministic conversion manifest** (`focus_1_4_manifest.json`,
+  `focus_data_toolkit.manifest`): per-dataset status/conformance/reason and per-column
+  lineage. Written on every conversion; `--manifest PATH` writes an extra copy.
+- **CLI exit codes**: `0` success without assumptions · `1` lint violation ·
+  `2` invalid arguments · `3` incomplete strict result · `4` synthetic result with
+  assumptions.
+
+### Changed — behaviour
+
+- **Default conversion behaviour changed**: strict mode no longer emits Billing Period /
+  Invoice Detail / Contract Commitment reconstructed from Cost and Usage alone. Use
+  `--mode synthetic` for the previous all-four output (now correctly labelled).
+- `convert_to_focus_1_4` gained a `mode` parameter; `ConversionResult` gained
+  `mode`, `provenance`, `manifest`, `not_produced`, `assumptions_present`.
+- README rewritten to separate schema migration / enrichment / synthetic projection.
 
 ### Fixed — FOCUS conformance of generated JSON columns
 

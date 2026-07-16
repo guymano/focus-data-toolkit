@@ -28,8 +28,41 @@ import json
 from datetime import datetime
 
 from focus_data_toolkit.model import dataset_columns
+from focus_data_toolkit.provenance import ColumnRule, Lineage
 
 DATASET = "Contract Commitment"
+
+# Provenance of every 1.4 Contract Commitment column. The 13 source columns are
+# OBSERVED; a few are derived/enriched; the 1.4-new commercial terms are ASSUMED
+# (no source), which blocks strict production.
+_OBSERVED_FROM_1_3 = (
+    "BillingCurrency", "ContractCommitmentCategory", "ContractCommitmentCost",
+    "ContractCommitmentDescription", "ContractCommitmentId", "ContractCommitmentPeriodEnd",
+    "ContractCommitmentPeriodStart", "ContractCommitmentQuantity", "ContractCommitmentType",
+    "ContractCommitmentUnit", "ContractId", "ContractPeriodEnd", "ContractPeriodStart",
+)
+PROVENANCE: dict[str, ColumnRule] = {
+    **{c: ColumnRule(Lineage.OBSERVED, f"ContractCommitment.{c}") for c in _OBSERVED_FROM_1_3},
+    "ContractCommitmentDurationType": ColumnRule(Lineage.DERIVED, "commitment period span"),
+    "InvoiceIssuerName": ColumnRule(Lineage.ENRICHED, "Cost and Usage provider context"),
+    "ServiceProviderName": ColumnRule(Lineage.ENRICHED, "Cost and Usage provider context"),
+    "PricingCurrency": ColumnRule(Lineage.DERIVED, "ContractCommitment.BillingCurrency"),
+    "PricingCurrencyContractCommitmentCost": ColumnRule(
+        Lineage.DERIVED, "ContractCommitment.ContractCommitmentCost"
+    ),
+    "ContractCommitmentCreated": ColumnRule(Lineage.ASSUMED, note="provider record timestamp"),
+    "ContractCommitmentLastUpdated": ColumnRule(Lineage.ASSUMED, note="provider record timestamp"),
+    "ContractCommitmentDiscountPercentage": ColumnRule(Lineage.UNAVAILABLE, note="emitted null"),
+    "ContractCommitmentApplicability": ColumnRule(Lineage.ASSUMED, note="terms absent from source"),
+    "ContractCommitmentBenefitCategory": ColumnRule(Lineage.ASSUMED, note="assumed default"),
+    "ContractCommitmentFulfillmentInterval": ColumnRule(Lineage.ASSUMED, note="assumed default"),
+    "ContractCommitmentLifecycleStatus": ColumnRule(Lineage.ASSUMED, note="assumed default"),
+    "ContractCommitmentModel": ColumnRule(Lineage.ASSUMED, note="assumed default"),
+    "ContractCommitmentOfferCategory": ColumnRule(Lineage.ASSUMED, note="assumed default"),
+    "ContractCommitmentPaymentInterval": ColumnRule(Lineage.ASSUMED, note="assumed default"),
+    "ContractCommitmentPaymentModel": ColumnRule(Lineage.ASSUMED, note="assumed default"),
+    "ContractCommitmentPaymentUpfrontPercentage": ColumnRule(Lineage.ASSUMED, note="assumed default"),
+}
 
 _APPLICABILITY = json.dumps(
     {"x_Source": "Derived from a FOCUS 1.3 Contract Commitment dataset; "
