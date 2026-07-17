@@ -23,6 +23,9 @@ jobs:
     name: Scorecard analysis
     runs-on: ubuntu-24.04
     permissions:
+      # A job-level permissions block replaces the top-level one entirely (unset scopes become
+      # `none`), so `contents: read` must be restated for actions/checkout to read the repo.
+      contents: read
       security-events: write  # upload SARIF to code scanning
       id-token: write         # publish results to the OpenSSF REST API (public repos)
     steps:
