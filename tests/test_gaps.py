@@ -113,3 +113,17 @@ def test_gaps_cli_json_output(tmp_path, source_tables):
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["source_version"] == "1.2"
     assert payload["datasets"]["Billing Period"]["column_gaps"]
+
+
+def test_incomplete_cc_source_reports_source_completeness_gap(full_1_2_header):
+    # A Contract Commitment header missing a mandatory non-nullable source column
+    # (ContractCommitmentId) is a source-completeness gap no supplement can fill.
+    incomplete_cc = tuple(c for c in CC_1_3 if c != "ContractCommitmentId")
+    report = compute_gaps(full_1_2_header, "1.2", cc_columns=incomplete_cc)
+    blocking = {g.column: g for g in report.blocking("Contract Commitment")}
+    assert "ContractCommitmentId" in blocking
+    assert blocking["ContractCommitmentId"].supplement_kinds == ()
+    assert blocking["ContractCommitmentId"].current_lineage == "UNAVAILABLE"
+    # A complete CC header does not report it as a gap.
+    complete = compute_gaps(full_1_2_header, "1.2", cc_columns=CC_1_3)
+    assert "ContractCommitmentId" not in {g.column for g in complete.blocking("Contract Commitment")}

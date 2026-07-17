@@ -33,7 +33,7 @@
       "target_kind": "contract_commitment",
       "source": "Google Compute Engine \u2014 regionCommitments (Commitment resource)",
       "doc_url": "https://docs.cloud.google.com/compute/docs/reference/rest/v1/regionCommitments",
-      "sha256": "a163eb59c1b4cb7d0cd4fdc51baa3f4f45783ded4d35c6a52e72310c14238648"
+      "sha256": "8adc15b222114ef6f90deca05aad448018b56a2a7214c4013a9e36039bb34ac3"
     }
   ]
 }

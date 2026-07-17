@@ -77,10 +77,37 @@ def test_forced_unknown_kind_and_missing_join_key_error(tmp_path):
         SupplementBundle.load([SupplementFileSpec(path=bad, kind="billing_period")])
 
 
-def test_duplicate_kind_files_rejected(tmp_path):
+def test_same_kind_files_with_disjoint_columns_merge(tmp_path):
+    # A provider-native export supplying some facts + a hand-authored file supplying the
+    # rest of the same kind's facts must combine, not be rejected.
+    a_rows = [{"InvoiceIssuerName": "AWS", "InvoiceId": "INV-1", "InvoiceIssueStatus": "Issued"}]
+    b_rows = [{"InvoiceIssuerName": "AWS", "InvoiceId": "INV-1", "PaymentTerms": "Net 30"}]
+    a = write_csv(tmp_path / "a.csv", a_rows)
+    b = write_csv(tmp_path / "b.csv", b_rows)
+    bundle = SupplementBundle.load([SupplementFileSpec(path=a), SupplementFileSpec(path=b)])
+    table = bundle.get("invoice")
+    assert table.value(("AWS", "INV-1"), "InvoiceIssueStatus") == "Issued"
+    assert table.value(("AWS", "INV-1"), "PaymentTerms") == "Net 30"
+    # Each column keeps its originating-file attribution.
+    assert table.source_for("InvoiceIssueStatus").endswith(":a.csv")
+    assert table.source_for("PaymentTerms").endswith(":b.csv")
+    # Manifest lists both files.
+    assert {e["path"] for e in bundle.manifest_entries()} == {"a.csv", "b.csv"}
+
+
+def test_same_kind_files_identical_values_merge(tmp_path):
     a = write_csv(tmp_path / "a.csv", [bp_supplement_row()])
     b = write_csv(tmp_path / "b.csv", [bp_supplement_row()])
-    with pytest.raises(SupplementError, match="multiple supplement files of kind"):
+    bundle = SupplementBundle.load([SupplementFileSpec(path=a), SupplementFileSpec(path=b)])
+    assert bundle.get("billing_period").value(
+        ("AWS", P1, P2), "BillingPeriodStatus"
+    ) == "Closed"
+
+
+def test_same_kind_files_conflicting_values_rejected(tmp_path):
+    a = write_csv(tmp_path / "a.csv", [bp_supplement_row(BillingPeriodStatus="Closed")])
+    b = write_csv(tmp_path / "b.csv", [bp_supplement_row(BillingPeriodStatus="Open")])
+    with pytest.raises(SupplementError, match="conflicting supplement value"):
         SupplementBundle.load([SupplementFileSpec(path=a), SupplementFileSpec(path=b)])
 
 
@@ -233,3 +260,47 @@ def test_supplements_validate_cli(tmp_path):
     bad = write_csv(tmp_path / "bad.csv", [bp_supplement_row(BillingPeriodStatus="Done")])
     assert main(["supplements", "validate", "--cost-and-usage", str(src),
                  "--supplement", str(bad)]) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Codex review fixes: envelopes, gzip JSON, zero-fact-columns
+# --------------------------------------------------------------------------- #
+def test_aws_invoice_envelope_json_is_unwrapped(tmp_path):
+    # `aws invoicing list-invoice-summaries --output json` returns an envelope object.
+    path = tmp_path / "aws.json"
+    path.write_text(json.dumps({
+        "invoiceSummaries": [
+            {"InvoiceId": "INV-1", "IssuedDate": "2026-06-01",
+             "Entity": {"InvoicingEntity": "AWS"}, "DueDate": "2026-07-01"}
+        ],
+        "nextToken": "abc",
+    }), encoding="utf-8")
+    bundle = SupplementBundle.load([SupplementFileSpec(path=path)])
+    assert bundle.get("invoice").adapter == "aws-invoice-summary@1"
+
+
+def test_json_object_with_several_arrays_is_ambiguous(tmp_path):
+    path = tmp_path / "x.json"
+    path.write_text(json.dumps({"a": [{"k": 1}], "b": [{"k": 2}]}), encoding="utf-8")
+    with pytest.raises(SupplementError, match="exactly one array"):
+        SupplementBundle.load([SupplementFileSpec(path=path)])
+
+
+def test_gzipped_json_supplement(tmp_path):
+    import gzip
+
+    path = tmp_path / "inv.json.gz"
+    payload = json.dumps([{
+        "InvoiceIssuerName": "AWS", "InvoiceId": "INV-1",
+        "InvoiceIssueStatus": "Issued", "PaymentTerms": "Net 30",
+    }])
+    with gzip.open(path, "wt", encoding="utf-8") as fh:
+        fh.write(payload)
+    bundle = SupplementBundle.load([SupplementFileSpec(path=path)])
+    assert bundle.get("invoice").value(("AWS", "INV-1"), "PaymentTerms") == "Net 30"
+
+
+def test_forced_kind_with_only_join_keys_rejected(tmp_path):
+    path = write_csv(tmp_path / "s.csv", [{"InvoiceIssuerName": "AWS", "InvoiceId": "INV-1"}])
+    with pytest.raises(SupplementError, match="none of its fact columns"):
+        SupplementBundle.load([SupplementFileSpec(path=path, kind="invoice")])

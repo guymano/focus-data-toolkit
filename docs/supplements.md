@@ -120,7 +120,13 @@ $ focus-toolkit convert --cost-and-usage my_focus_1_2.csv \
 ```
 
 The adapter is auto-detected from the header; force one with `FILE:<adapter-name>` (e.g.
-`aws_export.json:aws-invoice-summary`). Each adapter is a **vendored, versioned mapping
+`aws_export.json:aws-invoice-summary`). Provider API JSON is accepted either as a bare array
+or as the native envelope (`{"invoiceSummaries": [...], "nextToken": ...}`,
+`{"savingsPlans": [...]}`), and gzipped JSON (`*.json.gz`) is decompressed transparently. You
+can also combine a native export with a hand-authored file of the **same kind** for the facts
+the adapter leaves out (e.g. `aws_invoices.json` + a `payment_terms.csv` supplying
+`PaymentTerms`): files of the same kind are merged, each column keeps its own attribution, and
+a genuine value conflict for the same key is a hard error. Each adapter is a **vendored, versioned mapping
 table** carrying its official-doc provenance (see
 `focus_data_toolkit/supplement/adapters/adapters_provenance.json`); translated values keep
 `ENRICHED` lineage with the attribution `supplement:<adapter>@<version>:<file>`, so every

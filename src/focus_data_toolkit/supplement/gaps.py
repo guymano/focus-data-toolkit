@@ -23,7 +23,7 @@ from focus_data_toolkit.convert.cost_and_usage import cost_and_usage_provenance
 from focus_data_toolkit.convert.invoice_detail import PROVENANCE as INVOICE_DETAIL_PROVENANCE
 from focus_data_toolkit.model import FOCUS_1_4_DATASETS
 from focus_data_toolkit.model.validator import load_model
-from focus_data_toolkit.provenance import ColumnRule, strict_blockers
+from focus_data_toolkit.provenance import ColumnRule, Lineage, strict_blockers
 from focus_data_toolkit.supplement.kinds import SUPPLEMENT_KINDS, kinds_for_column
 
 GAP_REPORT_FORMAT = "1"
@@ -171,13 +171,24 @@ def compute_gaps(
     construction exactly what would block strict production of that dataset.
     """
     model = load_model()
+    # When a Contract Commitment source header is given, reflect it: a column the base
+    # provenance treats as OBSERVED-from-1.3 but that is absent from the actual header is a
+    # source-completeness gap (no supplement can fabricate it), not an observed value.
+    cc_prov = dict(CONTRACT_COMMITMENT_PROVENANCE)
+    if cc_columns is not None:
+        present_cc = set(cc_columns)
+        for col, base_rule in CONTRACT_COMMITMENT_PROVENANCE.items():
+            if base_rule.lineage is Lineage.OBSERVED and col not in present_cc:
+                cc_prov[col] = ColumnRule(
+                    Lineage.UNAVAILABLE, note="absent from the Contract Commitment source"
+                )
     provenance: dict[str, dict[str, ColumnRule]] = {
         "Cost and Usage": cost_and_usage_provenance(
             source_columns, source_version, invoice_detail_linked=False
         ),
         "Billing Period": BILLING_PERIOD_PROVENANCE,
         "Invoice Detail": INVOICE_DETAIL_PROVENANCE,
-        "Contract Commitment": CONTRACT_COMMITMENT_PROVENANCE,
+        "Contract Commitment": cc_prov,
     }
     gaps: dict[str, tuple[ColumnGap, ...]] = {}
     dataset_level: dict[str, str] = {}

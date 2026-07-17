@@ -48,9 +48,10 @@ class AppliedDataset:
     counters: LineageCounters = field(default_factory=LineageCounters)
 
 
-def _source_label(table: SupplementTable) -> str:
-    # For an adapter-translated file the tag is "<adapter>@<version>"; otherwise the kind.
-    return f"supplement:{table.source_tag}:{table.path.name}"
+def _source_label(table: SupplementTable, column: str) -> str:
+    # Per-column attribution: a merged table (adapter export + hand-authored file) tags each
+    # column to its originating file ("supplement:<adapter>@<version>:<file>" or the kind).
+    return table.source_for(column)
 
 
 def _allows_nulls(dataset: str, column: str) -> bool:
@@ -78,7 +79,7 @@ def _flip_rules(
             nullable = _allows_nulls(dataset, column)
             if complete or (nullable and col_cov.covered > 0):
                 note = None if complete else "nulls where the client supplied no value"
-                rules[column] = ColumnRule(Lineage.ENRICHED, _source_label(table), note)
+                rules[column] = ColumnRule(Lineage.ENRICHED, _source_label(table, column), note)
     return rules
 
 
@@ -94,10 +95,20 @@ def _apply_column(
     *,
     synthetic: bool,
     counters: LineageCounters,
+    base_is_factual: bool = False,
 ) -> None:
-    """Write one fact column: supplied value, else strict-empty / synthetic default."""
+    """Write one fact column: supplied value, else keep the base value / synthetic default.
+
+    ``base_is_factual`` marks an *override* column that already carries a factual base value
+    (e.g. Contract Commitment ``ServiceProviderName`` from the provider context). For an
+    uncovered row such a column must keep its base value — never be blanked — so a partial
+    override does not turn otherwise-valid rows into mandatory-null failures.
+    """
     if supplied:
         row[column] = supplied
+        counters.record(column, Lineage.ENRICHED)
+    elif base_is_factual and (row.get(column) or ""):
+        # Keep the factual base value for this uncovered row.
         counters.record(column, Lineage.ENRICHED)
     elif synthetic:
         # Keep the builder's documented default (assumed) — or null if it emitted none.
@@ -198,7 +209,7 @@ def apply_invoice_details(
                 extra_emitted.append(column)
                 out.provenance[column] = ColumnRule(
                     Lineage.ENRICHED,
-                    _source_label(table),
+                    _source_label(table, column),
                     None if col_cov.complete else "nulls where the client supplied no value",
                 )
 
@@ -260,6 +271,9 @@ def apply_contract_commitments(
         if model_col in table.fact_columns
         else None
     )
+    # Override columns whose base row already holds a factual (provider-context) value:
+    # a partial override must not blank the uncovered rows.
+    factual_base = {c for c, r in base_provenance.items() if r.is_factual}
     for row in out.rows or []:
         key = (row.get("ContractCommitmentId", ""),)
         for column in table.fact_columns:
@@ -268,10 +282,12 @@ def apply_contract_commitments(
             _apply_column(
                 row, column, table.value(key, column),
                 synthetic=synthetic, counters=out.counters,
+                base_is_factual=column in factual_base,
             )
         # Upfront percentage: supplied wins; else exactly derivable from the payment
         # model ('No Upfront' -> 0, 'All Upfront' -> 1); 'Partial Upfront' without a
-        # supplied percentage stays empty (flagged by validation/lint, never guessed).
+        # supplied percentage is not derivable and stays empty in BOTH modes (never a
+        # guessed '0' paired with 'Partial Upfront'); the mandatory-column lint flags it.
         supplied_pct = table.value(key, upfront) if upfront_supplied else ""
         payment_model = row.get(model_col, "")
         if supplied_pct:
@@ -283,16 +299,16 @@ def apply_contract_commitments(
         elif payment_model == "All Upfront":
             row[upfront] = "1"
             out.counters.record(upfront, Lineage.DERIVED)
-        elif not synthetic:
+        else:
             row[upfront] = ""
             out.counters.record(upfront, Lineage.UNAVAILABLE)
     if not any(
         (r.get(upfront) or "") == "" for r in (out.rows or [])
     ) and (upfront_supplied or (model_cov is not None and model_cov.complete)):
         source_note = (
-            _source_label(table)
+            _source_label(table, upfront)
             if upfront_supplied
-            else f"ContractCommitmentPaymentModel ({_source_label(table)})"
+            else f"ContractCommitmentPaymentModel ({_source_label(table, model_col)})"
         )
         lineage = Lineage.ENRICHED if upfront_supplied else Lineage.DERIVED
         out.provenance[upfront] = ColumnRule(lineage, source_note)

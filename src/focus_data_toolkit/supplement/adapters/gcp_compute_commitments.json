@@ -18,7 +18,7 @@
     {"target": "ContractCommitmentCreated", "source": "startTimestamp", "transform": "date_to_utc"},
     {"target": "ContractCommitmentLifecycleStatus", "source": "status",
      "value_map": {"ACTIVE": "Active", "EXPIRED": "Expired", "NOT_YET_ACTIVE": "Proposed",
-                   "CREATING": "Pending", "CANCELLED": "Canceled"}},
+                   "CREATING": "Pending", "CANCELLED": "Canceled", "CANCELED": "Canceled"}},
     {"target": "ContractCommitmentPaymentModel", "const": "No Upfront"},
     {"target": "ContractCommitmentPaymentInterval", "const": "Monthly"},
     {"target": "ContractCommitmentBenefitCategory", "const": "Discount"},

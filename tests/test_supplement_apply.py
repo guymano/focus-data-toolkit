@@ -239,3 +239,22 @@ def test_without_supplements_strict_behavior_is_unchanged(source):
     result = convert_to_focus_1_4(source, mode=Mode.STRICT)
     assert result.coverage == ("Cost and Usage",)
     assert "supplements" not in result.manifest
+
+
+def test_partial_provider_override_preserves_base_value(tmp_path, source, cc_source):
+    # A contract_commitment supplement overriding ServiceProviderName for only ONE
+    # commitment must not blank the others' factual base provider-context value.
+    cc_rows = _cc_supplement_rows(cc_source)
+    cc_rows[0]["ServiceProviderName"] = "Reseller Inc."
+    for r in cc_rows[1:]:
+        r["ServiceProviderName"] = ""  # uncovered rows
+    bundle = SupplementBundle.load(
+        [SupplementFileSpec(path=write_csv(tmp_path / "cc.csv", cc_rows))]
+    )
+    result = convert_to_focus_1_4(source, cc_source, mode=Mode.STRICT, supplements=bundle)
+    out = {r["ContractCommitmentId"]: r for r in result.datasets["Contract Commitment"]}
+    overridden = out[cc_source[0]["ContractCommitmentId"]]
+    assert overridden["ServiceProviderName"] == "Reseller Inc."
+    # Every other row keeps a non-empty (base provider-context) ServiceProviderName.
+    assert all(r["ServiceProviderName"] for r in result.datasets["Contract Commitment"])
+    assert result.manifest["datasets"]["Contract Commitment"]["status"] == "PRODUCED"

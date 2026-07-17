@@ -8,6 +8,7 @@ is a hard, explained error — never a guess. CSV inputs go through :class:`CsvR
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
@@ -22,6 +23,7 @@ from focus_data_toolkit.supplement.spec import SupplementError, SupplementFileSp
 JoinKey = tuple[str, ...]
 
 _SAMPLE_CAP = 25
+_GZIP_MAGIC = b"\x1f\x8b"
 
 
 def _sha256(path: Path) -> str:
@@ -52,15 +54,52 @@ def _flatten(obj: Mapping[str, object], prefix: str = "") -> dict[str, str]:
     return out
 
 
+def _is_json_path(path: Path) -> bool:
+    """A .json or .json.gz supplement (the compound suffix matters — Path.suffix is only .gz)."""
+    lower = path.name.lower()
+    return lower.endswith(".json") or lower.endswith(".json.gz")
+
+
+def _read_bytes(path: Path) -> bytes:
+    """Read a file, transparently gunzipping a gzip-magic (or .gz) payload."""
+    raw = path.read_bytes()
+    if raw[:2] == _GZIP_MAGIC or path.name.lower().endswith(".gz"):
+        return gzip.decompress(raw)
+    return raw
+
+
+def _unwrap_json_records(data: object, path: Path) -> list[dict]:
+    """Return the list of record objects from a JSON supplement.
+
+    Accepts a bare array, or a provider API envelope — a single object whose only
+    array-valued property holds the records (e.g. AWS ``{"invoiceSummaries": [...],
+    "nextToken": ...}`` or ``{"savingsPlans": [...]}``). An object with several array
+    properties is ambiguous and rejected rather than guessed.
+    """
+    if isinstance(data, list):
+        records = data
+    elif isinstance(data, dict):
+        array_keys = [k for k, v in data.items() if isinstance(v, list)]
+        if len(array_keys) != 1:
+            raise SupplementError(
+                f"{path}: JSON object supplement must wrap exactly one array of records "
+                f"(found array properties: {', '.join(array_keys) or 'none'})"
+            )
+        records = data[array_keys[0]]
+    else:
+        raise SupplementError(f"{path}: JSON supplement must be an array or an envelope object")
+    if not all(isinstance(r, dict) for r in records):
+        raise SupplementError(f"{path}: JSON supplement records must be objects")
+    return records
+
+
 def _read_rows(path: Path) -> tuple[tuple[str, ...], list[dict[str, str]]]:
-    if path.suffix.lower() == ".json":
+    if _is_json_path(path):
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
+            data = json.loads(_read_bytes(path).decode("utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
             raise SupplementError(f"{path}: invalid JSON: {exc}") from exc
-        if not isinstance(data, list) or not all(isinstance(r, dict) for r in data):
-            raise SupplementError(f"{path}: JSON supplement must be a list of objects")
-        rows = [_flatten(r) for r in data]
+        rows = [_flatten(r) for r in _unwrap_json_records(data, path)]
         header: dict[str, None] = {}
         for row in rows:
             for key in row:
@@ -110,6 +149,9 @@ class SupplementTable:
     duplicate_keys: tuple[JoinKey, ...] = ()
     # Set when a provider-native adapter translated this file ("<adapter>@<version>").
     adapter: str | None = None
+    # Per fact column -> its full ENRICHED attribution label. Populated at load; a merged
+    # table (several files, one kind) attributes each column to its originating file.
+    column_source: dict[str, str] = field(default_factory=dict)
 
     def lookup(self, key: JoinKey) -> Mapping[str, str] | None:
         return self.rows.get(key)
@@ -122,6 +164,12 @@ class SupplementTable:
     def source_tag(self) -> str:
         """The provenance tag for ENRICHED values from this table."""
         return self.adapter if self.adapter is not None else self.kind.name
+
+    def source_for(self, column: str) -> str:
+        """The ENRICHED attribution for ``column`` (its originating file/adapter)."""
+        return self.column_source.get(
+            column, f"supplement:{self.source_tag}:{self.path.name}"
+        )
 
     def manifest_entry(self) -> dict:
         entry: dict = {
@@ -218,6 +266,11 @@ def _load_table(spec: SupplementFileSpec) -> SupplementTable:
     raw_rows = rows_source
 
     fact_columns = tuple(sorted(set(header) & kind.columns))
+    if not fact_columns:
+        raise SupplementError(
+            f"{path}: supplement of kind {kind.name!r} carries none of its fact columns "
+            "(join keys only) — it would apply no facts. Add at least one fact column."
+        )
     unknown = tuple(
         sorted(
             c
@@ -233,6 +286,7 @@ def _load_table(spec: SupplementFileSpec) -> SupplementTable:
             duplicates.append(key)
             continue
         rows[key] = {c: (raw.get(c) or "").strip() for c in fact_columns}
+    source_label = f"supplement:{adapter_tag or kind.name}:{path.name}"
     return SupplementTable(
         kind=kind,
         path=path,
@@ -245,28 +299,67 @@ def _load_table(spec: SupplementFileSpec) -> SupplementTable:
         rows=rows,
         duplicate_keys=tuple(duplicates),
         adapter=adapter_tag,
+        column_source={c: source_label for c in fact_columns},
+    )
+
+
+def _merge_tables(a: SupplementTable, b: SupplementTable) -> SupplementTable:
+    """Merge two supplement files of the same kind into one join-indexed table.
+
+    Disjoint fact columns combine (the headline use: a provider-native adapter export plus
+    a hand-authored file supplying the facts the adapter leaves out). The same fact column
+    supplied for the same key by both files must agree; a genuine value conflict is a hard,
+    explained error rather than a silent last-writer-wins.
+    """
+    fact_columns = tuple(sorted(set(a.fact_columns) | set(b.fact_columns)))
+    rows: dict[JoinKey, dict[str, str]] = {k: dict(v) for k, v in a.rows.items()}
+    for key, facts in b.rows.items():
+        dst = rows.setdefault(key, {})
+        for col, val in facts.items():
+            existing = dst.get(col, "")
+            if existing and val and existing != val:
+                raise SupplementError(
+                    f"conflicting supplement value for {col} at join key "
+                    f"{'|'.join(key)}: {a.path.name} has {existing!r}, {b.path.name} has {val!r}"
+                )
+            if val or col not in dst:
+                dst[col] = val
+    column_source = {**a.column_source, **b.column_source}
+    return SupplementTable(
+        kind=a.kind,
+        path=a.path,  # placeholder; per-file provenance is kept in the bundle's file list
+        sha256=a.sha256,
+        row_count=a.row_count + b.row_count,
+        fact_columns=fact_columns,
+        unknown_columns=tuple(sorted(set(a.unknown_columns) | set(b.unknown_columns))),
+        provenance=a.provenance,
+        as_of=a.as_of,
+        rows=rows,
+        duplicate_keys=tuple(set(a.duplicate_keys) | set(b.duplicate_keys)),
+        adapter=a.adapter,
+        column_source=column_source,
     )
 
 
 @dataclass
 class SupplementBundle:
-    """All loaded supplement tables, one per kind."""
+    """Loaded supplement tables (one merged table per kind) plus the per-file record."""
 
     tables: dict[str, SupplementTable] = field(default_factory=dict)
+    files: list[SupplementTable] = field(default_factory=list)
 
     @classmethod
     def load(cls, specs: Sequence[SupplementFileSpec]) -> SupplementBundle:
+        files: list[SupplementTable] = []
         tables: dict[str, SupplementTable] = {}
         for spec in specs:
             table = _load_table(spec)
-            if table.kind.name in tables:
-                raise SupplementError(
-                    f"multiple supplement files of kind {table.kind.name!r} "
-                    f"({tables[table.kind.name].path.name}, {table.path.name}); "
-                    "merge them into one file per kind"
-                )
-            tables[table.kind.name] = table
-        return cls(tables=tables)
+            files.append(table)
+            existing = tables.get(table.kind.name)
+            # Several files may target the same kind (e.g. a provider-native export plus a
+            # hand-authored file for the facts the adapter leaves out): merge them.
+            tables[table.kind.name] = _merge_tables(existing, table) if existing else table
+        return cls(tables=tables, files=files)
 
     def get(self, kind_name: str) -> SupplementTable | None:
         return self.tables.get(kind_name)
@@ -275,13 +368,14 @@ class SupplementBundle:
         return bool(self.tables)
 
     def manifest_entries(self) -> list[dict]:
-        return [self.tables[name].manifest_entry() for name in sorted(self.tables)]
+        # One entry per input file, so each keeps its own sha256 / adapter / provenance.
+        return [t.manifest_entry() for t in self.files]
 
     def structural_diagnostics(self) -> list[Diagnostic]:
-        """Per-table structural findings (duplicates, unknown columns)."""
+        """Per-file structural findings (duplicates, unknown columns)."""
         out: list[Diagnostic] = []
-        for name in sorted(self.tables):
-            table = self.tables[name]
+        for table in self.files:
+            name = table.kind.name
             if table.duplicate_keys:
                 sample = ["|".join(k) for k in table.duplicate_keys[:_SAMPLE_CAP]]
                 out.append(
