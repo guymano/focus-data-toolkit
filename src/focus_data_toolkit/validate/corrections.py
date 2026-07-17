@@ -10,13 +10,17 @@ arrive with the Phase B generators.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from focus_data_toolkit.errors import Diagnostic, Severity
 
 Rows = Sequence[Mapping[str, str]]
+#: Inputs are consumed in forward passes only, so any (re-)iterable of rows works.
+RowStream = Iterable[Mapping[str, str]]
+#: Factory for per-key lookup state (``dict`` by default; a spillable map for streaming).
+IndexFactory = Callable[[], MutableMapping[str, str]]
 
 _PERCENTAGE_COLUMNS = (
     "ContractCommitmentDiscountPercentage",
@@ -39,7 +43,7 @@ def _parse_dt(value: str) -> datetime | None:
     return parsed if parsed.tzinfo is not None else None
 
 
-def check_contract_commitment_periods(contract_commitment: Rows) -> list[Diagnostic]:
+def check_contract_commitment_periods(contract_commitment: RowStream) -> list[Diagnostic]:
     """Each commitment/contract period must start strictly before it ends."""
     out: list[Diagnostic] = []
     for i, row in enumerate(contract_commitment, start=1):
@@ -64,7 +68,7 @@ def check_contract_commitment_periods(contract_commitment: Rows) -> list[Diagnos
     return out
 
 
-def check_contract_commitment_percentages(contract_commitment: Rows) -> list[Diagnostic]:
+def check_contract_commitment_percentages(contract_commitment: RowStream) -> list[Diagnostic]:
     """Percentage columns must be within [0, 1]."""
     out: list[Diagnostic] = []
     for i, row in enumerate(contract_commitment, start=1):
@@ -107,13 +111,15 @@ def _dec(value: str | None) -> Decimal | None:
     return parsed if parsed.is_finite() else None
 
 
-def check_no_duplicate_charge_keys(cost_and_usage: Rows) -> list[Diagnostic]:
+def check_no_duplicate_charge_keys(
+    cost_and_usage: RowStream, *, index_factory: IndexFactory = dict
+) -> list[Diagnostic]:
     """``x_ChargeKey`` must be unique: reusing one silently overwrites an auditable line.
 
     Corrections are appended as *new* keyed rows (``x_ChargeKey`` + ``x_CorrectionOf``), so a
     repeated key means an original (or a prior correction) was overwritten rather than amended.
     """
-    seen: dict[str, int] = {}
+    seen = index_factory()
     out: list[Diagnostic] = []
     for i, row in enumerate(cost_and_usage, start=1):
         key = (row.get("x_ChargeKey") or "").strip()
@@ -135,12 +141,15 @@ def check_no_duplicate_charge_keys(cost_and_usage: Rows) -> list[Diagnostic]:
                 )
             )
         else:
-            seen[key] = i
+            seen[key] = str(i)
     return out
 
 
 def check_correction_net_sums(
-    cost_and_usage: Rows, *, tolerance: Decimal = Decimal("0.01")
+    cost_and_usage: RowStream,
+    *,
+    tolerance: Decimal = Decimal("0.01"),
+    index_factory: IndexFactory = dict,
 ) -> list[Diagnostic]:
     """The net of a correction set must equal the declared ``x_NetCharge``.
 
@@ -151,17 +160,18 @@ def check_correction_net_sums(
     money is silently created or lost. Sets whose original is absent are handled by
     :func:`check_correction_references`; this check only reconciles what is present.
     """
-    originals: dict[str, Decimal] = {}
+    # Decimals are stored as exact strings so the lookup state can live in a spillable map.
+    originals = index_factory()
     for row in cost_and_usage:
         if _is_correction(row):
             continue
         key = (row.get("x_ChargeKey") or "").strip()
         cost = _dec(row.get("BilledCost"))
         if key and cost is not None:
-            originals[key] = cost
+            originals[key] = str(cost)
 
     # Accumulate corrections per original in row order (running net is order-sensitive).
-    running: dict[str, Decimal] = {}
+    running = index_factory()
     out: list[Diagnostic] = []
     for i, row in enumerate(cost_and_usage, start=1):
         if not _is_correction(row):
@@ -172,41 +182,45 @@ def check_correction_net_sums(
         delta = _dec(row.get("BilledCost"))
         if delta is None:
             continue
-        running[ref] = running.get(ref, originals[ref]) + delta
+        base = running.get(ref) or originals[ref]
+        net = Decimal(base) + delta
+        running[ref] = str(net)
         declared = _dec(row.get("x_NetCharge"))
         if declared is None:
             continue
-        if abs(running[ref] - declared) > tolerance:
+        if abs(net - declared) > tolerance:
             out.append(
                 Diagnostic(
                     code="FDT-CORR-002",
                     severity=Severity.ERROR,
-                    message=f"correction set for {ref!r} nets to {running[ref]} but x_NetCharge "
+                    message=f"correction set for {ref!r} nets to {net} but x_NetCharge "
                     f"declares {declared}",
                     datasets=("Cost and Usage",),
                     dataset="Cost and Usage",
                     line_number=i,
                     column="x_NetCharge",
                     expected=str(declared),
-                    actual=str(running[ref]),
+                    actual=str(net),
                     record_keys={"x_CorrectionOf": ref},
                 )
             )
     return out
 
 
-def check_correction_references(cost_and_usage: Rows) -> list[Diagnostic]:
+def check_correction_references(
+    cost_and_usage: RowStream, *, index_factory: IndexFactory = dict
+) -> list[Diagnostic]:
     """A correction line's ``x_CorrectionOf`` must point at a still-present *original* charge.
 
     The lookup is built only from non-correction originals, and a correction that references
     its own key is rejected — otherwise a correction with ``x_ChargeKey == x_CorrectionOf`` and
     no surviving original would pass, defeating the auditability guarantee.
     """
-    original_keys = {
-        (r.get("x_ChargeKey") or "").strip()
-        for r in cost_and_usage
-        if not _is_correction(r) and (r.get("x_ChargeKey") or "").strip()
-    }
+    original_keys = index_factory()
+    for r in cost_and_usage:
+        key = (r.get("x_ChargeKey") or "").strip()
+        if key and not _is_correction(r):
+            original_keys[key] = ""
     out: list[Diagnostic] = []
     for i, row in enumerate(cost_and_usage, start=1):
         ref = (row.get("x_CorrectionOf") or "").strip()

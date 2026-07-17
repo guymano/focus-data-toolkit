@@ -198,6 +198,10 @@ def _stringify(dataset: str, column: str, value) -> str:
     """Render a typed Arrow value back to the toolkit's canonical string form."""
     if value is None:
         return ""
+    if isinstance(value, str):
+        # Already textual (e.g. a client export storing every column as strings): pass it
+        # through untouched — downstream validation judges the format, not the reader.
+        return value
     data_type = column_spec(dataset, column)["data_type"]
     if data_type == "Date/Time":
         dt = value if value.tzinfo else value.replace(tzinfo=UTC)

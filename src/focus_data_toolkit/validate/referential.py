@@ -3,16 +3,32 @@
 These checks operate on a *bundle* of datasets (dataset name -> rows) and never live inside
 the per-dataset linter — they are inherently cross-dataset. Every finding is a structured
 :class:`~focus_data_toolkit.errors.Diagnostic` carrying the offending record's business key.
+
+Every check consumes each input in a single forward pass and keeps only per-key lookup
+state; ``index_factory`` lets the caller back that state with a disk-spilling map
+(:class:`~focus_data_toolkit.storage.spill.SpillableMap`) so validating datasets far larger
+than RAM stays memory-bounded.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import json
+from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
 
 from focus_data_toolkit.convert.contract_applied import ContractAppliedError, parse
 from focus_data_toolkit.errors import Diagnostic, Severity
 
 Rows = Sequence[Mapping[str, str]]
+#: Every dataset side of a cross-dataset check is consumed in a single forward pass, so it
+#: accepts any iterable of rows (e.g. a staged-file stream) — bounded memory.
+RowStream = Iterable[Mapping[str, str]]
+#: Factory for the per-key lookup state (``dict`` by default; a spillable map for streaming).
+IndexFactory = Callable[[], MutableMapping[str, str]]
+
+
+def _composite(*parts: str) -> str:
+    """Unambiguous single-string key for a tuple of values (JSON array encoding)."""
+    return json.dumps(parts, separators=(",", ":"))
 
 
 def _cu_keys(row: Mapping[str, str]) -> dict[str, str]:
@@ -25,9 +41,11 @@ def _cu_keys(row: Mapping[str, str]) -> dict[str, str]:
     return keys
 
 
-def check_unique_invoice_detail_ids(invoice_detail: Rows) -> list[Diagnostic]:
+def check_unique_invoice_detail_ids(
+    invoice_detail: RowStream, *, index_factory: IndexFactory = dict
+) -> list[Diagnostic]:
     """InvoiceDetailId must be unique within Invoice Detail."""
-    seen: dict[str, int] = {}
+    seen = index_factory()
     out: list[Diagnostic] = []
     for i, row in enumerate(invoice_detail, start=1):
         detail_id = (row.get("InvoiceDetailId") or "").strip()
@@ -49,13 +67,15 @@ def check_unique_invoice_detail_ids(invoice_detail: Rows) -> list[Diagnostic]:
                 )
             )
         else:
-            seen[detail_id] = i
+            seen[detail_id] = str(i)
     return out
 
 
-def check_unique_contract_commitment_ids(contract_commitment: Rows) -> list[Diagnostic]:
+def check_unique_contract_commitment_ids(
+    contract_commitment: RowStream, *, index_factory: IndexFactory = dict
+) -> list[Diagnostic]:
     """ContractCommitmentId must be unique (ContractApplied resolves commitments by this id)."""
-    seen: dict[str, int] = {}
+    seen = index_factory()
     out: list[Diagnostic] = []
     for i, row in enumerate(contract_commitment, start=1):
         commitment_id = (row.get("ContractCommitmentId") or "").strip()
@@ -77,16 +97,22 @@ def check_unique_contract_commitment_ids(contract_commitment: Rows) -> list[Diag
                 )
             )
         else:
-            seen[commitment_id] = i
+            seen[commitment_id] = str(i)
     return out
 
 
 def check_cost_and_usage_invoice_detail_fk(
-    cost_and_usage: Rows, invoice_detail: Rows
+    cost_and_usage: RowStream,
+    invoice_detail: RowStream,
+    *,
+    index_factory: IndexFactory = dict,
 ) -> list[Diagnostic]:
     """Every non-empty Cost and Usage InvoiceDetailId must exist in Invoice Detail."""
-    known = {(r.get("InvoiceDetailId") or "").strip() for r in invoice_detail}
-    known.discard("")
+    known = index_factory()
+    for r in invoice_detail:
+        detail_id = (r.get("InvoiceDetailId") or "").strip()
+        if detail_id:
+            known[detail_id] = ""
     out: list[Diagnostic] = []
     for i, row in enumerate(cost_and_usage, start=1):
         ref = (row.get("InvoiceDetailId") or "").strip()
@@ -123,11 +149,17 @@ def _commitment_ids(cost_and_usage_row: Mapping[str, str]) -> list[str]:
 
 
 def check_contract_applied_fk(
-    cost_and_usage: Rows, contract_commitment: Rows
+    cost_and_usage: RowStream,
+    contract_commitment: RowStream,
+    *,
+    index_factory: IndexFactory = dict,
 ) -> list[Diagnostic]:
     """Every ContractCommitmentId referenced from ContractApplied must exist."""
-    known = {(r.get("ContractCommitmentId") or "").strip() for r in contract_commitment}
-    known.discard("")
+    known = index_factory()
+    for r in contract_commitment:
+        commitment_id = (r.get("ContractCommitmentId") or "").strip()
+        if commitment_id:
+            known[commitment_id] = ""
     out: list[Diagnostic] = []
     for i, row in enumerate(cost_and_usage, start=1):
         for commitment_id in _commitment_ids(row):
@@ -151,18 +183,22 @@ def check_contract_applied_fk(
 
 
 def check_billing_period_coverage(
-    cost_and_usage: Rows, billing_period: Rows
+    cost_and_usage: RowStream,
+    billing_period: RowStream,
+    *,
+    index_factory: IndexFactory = dict,
 ) -> list[Diagnostic]:
     """Every (period, issuer) seen in Cost and Usage must have a Billing Period row."""
-    known = {
-        (
-            (r.get("BillingPeriodStart") or "").strip(),
-            (r.get("BillingPeriodEnd") or "").strip(),
-            (r.get("InvoiceIssuerName") or "").strip(),
-        )
-        for r in billing_period
-    }
-    reported: set[tuple[str, str, str]] = set()
+    known = index_factory()
+    for r in billing_period:
+        known[
+            _composite(
+                (r.get("BillingPeriodStart") or "").strip(),
+                (r.get("BillingPeriodEnd") or "").strip(),
+                (r.get("InvoiceIssuerName") or "").strip(),
+            )
+        ] = ""
+    reported = index_factory()
     out: list[Diagnostic] = []
     for i, row in enumerate(cost_and_usage, start=1):
         key = (
@@ -170,9 +206,10 @@ def check_billing_period_coverage(
             (row.get("BillingPeriodEnd") or "").strip(),
             (row.get("InvoiceIssuerName") or "").strip(),
         )
-        if not key[0] or key in known or key in reported:
+        composite = _composite(*key)
+        if not key[0] or composite in known or composite in reported:
             continue
-        reported.add(key)
+        reported[composite] = ""
         out.append(
             Diagnostic(
                 code="FDT-CROSS-040",
@@ -206,23 +243,32 @@ _CONSISTENCY_COLUMNS = {
 
 
 def check_cost_and_usage_invoice_detail_consistency(
-    cost_and_usage: Rows, invoice_detail: Rows
+    cost_and_usage: RowStream,
+    invoice_detail: RowStream,
+    *,
+    index_factory: IndexFactory = dict,
 ) -> list[Diagnostic]:
     """A Cost and Usage row's invoice/category/issuer/account/currency/period must match its
     Invoice Detail line (so a row cannot be attached to the wrong invoice line)."""
-    index = {
-        (r.get("InvoiceDetailId") or "").strip(): r
-        for r in invoice_detail
-        if (r.get("InvoiceDetailId") or "").strip()
-    }
+    # Only the compared columns are indexed (id -> JSON array of their stripped values), so
+    # the lookup stays small per line and spills cleanly through a string map.
+    index = index_factory()
+    for r in invoice_detail:
+        detail_id = (r.get("InvoiceDetailId") or "").strip()
+        if detail_id:
+            index[detail_id] = _composite(
+                *((r.get(c) or "").strip() for c in _CONSISTENCY_COLUMNS)
+            )
     out: list[Diagnostic] = []
     for i, row in enumerate(cost_and_usage, start=1):
         ref = (row.get("InvoiceDetailId") or "").strip()
-        detail = index.get(ref)
-        if detail is None:
+        packed = index.get(ref) if ref else None
+        if packed is None:
             continue  # missing FK already reported elsewhere
-        for column, code in _CONSISTENCY_COLUMNS.items():
-            expected = (detail.get(column) or "").strip()
+        expected_values = json.loads(packed)
+        for (column, code), expected in zip(
+            _CONSISTENCY_COLUMNS.items(), expected_values, strict=True
+        ):
             actual = (row.get(column) or "").strip()
             if expected != actual:
                 out.append(

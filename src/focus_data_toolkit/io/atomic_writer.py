@@ -6,6 +6,14 @@ written last. Publication is a single directory rename; on any error the tempora
 is removed and the destination is left untouched. This prevents partial files, a stale mix of
 old and new results, or an inconsistent manifest after a crash.
 
+A **replace** (``on_exists=replace``) needs two renames (old aside, new in), so that swap is
+**journaled**: a durable ``.replace-journal-<run_id>.json`` in the parent directory records
+the (target, tmp, trash) names before the first rename and is removed after the swap
+concludes. If the process dies inside the window, the next :class:`AtomicOutputDir` for the
+same destination — or an explicit ``fdt clean`` — reads the journal and finishes the job:
+roll the fully-staged new result forward, or roll the old result back, never leaving the
+destination missing. Recovery actions are surfaced as :class:`RuntimeWarning`s.
+
 The temporary directory name carries a run id, and an operational ``_run.json`` sidecar
 carries the run id / timestamp / file checksums — kept out of the deterministic business
 manifest so dataset bytes stay reproducible while operational metadata is still recorded.
@@ -14,12 +22,18 @@ manifest so dataset bytes stay reproducible while operational metadata is still 
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import uuid
+import warnings
 from collections.abc import Callable, Iterable
 from enum import StrEnum
 from pathlib import Path
+
+_JOURNAL_PREFIX = ".replace-journal-"
+_TMP_PREFIX = ".output.tmp-"
+_TRASH_PREFIX = ".trash-"
 
 
 class OnExists(StrEnum):
@@ -68,6 +82,139 @@ def _fsync_dir(path: Path) -> None:
         os.close(fd)
 
 
+def _is_plain_name(name: object) -> bool:
+    """A single path component: non-empty, no separators/drive, no traversal, not absolute."""
+    if not isinstance(name, str) or not name or name in (".", ".."):
+        return False
+    if any(sep in name for sep in ("/", "\\", ":", "\x00")):
+        return False
+    return Path(name).name == name and not Path(name).is_absolute()
+
+
+def _read_journal(journal: Path) -> dict | None:
+    """Load a replace journal; None when unreadable/invalid (left for ``fdt clean``).
+
+    Every recorded name must be a plain sibling basename with the writer's own prefixes —
+    a crafted or corrupted journal (absolute paths, ``..``, foreign names) must never steer
+    recovery renames/removals outside the output parent, so it is rejected here before any
+    filesystem operation and later removed as stale by :func:`clean_leftovers`.
+    """
+    try:
+        info = json.loads(journal.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not (isinstance(info, dict) and {"target", "tmp", "trash"} <= set(info)):
+        return None
+    target, tmp, trash = info["target"], info["tmp"], info["trash"]
+    if not all(_is_plain_name(name) for name in (target, tmp, trash)):
+        return None
+    if not (tmp.startswith(_TMP_PREFIX) and trash.startswith(_TRASH_PREFIX)):
+        return None
+    if target.startswith((_TMP_PREFIX, _TRASH_PREFIX, _JOURNAL_PREFIX)):
+        return None  # a destination is never one of the writer's own scratch names
+    return info
+
+
+def recover_interrupted_replaces(
+    parent: str | os.PathLike[str], *, dest_name: str | None = None
+) -> list[str]:
+    """Finish (or safely undo) journaled replace swaps that a crash left half-done.
+
+    Scans ``parent`` for ``.replace-journal-*`` files — one exists only inside a replace
+    swap — and resolves each unambiguous state:
+
+    * destination missing, staged tmp present → **roll forward** (the tmp was fully written,
+      validated and fsync'd before the journal was created), then drop the old ``.trash-*``;
+    * destination missing, only ``.trash-*`` present → **roll back** the old result;
+    * destination present → the swap concluded (or never started): drop the leftover
+      ``.trash-*`` and, if the run died before its first rename, the never-published tmp.
+
+    ``dest_name`` restricts recovery to journals targeting that destination (what
+    :class:`AtomicOutputDir` uses on entry). Returns a description of every action taken.
+    """
+    parent = Path(parent)
+    actions: list[str] = []
+    for journal in sorted(parent.glob(f"{_JOURNAL_PREFIX}*.json")):
+        info = _read_journal(journal)
+        if info is None or (dest_name is not None and info["target"] != dest_name):
+            continue
+        target = parent / info["target"]
+        tmp = parent / info["tmp"]
+        trash = parent / info["trash"]
+        if not target.exists() and tmp.exists():
+            os.replace(tmp, target)
+            actions.append(
+                f"rolled forward interrupted replace of {target}: published the fully "
+                f"staged result from {tmp.name}"
+            )
+            if trash.exists():
+                shutil.rmtree(trash, ignore_errors=True)
+                actions.append(f"removed superseded previous result {trash.name}")
+        elif not target.exists() and trash.exists():
+            os.replace(trash, target)
+            actions.append(
+                f"rolled back interrupted replace of {target}: restored the previous "
+                f"result from {trash.name}"
+            )
+        else:
+            if trash.exists():
+                shutil.rmtree(trash, ignore_errors=True)
+                actions.append(f"removed leftover previous result {trash.name}")
+            if tmp.exists():
+                shutil.rmtree(tmp, ignore_errors=True)
+                actions.append(
+                    f"removed staged result {tmp.name} of a replace that never started "
+                    f"(destination {target.name} is intact); re-run the conversion"
+                )
+        journal.unlink(missing_ok=True)
+        _fsync_dir(parent)
+    return actions
+
+
+def _remove_orphans(directory: Path) -> list[str]:
+    """Remove leftover staging/trash directories and stale journals inside ``directory``.
+
+    Runs after :func:`recover_interrupted_replaces`, so any journal still present is
+    unreadable or invalid — removed as stale, never acted upon.
+    """
+    actions: list[str] = []
+    for leftover in sorted(directory.iterdir()):
+        if leftover.name.startswith((_TMP_PREFIX, _TRASH_PREFIX)) and leftover.is_dir():
+            shutil.rmtree(leftover, ignore_errors=True)
+            kind = "unpublished staging" if leftover.name.startswith(_TMP_PREFIX) else "trash"
+            actions.append(f"removed orphan {kind} directory {leftover.name}")
+        elif leftover.name.startswith(_JOURNAL_PREFIX) and leftover.is_file():
+            leftover.unlink(missing_ok=True)
+            actions.append(f"removed stale replace journal {leftover.name}")
+    if actions:
+        _fsync_dir(directory)
+    return actions
+
+
+def clean_leftovers(directory: str | os.PathLike[str]) -> list[str]:
+    """Recover journaled replaces, then remove orphan staging/trash leftovers (``fdt clean``).
+
+    ``AtomicOutputDir`` stages ``.output.tmp-*`` / ``.trash-*`` / journals in the
+    **destination's parent**, so when ``directory`` is an output directory its leftovers are
+    siblings: both ``directory`` itself (as a container of outputs) and its parent are
+    swept. Journaled replaces are recovered first (any destination — this is explicit
+    maintenance), then orphans (staging from runs that died before publishing, trash from
+    concluded swaps, unreadable journals) are removed. Only call this when no conversion is
+    currently publishing here — a live run's staging directory is indistinguishable from a
+    dead one's.
+    """
+    directory = Path(directory)
+    actions: list[str] = []
+    parent = directory.parent
+    if parent != directory and parent.is_dir():
+        actions.extend(recover_interrupted_replaces(parent))
+        actions.extend(_remove_orphans(parent))
+    if directory.is_dir():
+        actions.extend(recover_interrupted_replaces(directory))
+        actions.extend(_remove_orphans(directory))
+    return actions
+
+
 def sha256_file(path: Path) -> str:
     """Stream ``path`` through SHA-256 (bounded memory) and return the hex digest."""
     digest = hashlib.sha256()
@@ -108,6 +255,12 @@ class AtomicOutputDir:
 
     # -- context management ----------------------------------------------------
     def __enter__(self) -> AtomicOutputDir:
+        # A previous run may have died mid-swap: finish its journaled replace first, so the
+        # destination is in a consistent state before this run's policy is applied.
+        if self._parent.is_dir():
+            for action in recover_interrupted_replaces(self._parent, dest_name=self.dest.name):
+                warnings.warn(f"recovered interrupted publish: {action}", RuntimeWarning,
+                              stacklevel=2)
         if self.on_exists is OnExists.REFUSE and self.dest.exists():
             raise DestinationExistsError(
                 f"destination {self.dest} already exists (on_exists=refuse)"
@@ -237,8 +390,26 @@ class AtomicOutputDir:
             raise DestinationExistsError(
                 f"destination {target} appeared during staging (on_exists=refuse)"
             )
+        if self.on_exists is OnExists.VERSION:  # pragma: no cover - run-id collision
+            raise AtomicWriteError(
+                f"versioned destination {target} already exists (run-id collision); retry"
+            )
         # target exists -> swap: move it aside, move the new one in, then delete the old.
-        trash = self._parent / f".trash-{self.run_id}"
+        # The two renames are journaled so a crash inside the window is recoverable (the
+        # journal is written and fsync'd durably *before* the destination is touched).
+        trash = self._parent / f"{_TRASH_PREFIX}{self.run_id}"
+        journal = self._parent / f"{_JOURNAL_PREFIX}{self.run_id}.json"
+        record = {
+            "run_id": self.run_id,
+            "target": target.name,
+            "tmp": self._tmp.name,
+            "trash": trash.name,
+        }
+        with open(journal, "wb") as handle:
+            handle.write(json.dumps(record, sort_keys=True).encode("utf-8"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        _fsync_dir(self._parent)
         os.replace(target, trash)
         try:
             os.replace(self._tmp, target)
@@ -247,6 +418,7 @@ class AtomicOutputDir:
             raise
         finally:
             shutil.rmtree(trash, ignore_errors=True)
+            journal.unlink(missing_ok=True)
         _fsync_dir(target.parent)
 
 
@@ -282,6 +454,8 @@ __all__ = [
     "AtomicWriteError",
     "DestinationExistsError",
     "OnExists",
+    "clean_leftovers",
+    "recover_interrupted_replaces",
     "sha256_file",
     "sha256sums_text",
     "write_files_atomically",

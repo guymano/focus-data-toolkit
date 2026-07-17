@@ -137,9 +137,17 @@ For consolidated, multi-provider, multi-issuer, multi-currency exports:
 - **Cross-dataset validation** (`validate_dataset_bundle`) checks referential integrity,
   currency/period/issuer coherence, invoice reconciliation (with a rounding tolerance),
   Split Cost Allocation, and correction/lifecycle integrity — separately from the
-  per-dataset linter.
+  per-dataset linter. It runs as a **publication gate** on every conversion (eager and
+  streaming): an ERROR refuses to publish, the outcome is recorded in the manifest's
+  `bundle_validation` section, and `--no-validate` skips it (the skip is recorded too).
+  In the streaming path the checks re-read the staged files in bounded memory, spilling
+  per-key lookup state to a scratch SQLite database past a threshold.
 - **Atomic writes**: output appears only after validation succeeds and checksums + manifest
   are written; nothing partial is left on error. `--on-exists refuse|replace|version`.
+  A `replace` swap is **journaled**: if the process dies between its two renames, the next
+  publish to the same destination (or `focus-toolkit clean --out DIR`) reads the journal and
+  rolls the fully staged result forward — or the previous result back — so the destination
+  is never left missing. `clean` also removes orphan `.output.tmp-*` / `.trash-*` leftovers.
 
 ```python
 from focus_data_toolkit import convert_to_focus_1_4, detect_focus_schema, validate_bundle
@@ -157,6 +165,10 @@ memory stays **flat regardless of row count** — a constant ~64 MB peak process
 converting 50k or 300k rows (6× the rows, ×1.05 the memory; `tools/benchmark_streaming.py`).
 Its output is **byte-identical** to the in-memory path — both call the same pure
 per-row/per-group functions and the same manifest assembler.
+
+Sources may be **CSV (gzip ok) or Parquet** — the format is sniffed per file (magic bytes,
+extension as fallback), so `--cost-and-usage export.parquet` works everywhere a CSV does
+(`convert`, `gaps`, `supplements validate`), in both the eager and streaming paths.
 
 ```bash
 # bounded-memory streaming to CSV (recommended for large exports)
@@ -203,13 +215,15 @@ out = convert_files("huge_cost_and_usage.csv.gz", "./focus-1.4",
 ### Synthetic scenarios (SCA, corrections, billing lifecycle)
 
 Deterministic, provider-agnostic scenario builders produce self-consistent data for tests and
-demos, and typed lifecycle checks validate status transitions:
+demos, and typed lifecycle checks validate the full snapshot chains — status transitions plus
+chain structure (id/order uniqueness, `previous_instance_id` resolution, cycle detection,
+`last_updated` monotonicity, closed-instance immutability; `FDT-LIFE-001..006`):
 
 ```python
 from focus_data_toolkit.generators.scenarios import (
     split_allocation_group, correction_set, billing_lifecycle_instances,
 )
-from focus_data_toolkit import check_status_transitions, validate_bundle
+from focus_data_toolkit import check_dataset_instances, validate_bundle
 
 alloc = split_allocation_group("origin-1", "100.00", weights=[3, 2, 1])   # ratios sum to 1,
 validate_bundle({"Cost and Usage": alloc}).ok                             # costs sum to origin
@@ -217,7 +231,7 @@ validate_bundle({"Cost and Usage": alloc}).ok                             # cost
 corr = correction_set("chg-1", "100.00", ["-30.00"])   # original + signed Correction line,
 validate_bundle({"Cost and Usage": corr}).ok           # running net recorded in x_NetCharge
 
-check_status_transitions(billing_lifecycle_instances())  # [] — only allowed transitions
+check_dataset_instances(billing_lifecycle_instances())  # [] — chains + transitions all valid
 ```
 
 ### Python API
