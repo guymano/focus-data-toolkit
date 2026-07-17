@@ -75,6 +75,7 @@ def build_manifest(
     contexts: dict | None = None,
     diagnostics: list[dict] | None = None,
     capability_profile: dict | None = None,
+    supplements: list[dict] | None = None,
 ) -> dict:
     assumptions_present = any(
         entry["status"] in (PRODUCED, PRODUCED_SYNTHETIC)
@@ -101,6 +102,10 @@ def build_manifest(
         # The applicability conditions the lint actually enforced. Recorded even when
         # empty ("none-declared"), so an unevaluated condition set is never silent.
         manifest["capability_profile"] = capability_profile
+    if supplements:
+        # Client-supplied fact files (path, kind, sha256, row counts, declared
+        # provenance): the audit trail behind every ENRICHED column.
+        manifest["supplements"] = supplements
     return manifest
 
 

@@ -1,0 +1,25 @@
+{
+  "adapter": "azure-invoice",
+  "version": "1",
+  "target_kind": "invoice",
+  "provenance": {
+    "source": "Azure Billing — Invoices REST API (Invoice resource)",
+    "doc_url": "https://learn.microsoft.com/en-us/rest/api/billing/invoices/get?view=rest-billing-2024-04-01",
+    "field_names_from": "Azure Billing REST API 2024-04-01 Invoice.properties; InvoiceStatus enum Due/OverDue/Paid/Void",
+    "retrieved": "2026-07-17",
+    "notes": "Flatten the invoice JSON so 'properties.*' become dot-path columns; the invoice number is the resource 'name'. Azure InvoiceStatus is a payment status (Due/OverDue/Paid) — all issued — mapped to FOCUS InvoiceIssueStatus 'Issued', with 'Void' -> 'Voided'. Azure MCA/EA invoices are issued by Microsoft, so InvoiceIssuerName is the constant 'Microsoft'; if a client's FOCUS source uses a different issuer string the join simply does not match (orphan/coverage diagnostics make that visible — never a silent wrong value). PaymentTerms is not exposed on the invoice resource and is left for the client."
+  },
+  "detect": {
+    "all_of": ["name", "properties.status", "properties.invoiceDate"],
+    "any_of": ["properties.dueDate", "properties.invoicePeriodStartDate", "properties.billingProfileDisplayName", "properties.invoiceType"]
+  },
+  "fields": [
+    {"target": "InvoiceId", "source": "name"},
+    {"target": "InvoiceIssuerName", "const": "Microsoft"},
+    {"target": "InvoiceIssueDate", "source": "properties.invoiceDate", "transform": "date_to_utc"},
+    {"target": "PaymentDueDate", "source": "properties.dueDate", "transform": "date_to_utc"},
+    {"target": "PurchaseOrderNumber", "source": "properties.purchaseOrderNumber"},
+    {"target": "InvoiceIssueStatus", "source": "properties.status",
+     "value_map": {"Due": "Issued", "OverDue": "Issued", "Paid": "Issued", "Void": "Voided"}}
+  ]
+}

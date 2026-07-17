@@ -4,6 +4,8 @@ Subcommands:
 
 * ``generate`` — emit provider-realistic FOCUS 1.2/1.3 sample CSVs.
 * ``convert``  — convert a FOCUS 1.2/1.3 source into the four FOCUS 1.4 datasets.
+* ``gaps``     — report exactly which facts a client must supply for the four
+  FOCUS 1.4 datasets to be produced factually from a given source.
 * ``validate`` — validate a CSV against the built-in FOCUS 1.4 model, or run
   the official FinOps validator (``--official``).
 """
@@ -68,6 +70,105 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _read_header(path: str) -> tuple[str, ...]:
+    """Read only the header of a CSV file (gzip auto-detected)."""
+    from focus_data_toolkit.io.csv_io import CsvRowReader
+
+    reader = CsvRowReader(path)
+    try:
+        return reader.source_columns
+    finally:
+        reader.close()
+
+
+def _cmd_gaps(args: argparse.Namespace) -> int:
+    from focus_data_toolkit.convert import _resolve_source_version
+    from focus_data_toolkit.supplement import compute_gaps
+
+    header = _read_header(args.cost_and_usage)
+    try:
+        version, _detection = _resolve_source_version(
+            header,
+            source_version=args.source_version,
+            source_dataset=args.source_dataset,
+            mode=Mode.STRICT,
+        )
+    except ConversionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    cc_header = _read_header(args.contract_commitment) if args.contract_commitment else None
+    report = compute_gaps(header, version, cc_columns=cc_header)
+    payload = (
+        json.dumps(report.as_dict(), indent=2, sort_keys=True) + "\n"
+        if args.format == "json"
+        else report.render_text()
+    )
+    if args.out:
+        Path(args.out).write_text(payload, encoding="utf-8")
+        print(f"wrote {args.out}")
+    else:
+        print(payload, end="")
+    return 0
+
+
+def _supplement_specs(args: argparse.Namespace) -> list:
+    """Collect supplement file specs from --supplement / --supplements-dir."""
+    from focus_data_toolkit.supplement import load_bundle_dir, parse_supplement_arg
+
+    specs = [parse_supplement_arg(arg) for arg in (args.supplement or [])]
+    if getattr(args, "supplements_dir", None):
+        specs.extend(load_bundle_dir(args.supplements_dir))
+    return specs
+
+
+def _cmd_supplements_validate(args: argparse.Namespace) -> int:
+    from focus_data_toolkit.supplement import (
+        SupplementBundle,
+        SupplementError,
+        source_key_sets,
+        validate_supplements,
+    )
+    from focus_data_toolkit.supplement.validate import has_blocking_errors
+
+    try:
+        specs = _supplement_specs(args)
+        if not specs:
+            print("error: provide --supplement and/or --supplements-dir", file=sys.stderr)
+            return 2
+        bundle = SupplementBundle.load(specs)
+    except SupplementError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    cau_rows = read_csv_rows(args.cost_and_usage)
+    cc_rows = read_csv_rows(args.contract_commitment) if args.contract_commitment else None
+    diagnostics = validate_supplements(bundle, source_key_sets(cau_rows, cc_rows))
+    for diag in diagnostics:
+        print(f"{diag.severity} {diag.code}: {diag.message}")
+        for key, value in diag.context.items():
+            print(f"    {key}: {value}")
+    if has_blocking_errors(diagnostics):
+        print("supplements NOT usable: fix the ERROR diagnostics above", file=sys.stderr)
+        return 1
+    kinds = ", ".join(sorted(bundle.tables)) or "-"
+    print(f"supplements OK ({kinds}); see FDT-SUPP-010 entries for coverage")
+    return 0
+
+
+def _cmd_supplements_adapters(args: argparse.Namespace) -> int:
+    from focus_data_toolkit.supplement.adapters import load_adapters
+
+    adapters = load_adapters()
+    if not adapters:
+        print("no provider adapters available")
+        return 0
+    for name in sorted(adapters):
+        a = adapters[name]
+        print(f"{name} (v{a.version}) -> {a.target_kind}")
+        print(f"    source: {a.provenance.get('source', '?')}")
+        print(f"    doc:    {a.provenance.get('doc_url', '?')}")
+    return 0
+
+
 def _capabilities(args: argparse.Namespace) -> CapabilityProfile:
     """Build the capability profile from repeated ``--supports`` flags."""
     return CapabilityProfile(frozenset(args.supports), source="cli") if args.supports \
@@ -76,6 +177,8 @@ def _capabilities(args: argparse.Namespace) -> CapabilityProfile:
 
 def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
     """Bounded-memory streaming conversion (required for Parquet output / large inputs)."""
+    from focus_data_toolkit.supplement import SupplementError
+
     partition_by = [c.strip() for c in (args.partition_by or "").split(",") if c.strip()]
     try:
         target_file_size = _parse_size(args.target_file_size)
@@ -94,7 +197,11 @@ def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
             compression=args.compression,
             target_file_size=target_file_size,
             capabilities=_capabilities(args),
+            supplements=_load_supplements(args),
         )
+    except SupplementError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     except (ConversionError, DestinationExistsError, MalformedRecordError) as exc:
         # MalformedRecordError covers a malformed CSV record and a missing PyArrow (the clear
         # install hint) — surface both as a normal CLI error, not a traceback.
@@ -132,12 +239,22 @@ def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
     return 0
 
 
+def _load_supplements(args: argparse.Namespace):
+    """Load the supplement bundle from CLI args (None when no supplements given)."""
+    from focus_data_toolkit.supplement import SupplementBundle
+
+    specs = _supplement_specs(args)
+    return SupplementBundle.load(specs) if specs else None
+
+
 def _cmd_convert(args: argparse.Namespace) -> int:
     mode = Mode(args.mode)
     # Parquet output, explicit --stream, or partitioning go through the bounded-memory streaming
     # engine; the eager path (rich per-dataset reporting) stays the default for CSV output.
     if args.output_format == "parquet" or args.stream or args.partition_by:
         return _cmd_convert_stream(args, mode)
+
+    from focus_data_toolkit.supplement import SupplementError
 
     cau_rows = read_csv_rows(args.cost_and_usage)
     cc_rows = read_csv_rows(args.contract_commitment) if args.contract_commitment else None
@@ -150,7 +267,11 @@ def _cmd_convert(args: argparse.Namespace) -> int:
             mode=mode,
             validate=not args.no_validate,
             capabilities=_capabilities(args),
+            supplements=_load_supplements(args),
         )
+    except SupplementError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     except ConversionError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -287,6 +408,17 @@ def build_parser() -> argparse.ArgumentParser:
         f"(known: {', '.join(sorted(KNOWN_CONDITIONS))})",
     )
     conv.add_argument(
+        "--supplement",
+        action="append",
+        default=[],
+        metavar="FILE[:KIND]",
+        help="supplemental client facts (CSV/JSON, gzip ok); repeatable; ':KIND' forces "
+        "the kind; see 'fdt gaps' and docs/supplements.md",
+    )
+    conv.add_argument(
+        "--supplements-dir", help="directory containing a supplements.json bundle manifest"
+    )
+    conv.add_argument(
         "--on-exists",
         choices=[e.value for e in OnExists],
         default=OnExists.REFUSE.value,
@@ -328,6 +460,54 @@ def build_parser() -> argparse.ArgumentParser:
         "a new part file once exceeded",
     )
     conv.set_defaults(func=_cmd_convert)
+
+    gaps = sub.add_parser(
+        "gaps",
+        help="report exactly which facts a client must supply to produce the four "
+        "FOCUS 1.4 datasets factually from this source",
+    )
+    gaps.add_argument("--cost-and-usage", required=True, help="FOCUS 1.2/1.3 Cost and Usage CSV")
+    gaps.add_argument(
+        "--contract-commitment", help="optional FOCUS 1.3 Contract Commitment CSV (13 columns)"
+    )
+    gaps.add_argument(
+        "--source-version", help="force the FOCUS source version (1.2 or 1.3)"
+    )
+    gaps.add_argument(
+        "--source-dataset", help="force the source dataset instead of auto-detecting it"
+    )
+    gaps.add_argument("--format", choices=("text", "json"), default="text")
+    gaps.add_argument("--out", help="write the report to this path instead of stdout")
+    gaps.set_defaults(func=_cmd_gaps)
+
+    supp = sub.add_parser(
+        "supplements", help="work with supplemental client data (see docs/supplements.md)"
+    )
+    supp_sub = supp.add_subparsers(dest="supplements_command", required=True)
+    supp_val = supp_sub.add_parser(
+        "validate", help="pre-flight check supplement files against a source"
+    )
+    supp_val.add_argument(
+        "--cost-and-usage", required=True, help="FOCUS 1.2/1.3 Cost and Usage CSV"
+    )
+    supp_val.add_argument(
+        "--contract-commitment", help="optional FOCUS 1.3 Contract Commitment CSV"
+    )
+    supp_val.add_argument(
+        "--supplement",
+        action="append",
+        default=[],
+        metavar="FILE[:KIND]",
+        help="supplement file (CSV/JSON, gzip ok); repeatable; ':KIND' forces the kind",
+    )
+    supp_val.add_argument(
+        "--supplements-dir", help="directory containing a supplements.json bundle manifest"
+    )
+    supp_val.set_defaults(func=_cmd_supplements_validate)
+    supp_adapters = supp_sub.add_parser(
+        "adapters", help="list the provider-native export adapters (AWS/Azure/GCP)"
+    )
+    supp_adapters.set_defaults(func=_cmd_supplements_adapters)
 
     val = sub.add_parser("validate", help="validate a CSV file")
     val.add_argument("file", help="CSV file to validate")

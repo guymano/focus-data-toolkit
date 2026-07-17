@@ -9,6 +9,53 @@ policy.
 
 ## [Unreleased]
 
+### Added — provider-native supplement adapters
+
+- **Adapters** translate documented cloud-provider export formats into the
+  canonical supplement kinds automatically, so a client passes native exports
+  straight to `convert` / `supplements validate` without renaming anything.
+  First adapters (AWS): `aws-invoice-summary` (Invoicing API `InvoiceSummary`,
+  incl. nested `Entity.InvoicingEntity`, `DueDate`, `PurchaseOrderNumber`) →
+  `invoice`; `aws-savings-plans` (Savings Plans inventory: `paymentOption`,
+  `state`, `start`) → `contract_commitment`. Each adapter is a vendored,
+  versioned JSON mapping table with official-doc provenance
+  (`supplement/adapters/adapters_provenance.json`, sha256-verified); the format
+  is auto-detected from the header (force with `FILE:<adapter-name>`).
+  Translated rows flow through the unchanged supplement validation and carry
+  `ENRICHED` lineage attributed as `supplement:<adapter>@<version>:<file>`. An
+  adapter only maps fields its table describes (residual gaps are reported, not
+  guessed); an unrecognized export falls back to the generic FOCUS-named path.
+  New command: `fdt supplements adapters`. Adapters ship for **AWS**
+  (`aws-invoice-summary`, `aws-savings-plans`), **Azure** (`azure-invoice` —
+  Billing Invoices REST API; `InvoiceStatus` Due/OverDue/Paid → `Issued`,
+  Void → `Voided`) and **GCP** (`gcp-compute-commitments` — Compute Engine
+  `regionCommitments`; `status` and CUD payment facts → `contract_commitment`).
+
+### Added — supplemental client data (promise #3)
+
+- **Gap analysis** (`fdt gaps`): reports, per FOCUS 1.4 dataset, exactly which
+  columns block strict production for a given 1.2/1.3 source — computed from
+  the converter's own provenance rules and annotated from the embedded model —
+  plus ready-to-fill CSV templates per supplement kind. Missing mandatory
+  source columns are reported as source-completeness gaps.
+- **Supplement bundles**: clients supply the missing provider-issued facts as
+  sidecar files (CSV/JSON, gzip ok; kinds `billing_period`, `invoice`,
+  `invoice_line`, `contract_commitment`; kind auto-detected from the header or
+  forced with `FILE:KIND`). Supplements are validated against the source and
+  the model before any use (`FDT-SUPP-0xx`: duplicate keys, unknown columns,
+  format/allowed-value violations, orphans, `BilledCost` reconciliation
+  conflicts, per-column coverage). Pre-flight command:
+  `fdt supplements validate`.
+- **ENRICHED conversion**: `convert_to_focus_1_4(..., supplements=...)`
+  applies supplied facts with `ENRICHED` lineage and full attribution
+  (`supplement:<kind>:<file>` + sha256 in the new manifest `supplements`
+  section). At full coverage, **strict mode now produces all four FOCUS 1.4
+  datasets** with nothing invented; partial coverage keeps the dataset
+  `NOT_PRODUCED` with per-value counters showing how close it is. In strict
+  mode uncovered nullable assumed columns are emitted empty (synthetic
+  defaults never leak); real issuer-assigned `InvoiceDetailId`s replace the
+  locally generated back-links.
+
 ### Added — capability profiles
 
 - New `CapabilityProfile` (`focus_data_toolkit.model.capabilities`): an

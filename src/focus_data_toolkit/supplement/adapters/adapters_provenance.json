@@ -1,0 +1,39 @@
+{
+  "description": "Provenance of the vendored provider-native supplement adapters.",
+  "attribution": "Field names are derived from the official provider API documentation and the referenced open-source service models (botocore, Apache-2.0). Mapping tables authored for focus-data-toolkit.",
+  "retrieved": "2026-07-17",
+  "adapters": [
+    {
+      "file": "aws_invoice_summary.json",
+      "adapter": "aws-invoice-summary",
+      "target_kind": "invoice",
+      "source": "AWS Invoicing API \u2014 InvoiceSummary (ListInvoiceSummaries)",
+      "doc_url": "https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_invoicing_InvoiceSummary.html",
+      "sha256": "f69d31914694e9cfd7f9ec3be3aff273d2340a4f8368285d86c31cb6963ee0ae"
+    },
+    {
+      "file": "aws_savings_plans.json",
+      "adapter": "aws-savings-plans",
+      "target_kind": "contract_commitment",
+      "source": "AWS Savings Plans API \u2014 SavingsPlan (DescribeSavingsPlans)",
+      "doc_url": "https://docs.aws.amazon.com/savingsplans/latest/APIReference/API_SavingsPlan.html",
+      "sha256": "baf099ba17753672c52ba504d9deef978c279c4a168c8be72b05501a878df6fb"
+    },
+    {
+      "file": "azure_invoice.json",
+      "adapter": "azure-invoice",
+      "target_kind": "invoice",
+      "source": "Azure Billing \u2014 Invoices REST API (Invoice resource)",
+      "doc_url": "https://learn.microsoft.com/en-us/rest/api/billing/invoices/get?view=rest-billing-2024-04-01",
+      "sha256": "3539beba9d84cab5ae7fa8f7e2c35fb32d3c333e85a01ff887748ad6a4780e85"
+    },
+    {
+      "file": "gcp_compute_commitments.json",
+      "adapter": "gcp-compute-commitments",
+      "target_kind": "contract_commitment",
+      "source": "Google Compute Engine \u2014 regionCommitments (Commitment resource)",
+      "doc_url": "https://docs.cloud.google.com/compute/docs/reference/rest/v1/regionCommitments",
+      "sha256": "8adc15b222114ef6f90deca05aad448018b56a2a7214c4013a9e36039bb34ac3"
+    }
+  ]
+}

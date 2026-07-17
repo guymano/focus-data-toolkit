@@ -58,6 +58,10 @@ def test_wheel_contents(dists):
     assert any(
         n.endswith("model/json_schemas/json_schemas_provenance.json") for n in names
     )
+    # Vendored provider adapters (AWS invoice/savings-plans + their provenance manifest).
+    adapters = [n for n in names if "/supplement/adapters/" in n and n.endswith(".json")]
+    assert len(adapters) >= 3, "adapter mapping tables missing from wheel"
+    assert any(n.endswith("adapters/adapters_provenance.json") for n in names)
     assert any(n.endswith("cli.py") for n in names)
     # No tests, no scratch, no golden fixtures leak into the wheel.
     assert not any("/tests/" in n or n.startswith("tests/") for n in names)

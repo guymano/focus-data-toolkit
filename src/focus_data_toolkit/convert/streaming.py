@@ -65,7 +65,25 @@ from focus_data_toolkit.io.records import DatasetSchema
 from focus_data_toolkit.model import dataset_columns, load_model
 from focus_data_toolkit.model.capabilities import CapabilityProfile
 from focus_data_toolkit.modes import Mode
-from focus_data_toolkit.provenance import LineageCounters, has_assumptions, strict_blockers
+from focus_data_toolkit.provenance import (
+    ColumnRule,
+    Lineage,
+    LineageCounters,
+    has_assumptions,
+    strict_blockers,
+)
+from focus_data_toolkit.supplement.apply import (
+    apply_billing_periods,
+    apply_contract_commitments,
+    apply_invoice_details,
+    flip_enriched_rules,
+)
+from focus_data_toolkit.supplement.loader import SupplementBundle
+from focus_data_toolkit.supplement.validate import (
+    SourceKeySets,
+    coverage,
+    validate_supplements,
+)
 
 # Rows per chunk when linting a produced file (bounded memory; the linter has no cross-row
 # state, so chunked linting equals whole-file linting for the fixed model column set).
@@ -227,18 +245,23 @@ def convert_files(
     compression: str = "snappy",
     target_file_size: int | None = None,
     capabilities: CapabilityProfile | None = None,
+    supplements: SupplementBundle | None = None,
 ) -> Path:
     """Stream-convert a Cost and Usage file to the FOCUS 1.4 datasets in ``out_dir``.
 
-    The Cost and Usage file is read once; Invoice Detail / Billing Period aggregation happens
-    on disk (SQLite) so memory stays bounded. Output is published atomically (nothing appears
-    until validation passes and checksums + manifest are written). ``output_format`` is ``csv``
-    (byte-exact) or ``parquet`` (value-exact decimal128; requires the ``[parquet]`` extra).
+    The Cost and Usage file is read once (twice with ``supplements``: a cheap key-collection
+    pre-pass validates the bundle before anything is staged); Invoice Detail / Billing Period
+    aggregation happens on disk (SQLite) so memory stays bounded by the *supplement-scale*
+    cardinalities (periods, invoices, invoice lines, commitments), never by the Cost and
+    Usage row count. Output is published atomically (nothing appears until validation passes
+    and checksums + manifest are written). ``output_format`` is ``csv`` (byte-exact) or
+    ``parquet`` (value-exact decimal128; requires the ``[parquet]`` extra).
 
     Parquet only: ``partition_by`` writes the Cost and Usage dataset as a Hive-partitioned tree
     on the given low-cardinality String/Date-Time columns; ``compression`` selects the codec; and
     ``target_file_size`` (approximate uncompressed bytes) rolls each partition to a new part file.
-    Returns the published path.
+    Returns the published path. Supplement handling is shared with the eager path
+    (same ``apply_*`` functions), so both produce identical bytes.
     """
     from focus_data_toolkit import __version__
     from focus_data_toolkit.convert import _resolve_source_version
@@ -288,15 +311,62 @@ def convert_files(
 
     cc_rows = read_csv_rows(contract_commitment) if contract_commitment else None
     source_cols = set(reader.source_columns)
+    diagnostics: list[Diagnostic] = []
+
+    # Supplements: a cheap pre-pass collects the source's join keys (memory bounded by
+    # their distinct counts, i.e. supplement scale) so the bundle is fully validated
+    # before anything is staged, and the strict back-link/provenance decisions are made
+    # exactly as in the eager path.
+    supp_keys: SourceKeySets | None = None
+    linked = synthetic
+    line_table = supplements.get("invoice_line") if supplements else None
+    if supplements:
+        supp_keys = SourceKeySets()
+        pre = CsvRowReader(cost_and_usage)
+        try:
+            for record in pre:
+                supp_keys.observe_cau_row(record.values)
+        finally:
+            pre.close()
+        for cc_row in cc_rows or ():
+            supp_keys.observe_cc_row(cc_row)
+        supp_diags = validate_supplements(supplements, supp_keys)
+        diagnostics.extend(supp_diags)
+        errors = [d for d in supp_diags if d.severity is Severity.ERROR]
+        if errors:
+            reader.close()
+            raise ConversionError(
+                f"{len(errors)} supplement validation error(s); first: "
+                f"[{errors[0].code}] {errors[0].message}"
+            )
+        # Will Invoice Detail be produced? (Rules only — the same _flip_rules the apply
+        # step uses, so this matches the post-pass provenance exactly.)
+        invd_flipped = flip_enriched_rules(
+            INVOICE_DETAIL_PROVENANCE, "Invoice Detail",
+            [t for t in (supplements.get("invoice"), line_table) if t is not None],
+            supp_keys,
+        )
+        invd_blocked = bool(
+            strict_blockers(invd_flipped, load_model()["datasets"]["Invoice Detail"]["columns"])
+        )
+        linked = bool(supp_keys.invoice_grains) and (synthetic or not invd_blocked)
+
+    cu_prov = cost_and_usage_provenance(source_cols, version, invoice_detail_linked=linked)
+    if supplements and supp_keys is not None and linked and line_table is not None:
+        if "InvoiceDetailId" in line_table.fact_columns:
+            id_cov = coverage(line_table, supp_keys.invoice_grains)["InvoiceDetailId"]
+            if id_cov.complete:
+                cu_prov["InvoiceDetailId"] = ColumnRule(
+                    Lineage.ENRICHED,
+                    line_table.source_for("InvoiceDetailId"),
+                    note="issuer-assigned back-link to Invoice Detail",
+                )
     provenance = {
-        "Cost and Usage": cost_and_usage_provenance(
-            source_cols, version, invoice_detail_linked=synthetic
-        ),
+        "Cost and Usage": cu_prov,
         "Contract Commitment": CONTRACT_COMMITMENT_PROVENANCE,
         "Billing Period": BILLING_PERIOD_PROVENANCE,
         "Invoice Detail": INVOICE_DETAIL_PROVENANCE,
     }
-    diagnostics: list[Diagnostic] = []
     row_counts = dict.fromkeys(load_model()["datasets"], 0)
 
     with AtomicOutputDir(out_dir, on_exists=on_exists, keep_temp=keep_temp) as out:
@@ -314,7 +384,11 @@ def convert_files(
             partition_by=cu_partition,
             target_file_size=target_file_size,
         )
-        index = ExternalIndexOpener(out.path_for(_INDEX_DB)) if synthetic else None
+        index = (
+            ExternalIndexOpener(out.path_for(_INDEX_DB))
+            if (synthetic or supplements)
+            else None
+        )
 
         provider_seen: dict[tuple[str, str], ProviderContext] = {}
         billing_seen: dict[tuple, BillingContext] = {}
@@ -330,7 +404,17 @@ def convert_files(
                 billing_seen[astuple(bctx)] = bctx
 
                 grain = invoice_detail_grain_key(row)
-                detail_id = invoice_detail_id(grain) if (synthetic and grain[1]) else ""
+                detail_id = ""
+                if grain[1] and linked:
+                    real_id = (
+                        line_table.value(grain, "InvoiceDetailId")
+                        if line_table is not None
+                        else ""
+                    )
+                    if real_id:
+                        detail_id = real_id
+                    elif synthetic:
+                        detail_id = invoice_detail_id(grain)
                 cu_writer.write(
                     convert_cost_and_usage_row(
                         row, version, detail_id=detail_id, target=cu_columns,
@@ -339,7 +423,7 @@ def convert_files(
                 )
                 cu_count += 1
 
-                if synthetic:
+                if index is not None:
                     if grain[1]:
                         index.stage_invoice_line(grain, (row.get("BilledCost") or "0"))
                     start = (row.get("BillingPeriodStart") or "").strip()
@@ -359,26 +443,53 @@ def convert_files(
             diagnostics.extend(_partition_diagnostics(cu_partition, cu_writer.partition_count()))
 
         staged = {"Cost and Usage": cu_file}
+        lineage_counts: dict[str, LineageCounters] = {"Cost and Usage": cu_counters}
 
-        if synthetic:
+        if index is not None:
+            # Invoice Detail: rows come out of the SQLite aggregation (supplement-scale
+            # cardinality). With supplements they are materialized and pushed through the
+            # same apply function as the eager path, so both stay byte-identical.
             emitted = emitted_invoice_detail_columns()
+            invd_rows = [
+                invoice_detail_row(grain, total, invoice_detail_id(grain), emitted)
+                for grain, total in index.finalize_invoice_groups()
+            ]
+            if supplements and supp_keys is not None and invd_rows:
+                applied, _mapping = apply_invoice_details(
+                    invd_rows, {}, supplements, supp_keys, INVOICE_DETAIL_PROVENANCE,
+                    synthetic=synthetic,
+                )
+                invd_rows = applied.rows or []
+                provenance["Invoice Detail"] = applied.provenance
+                lineage_counts["Invoice Detail"] = applied.counters
+            id_columns = tuple(invd_rows[0].keys()) if invd_rows else tuple(emitted)
             id_file = _output_filename("Invoice Detail", provenance, synthetic, output_format)
             id_handle, id_writer = _open_writer(
                 out.path_for(id_file),
-                DatasetSchema("Invoice Detail", tuple(emitted)),
+                DatasetSchema("Invoice Detail", id_columns),
                 output_format,
                 metadata=_meta("Invoice Detail"),
                 compression=compression,
             )
-            id_count = 0
-            for grain, total in index.finalize_invoice_groups():
-                id_writer.write(invoice_detail_row(grain, total, invoice_detail_id(grain), emitted))
-                id_count += 1
+            for invd_row in invd_rows:
+                id_writer.write(invd_row)
             id_handle.close()
             staged["Invoice Detail"] = id_file
-            row_counts["Invoice Detail"] = id_count
+            row_counts["Invoice Detail"] = len(invd_rows)
 
             bp_columns = dataset_columns("Billing Period")
+            bp_rows = [
+                billing_period_row(start, end, issuer, bp_columns)
+                for start, end, issuer in index.finalize_billing_periods()
+            ]
+            if supplements and supp_keys is not None and bp_rows:
+                bp_applied = apply_billing_periods(
+                    bp_rows, supplements, supp_keys, BILLING_PERIOD_PROVENANCE,
+                    synthetic=synthetic,
+                )
+                bp_rows = bp_applied.rows or []
+                provenance["Billing Period"] = bp_applied.provenance
+                lineage_counts["Billing Period"] = bp_applied.counters
             bp_file = _output_filename("Billing Period", provenance, synthetic, output_format)
             bp_handle, bp_writer = _open_writer(
                 out.path_for(bp_file),
@@ -387,13 +498,11 @@ def convert_files(
                 metadata=_meta("Billing Period"),
                 compression=compression,
             )
-            bp_count = 0
-            for start, end, issuer in index.finalize_billing_periods():
-                bp_writer.write(billing_period_row(start, end, issuer, bp_columns))
-                bp_count += 1
+            for bp_row in bp_rows:
+                bp_writer.write(bp_row)
             bp_handle.close()
             staged["Billing Period"] = bp_file
-            row_counts["Billing Period"] = bp_count
+            row_counts["Billing Period"] = len(bp_rows)
 
             if cc_rows:
                 providers = [provider_seen[k] for k in sorted(provider_seen)]
@@ -408,6 +517,14 @@ def convert_files(
                     invoice_issuer_name=issuer,
                     diagnostics=diagnostics,
                 )
+                if supplements and supp_keys is not None and cc_out:
+                    cc_applied = apply_contract_commitments(
+                        cc_out, supplements, supp_keys, CONTRACT_COMMITMENT_PROVENANCE,
+                        synthetic=synthetic,
+                    )
+                    cc_out = cc_applied.rows or []
+                    provenance["Contract Commitment"] = cc_applied.provenance
+                    lineage_counts["Contract Commitment"] = cc_applied.counters
                 cc_columns = dataset_columns("Contract Commitment")
                 cc_file = _output_filename(
                     "Contract Commitment", provenance, synthetic, output_format
@@ -452,8 +569,9 @@ def convert_files(
             row_counts=row_counts,
             output_format=output_format,
             partitioned_by={k: list(v) for k, v in partition_map.items()},
-            lineage_counts={"Cost and Usage": cu_counters},
+            lineage_counts=lineage_counts,
             capabilities=capabilities,
+            supplements=supplements.manifest_entries() if supplements else None,
         )
 
         # Remove any staged file whose dataset turned out NOT produced (e.g. zero derivable rows).
