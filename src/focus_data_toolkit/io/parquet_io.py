@@ -63,8 +63,11 @@ COMPRESSIONS = ("snappy", "zstd", "gzip", "none")
 # Partition columns must be low-cardinality identifiers, not measures/JSON. String and Date/Time
 # both round-trip losslessly through Hive directory names (reconstructed as strings on read).
 _PARTITIONABLE_TYPES = frozenset({"String", "Date/Time"})
-# Hive's sentinel for a null/empty partition value (PyArrow reads it back as null -> "").
-_HIVE_NULL = "__HIVE_DEFAULT_PARTITION__"
+# Empty partition values are written as an empty segment (``COL=``), which reads back as "".
+# The reader disables Hive's null convention with a sentinel that percent-encoding can never
+# produce, so a *real* value equal to Hive's ``__HIVE_DEFAULT_PARTITION__`` token is not
+# silently turned into null. (Percent-encoded values only ever contain [A-Za-z0-9_.~%-].)
+_NO_HIVE_NULL = "\x00__fdt_never_null__"
 # High-cardinality guards: warn past the soft threshold, refuse past the hard cap (each distinct
 # partition holds an open writer, so an unbounded key would exhaust file handles / memory).
 PARTITION_WARN_THRESHOLD = 100
@@ -88,9 +91,12 @@ def partitionable_columns(dataset: str, columns: Sequence[str]) -> list[str]:
 
 
 def _hive_segment(column: str, value: str) -> str:
-    """Render one ``column=value`` Hive path segment (percent-encoded; empty -> null sentinel)."""
-    encoded = quote(value, safe="") if value else _HIVE_NULL
-    return f"{column}={encoded}"
+    """Render one ``column=value`` Hive path segment (percent-encoded; empty -> ``COL=``).
+
+    An empty value becomes an empty segment rather than Hive's ``__HIVE_DEFAULT_PARTITION__``
+    sentinel, so a real value that happens to equal that sentinel can never collide with it.
+    """
+    return f"{column}={quote(value, safe='')}"
 
 
 @cache
@@ -246,10 +252,19 @@ class ParquetRowWriter:
         self._buffer: list[Mapping[str, str]] = []
         self._written = 0
 
+    @property
+    def buffered(self) -> int:
+        """Rows currently buffered (not yet flushed to a row group)."""
+        return len(self._buffer)
+
     def write(self, values: Mapping[str, str]) -> None:
         self._buffer.append(values)
         if len(self._buffer) >= _BATCH:
             self._flush()
+
+    def flush(self) -> None:
+        """Flush buffered rows to a row group (public; used to bound memory across writers)."""
+        self._flush()
 
     def _flush(self) -> None:
         if not self._buffer:
@@ -331,10 +346,12 @@ class PartitionedParquetWriter:
 
     Rows are routed to ``base_dir/COL=value/.../part-N.parquet`` by their partition-column values;
     the partition columns are **omitted** from the part files (standard Hive — a reader
-    reconstructs them from the path). Each partition keeps one open :class:`ParquetRowWriter`, so
-    memory and open file handles scale with the *number of partitions*, not the row count — hence
-    the hard :data:`MAX_PARTITIONS` cap. When ``target_file_size`` is set, a partition rolls to a
-    new part file once its (approximate, uncompressed) running size crosses the threshold.
+    reconstructs them from the path). Open file handles scale with the *number of partitions*
+    (hence the hard :data:`MAX_PARTITIONS` cap), but **buffered rows are bounded globally**: once
+    the total unflushed rows across all partitions reaches :data:`_BATCH`, every partition writer
+    is flushed — so memory stays bounded no matter how the rows interleave across partition keys.
+    When ``target_file_size`` is set, a partition rolls to a new part file once its (approximate,
+    uncompressed) running size crosses the threshold.
     """
 
     def __init__(
@@ -347,6 +364,8 @@ class PartitionedParquetWriter:
         compression: str = "snappy",
         target_file_size: int | None = None,
     ) -> None:
+        if target_file_size is not None and target_file_size <= 0:
+            raise ValueError(f"target_file_size must be positive, got {target_file_size}")
         self._base = Path(base_dir)
         self._dataset = resolve_dataset(schema.dataset)
         self._partition_by = tuple(partition_by)
@@ -357,6 +376,7 @@ class PartitionedParquetWriter:
         self._target = target_file_size
         # Per partition: (writer, part_index, running_byte_estimate).
         self._writers: dict[tuple[str, ...], list] = {}
+        self._buffered = 0  # total rows buffered across all partition writers
 
     def _partition_dir(self, values: Mapping[str, str]) -> tuple[tuple[str, ...], Path]:
         key = tuple((values.get(c) or "") for c in self._partition_by)
@@ -389,10 +409,17 @@ class PartitionedParquetWriter:
             state[2] = 0
             state[0] = self._open_part(directory, state[1])
         state[0].write(values)
+        self._buffered += 1
         if self._target is not None:
             state[2] += sum(len(values.get(c) or "") for c in self._file_columns) + len(
                 self._file_columns
             )
+        # Bound total buffered rows across ALL partitions (not per-partition): flush everything
+        # once the global buffer fills, so memory can't grow with the number of partition keys.
+        if self._buffered >= _BATCH:
+            for st in self._writers.values():
+                st[0].flush()
+            self._buffered = 0
 
     def partition_count(self) -> int:
         return len(self._writers)
@@ -417,7 +444,9 @@ class PartitionedParquetReader:
         self._dataset = resolve_dataset(dataset)
         self._partition_cols = set(partition_by)
         schema = self._pa.schema([(c, self._pa.string()) for c in partition_by])
-        partitioning = pds.HivePartitioning(schema, null_fallback=_HIVE_NULL, segment_encoding="uri")
+        partitioning = pds.HivePartitioning(
+            schema, null_fallback=_NO_HIVE_NULL, segment_encoding="uri"
+        )
         self._ds = pds.dataset(str(base_dir), format="parquet", partitioning=partitioning)
         self.source_columns: tuple[str, ...] = tuple(self._ds.schema.names)
 

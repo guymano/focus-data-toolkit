@@ -172,7 +172,10 @@ def _lint_file(dataset: str, path: Path, output_format: str = "csv", *, partitio
 
 
 def _validate_parquet_options(
-    output_format: str, partition_by: tuple[str, ...], compression: str
+    output_format: str,
+    partition_by: tuple[str, ...],
+    compression: str,
+    target_file_size: int | None,
 ) -> None:
     """Reject partitioning/compression options that don't apply or aren't valid FOCUS keys."""
     if output_format != "parquet":
@@ -184,6 +187,10 @@ def _validate_parquet_options(
     if compression not in COMPRESSIONS:
         raise ConversionError(
             f"unsupported compression {compression!r}; choose one of {', '.join(COMPRESSIONS)}"
+        )
+    if target_file_size is not None and target_file_size <= 0:
+        raise ConversionError(
+            f"--target-file-size must be positive, got {target_file_size} bytes"
         )
     if partition_by:
         bad = partitionable_columns("Cost and Usage", partition_by)
@@ -232,7 +239,7 @@ def convert_files(
             f"unsupported output format {output_format!r}; choose one of {', '.join(OUTPUT_FORMATS)}"
         )
     partition_by = tuple(partition_by or ())
-    _validate_parquet_options(output_format, partition_by, compression)
+    _validate_parquet_options(output_format, partition_by, compression, target_file_size)
     # Partitioning applies to the (large) Cost and Usage dataset only; the small derived datasets
     # stay single files.
     partition_map: dict[str, tuple[str, ...]] = (

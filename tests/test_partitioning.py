@@ -48,7 +48,30 @@ def test_hive_segment_encodes_specials_and_empty():
     assert _hive_segment("BillingPeriodStart", "2026-01-01T00:00:00Z") == (
         "BillingPeriodStart=2026-01-01T00%3A00%3A00Z"
     )
-    assert _hive_segment("BillingCurrency", "") == "BillingCurrency=__HIVE_DEFAULT_PARTITION__"
+    # Empty -> an empty segment (COL=), never Hive's null sentinel, so a real value equal to the
+    # sentinel cannot collide with "empty".
+    assert _hive_segment("BillingCurrency", "") == "BillingCurrency="
+
+
+def test_partition_value_equal_to_hive_sentinel_round_trips(tmp_path):
+    cols = ("BilledCost", "InvoiceIssuerName")
+    part_by = ["InvoiceIssuerName"]
+    rows = [
+        {"BilledCost": "1", "InvoiceIssuerName": "__HIVE_DEFAULT_PARTITION__"},
+        {"BilledCost": "2", "InvoiceIssuerName": ""},
+        {"BilledCost": "3", "InvoiceIssuerName": "AWS"},
+    ]
+    base = tmp_path / "cu"
+    w = PartitionedParquetWriter(base, DatasetSchema(_CU, cols), part_by)
+    for r in rows:
+        w.write(r)
+    w.close()
+    out = {
+        Decimal(r.values["BilledCost"]): r.values["InvoiceIssuerName"]
+        for r in PartitionedParquetReader(base, _CU, part_by)
+    }
+    # A literal "__HIVE_DEFAULT_PARTITION__" value is preserved, distinct from the empty one.
+    assert out == {Decimal(1): "__HIVE_DEFAULT_PARTITION__", Decimal(2): "", Decimal(3): "AWS"}
 
 
 def test_writer_refuses_too_many_partitions(tmp_path, monkeypatch):
@@ -203,3 +226,42 @@ def test_cli_partition_by_without_parquet_exits_2(tmp_path, capsys):
                "--mode", "synthetic", "--partition-by", "BillingCurrency"])
     assert rc == 2
     assert "requires --output-format parquet" in capsys.readouterr().err
+
+
+def test_total_buffered_rows_are_bounded_across_partitions(tmp_path, monkeypatch):
+    # Regression: many partition keys must not each buffer up to _BATCH rows. With a small global
+    # batch, total buffered across ALL partition writers stays <= _BATCH regardless of key spread.
+    import focus_data_toolkit.io.parquet_io as pqio
+
+    monkeypatch.setattr(pqio, "_BATCH", 4)
+    cols = ("BilledCost", "InvoiceIssuerName")
+    base = tmp_path / "cu"
+    w = PartitionedParquetWriter(base, DatasetSchema(_CU, cols), ["InvoiceIssuerName"])
+    for i in range(40):  # 40 rows spread over 8 distinct partitions
+        w.write({"BilledCost": str(i), "InvoiceIssuerName": f"iss-{i % 8}"})
+        total_buffered = sum(st[0].buffered for st in w._writers.values())
+        assert total_buffered <= 4, total_buffered  # global cap holds after every write
+    w.close()
+    # All rows survived the periodic flush-all.
+    assert len(list(PartitionedParquetReader(base, _CU, ["InvoiceIssuerName"]))) == 40
+
+
+def test_non_positive_target_file_size_is_rejected(tmp_path):
+    cau = _source(tmp_path, 10)
+    with pytest.raises(ConversionError, match="must be positive"):
+        convert_files(str(cau), str(tmp_path / "o"), mode="synthetic",
+                      output_format="parquet", partition_by=["BillingCurrency"], target_file_size=0)
+
+
+def test_writer_rejects_non_positive_target_file_size(tmp_path):
+    with pytest.raises(ValueError, match="must be positive"):
+        PartitionedParquetWriter(tmp_path / "cu", DatasetSchema(_CU, ("BilledCost", "BillingCurrency")),
+                                 ["BillingCurrency"], target_file_size=-1)
+
+
+def test_cli_non_positive_target_file_size_exits_2(tmp_path, capsys):
+    cau = _source(tmp_path, 10)
+    rc = main(["convert", "--cost-and-usage", str(cau), "--out", str(tmp_path / "o"),
+               "--mode", "synthetic", "--output-format", "parquet", "--target-file-size", "0"])
+    assert rc == 2
+    assert "must be positive" in capsys.readouterr().err

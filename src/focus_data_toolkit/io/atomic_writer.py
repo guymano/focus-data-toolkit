@@ -155,13 +155,22 @@ class AtomicOutputDir:
         """Register every file under a staged directory (e.g. a partitioned Parquet dataset).
 
         Each file is fsync'd and enrolled for checksums under its path relative to the staging
-        directory, so a partition tree is covered by ``SHA256SUMS`` file-by-file.
+        directory, so a partition tree is covered by ``SHA256SUMS`` file-by-file. Every directory
+        in the tree (root and each partition level) is fsync'd too, so the nested directory
+        entries are durable before publish — otherwise a crash could lose part files that the
+        manifest and ``SHA256SUMS`` already reference.
         """
         root = self.path_for(name)
         added = sorted(p for p in root.rglob("*") if p.is_file())
+        dirs: set[Path] = {root}
         for path in added:
             _fsync_file(path)
             self._data_files.append(path)
+            dirs.update(path.parents)  # every partition-level dir up the tree
+        # fsync deepest-first so a parent's entry for a child dir is persisted after the child.
+        for directory in sorted(dirs, key=lambda p: len(p.parts), reverse=True):
+            if root in (directory, *directory.parents):  # stay within the staged tree
+                _fsync_dir(directory)
         return added
 
     def discard(self, name: str) -> None:
