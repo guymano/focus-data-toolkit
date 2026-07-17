@@ -166,6 +166,21 @@ def test_allocated_method_details_valid_element_accepted():
     assert _rules_for("Cost and Usage", row, "AllocatedMethodDetails") == set()
 
 
+def test_non_finite_json_constants_are_rejected():
+    # NaN/Infinity are Python parser extensions, not valid JSON: the lint rejects the
+    # value outright, and the schema evaluator never treats a non-finite float as a number.
+    row = {"AllocatedMethodDetails": '{"Elements":[{"AllocatedRatio":NaN}]}'}
+    assert "bad_json" in _rules_for("Cost and Usage", row, "AllocatedMethodDetails")
+    row = {"AllocatedMethodDetails": '{"Elements":[{"AllocatedRatio":Infinity}]}'}
+    assert "bad_json" in _rules_for("Cost and Usage", row, "AllocatedMethodDetails")
+    assert check_against_official_schema(
+        "AllocatedMethodDetails", {"Elements": [{"AllocatedRatio": float("nan")}]}
+    )
+    assert check_against_official_schema(
+        "AllocatedMethodDetails", {"Elements": [{"AllocatedRatio": float("inf")}]}
+    )
+
+
 def test_commitment_program_eligibility_missing_program_type_rejected():
     row = {"CommitmentProgramEligibilityDetails": json.dumps({"CommitmentPrograms": [{}]})}
     assert "official_schema_violation" in _rules_for(

@@ -18,6 +18,7 @@ schema update that outgrows the subset must fail loudly, never silently pass.
 from __future__ import annotations
 
 import json
+import math
 import re
 from functools import cache
 from pathlib import Path
@@ -41,13 +42,20 @@ _HANDLED = frozenset({
 })
 _ANNOTATIONS = frozenset({"$schema", "$id", "$defs", "title", "description", "default"})
 
+def _is_number(v: object) -> bool:
+    # Standard JSON has no NaN/Infinity; Python's parser may still produce them from
+    # the non-standard constants, so a non-finite float is never a schema "number".
+    if isinstance(v, bool) or not isinstance(v, int | float):
+        return False
+    return math.isfinite(v)
+
+
 _TYPE_CHECKS = {
     "object": lambda v: isinstance(v, dict),
     "array": lambda v: isinstance(v, list),
     "string": lambda v: isinstance(v, str),
-    "number": lambda v: isinstance(v, int | float) and not isinstance(v, bool),
-    "integer": lambda v: (isinstance(v, int) and not isinstance(v, bool))
-    or (isinstance(v, float) and v.is_integer()),
+    "number": _is_number,
+    "integer": lambda v: _is_number(v) and (isinstance(v, int) or v.is_integer()),
     "boolean": lambda v: isinstance(v, bool),
     "null": lambda v: v is None,
 }

@@ -38,14 +38,16 @@ class CapabilityProfile:
     source: str = "none-declared"
 
     def __post_init__(self) -> None:
-        unknown = set(self.supported_conditions) - KNOWN_CONDITIONS
+        # Accept any iterable-of-str the caller passed and materialize it exactly once —
+        # a one-shot generator must not be exhausted by validation before it is frozen.
+        conditions = frozenset(self.supported_conditions)
+        object.__setattr__(self, "supported_conditions", conditions)
+        unknown = conditions - KNOWN_CONDITIONS
         if unknown:
             known = ", ".join(sorted(KNOWN_CONDITIONS))
             raise ValueError(
                 f"unknown applicability condition(s) {sorted(unknown)}; known: {known}"
             )
-        # Accept any iterable-of-str the caller passed and freeze it.
-        object.__setattr__(self, "supported_conditions", frozenset(self.supported_conditions))
 
     @classmethod
     def none(cls) -> CapabilityProfile:

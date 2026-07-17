@@ -30,6 +30,15 @@ def test_unknown_condition_is_rejected():
         CapabilityProfile(frozenset({"SupportsTimeTravel"}))
 
 
+def test_one_shot_iterable_is_materialized_once():
+    # A generator must survive validation: it is frozen before the unknown-check,
+    # so the profile keeps the declared conditions instead of silently emptying.
+    profile = CapabilityProfile(c for c in [COND_UNIT_PRICING])  # type: ignore[arg-type]
+    assert profile.supported_conditions == frozenset({COND_UNIT_PRICING})
+    with pytest.raises(ValueError, match="unknown applicability condition"):
+        CapabilityProfile(c for c in ["SupportsTimeTravel"])  # type: ignore[arg-type]
+
+
 def test_profile_as_dict_is_deterministic():
     profile = CapabilityProfile.of(*sorted(KNOWN_CONDITIONS), source="api")
     assert profile.as_dict() == {

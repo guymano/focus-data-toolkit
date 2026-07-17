@@ -148,6 +148,10 @@ class _DuplicateKey(Exception):
     pass
 
 
+class _NonFiniteConstant(Exception):
+    pass
+
+
 def _no_dup_pairs(pairs: list[tuple[str, object]]) -> dict:
     seen: dict = {}
     for key, value in pairs:
@@ -157,11 +161,18 @@ def _no_dup_pairs(pairs: list[tuple[str, object]]) -> dict:
     return seen
 
 
+def _reject_constant(const: str) -> float:
+    # NaN / Infinity / -Infinity are Python extensions, not valid JSON.
+    raise _NonFiniteConstant(const)
+
+
 def _load_json_object(value: str) -> tuple[dict | None, str | None]:
     try:
-        obj = json.loads(value, object_pairs_hook=_no_dup_pairs)
+        obj = json.loads(value, object_pairs_hook=_no_dup_pairs, parse_constant=_reject_constant)
     except _DuplicateKey:
         return None, "duplicate_json_key"
+    except _NonFiniteConstant:
+        return None, "bad_json"
     except json.JSONDecodeError:
         return None, "bad_json"
     if not isinstance(obj, dict):
