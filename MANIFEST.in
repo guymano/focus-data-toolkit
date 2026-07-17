@@ -1,0 +1,18 @@
+# Source distribution contents (the wheel is governed by [tool.setuptools.package-data]).
+# LICENSE is included automatically via PEP 639 license-files; listed here for older tooling.
+include LICENSE
+include CHANGELOG.md
+include pyproject.toml
+
+# Ship the PEP 561 marker and the embedded FOCUS 1.4 model/reference JSON.
+recursive-include src/focus_data_toolkit py.typed *.json
+
+# Ship the model extractor and the tests/fixtures so the build and the embedded model are
+# reproducible/verifiable from the sdist (the extractor is the source-of-record process for
+# src/focus_data_toolkit/model/*.json).
+include tools/extract_focus_1_4_model.py
+recursive-include tests *.py *.csv *.json *.md
+
+global-exclude *.py[cod]
+global-exclude __pycache__
+prune **/__pycache__

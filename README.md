@@ -52,8 +52,13 @@ The core package is **standard-library only** (Python ≥ 3.11).
 ## Quickstart
 
 ```bash
-pip install git+https://github.com/guymano/focus-data-toolkit
+pip install focus-data-toolkit
 ```
+
+The core package is standard-library only and supports **Python 3.11+**. Optional extras add
+capabilities: `parquet` (PyArrow columnar output), `validator` (the official FinOps validator,
+**Python 3.12+**), and `all` (both). Until the first PyPI release, install from source with
+`pip install "git+https://github.com/guymano/focus-data-toolkit"`.
 
 ### 1. Generate FOCUS 1.2/1.3 sample data
 
@@ -111,7 +116,7 @@ detected from the CSV header. CLI exit codes: `0` success without assumptions ·
 focus-toolkit validate focus-1.4/focus_1_4_cost_and_usage.csv --dataset cost-and-usage
 
 # official FinOps validator (optional extra, requires Python >= 3.12; supports 1.2/1.3)
-pip install "focus-data-toolkit[validator] @ git+https://github.com/guymano/focus-data-toolkit"
+pip install "focus-data-toolkit[validator]"
 focus-toolkit validate --official --focus-version 1.2.0.1 my_focus_1_2_export.csv
 ```
 
