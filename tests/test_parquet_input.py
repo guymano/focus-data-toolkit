@@ -128,3 +128,39 @@ def test_gaps_cli_reads_parquet_header(tmp_path, source):
     assert rc == 0
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["source_version"] == "1.2"
+
+
+# --- input failures surface as clean CLI errors, never tracebacks -----------------------
+
+
+def _corrupt_parquet(tmp_path) -> Path:
+    path = tmp_path / "corrupt.parquet"
+    path.write_bytes(b"PAR1this is not really a parquet file")
+    return path
+
+
+def test_gaps_cli_corrupt_parquet_is_a_clean_error(tmp_path, capsys):
+    rc = main(["gaps", "--cost-and-usage", str(_corrupt_parquet(tmp_path))])
+    assert rc == 2
+    assert "error:" in capsys.readouterr().err
+
+
+def test_validate_cli_malformed_source_is_a_clean_error(tmp_path, capsys):
+    bad = tmp_path / "bad.csv"
+    bad.write_text("BilledCost,BillingCurrency\n1.00\n", encoding="utf-8")  # short row
+    rc = main(["validate", str(bad), "--dataset", "cost-and-usage"])
+    assert rc == 2
+    assert "error:" in capsys.readouterr().err
+
+
+def test_supplements_validate_cli_corrupt_source_is_a_clean_error(tmp_path, source, capsys):
+    from test_supplement_apply import _billing_period_rows
+
+    supp = write_csv(tmp_path / "bp.csv", _billing_period_rows(source))
+    rc = main([
+        "supplements", "validate",
+        "--cost-and-usage", str(_corrupt_parquet(tmp_path)),
+        "--supplement", str(supp),
+    ])
+    assert rc == 2
+    assert "error:" in capsys.readouterr().err

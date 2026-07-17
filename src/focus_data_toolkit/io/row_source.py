@@ -15,11 +15,12 @@ hint as Parquet output does.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from focus_data_toolkit.io.csv_io import CsvRowReader
-from focus_data_toolkit.io.records import Record
+from focus_data_toolkit.io.records import MalformedRecordError, Record
 
 _PARQUET_MAGIC = b"PAR1"
 
@@ -70,19 +71,42 @@ def open_row_source(path: str | Path, *, dataset: str | None = None) -> RowSourc
     if p.is_dir():
         from focus_data_toolkit.io.parquet_io import PartitionedParquetReader
 
-        return PartitionedParquetReader(p, dataset or "Cost and Usage", _hive_partition_columns(p))
+        with _parquet_errors(p):
+            return PartitionedParquetReader(
+                p, dataset or "Cost and Usage", _hive_partition_columns(p)
+            )
     if is_parquet(p):
         from focus_data_toolkit.io.parquet_io import ParquetRowReader
 
-        return ParquetRowReader(p, dataset=dataset)
+        with _parquet_errors(p):
+            return ParquetRowReader(p, dataset=dataset)
     return CsvRowReader(p)
+
+
+@contextmanager
+def _parquet_errors(path: Path) -> Iterator[None]:
+    """Translate Arrow open/read failures into the CLI-friendly MalformedRecordError.
+
+    A missing-pyarrow MalformedRecordError (with its install hint) passes through untouched.
+    """
+    try:
+        yield
+    except MalformedRecordError:
+        raise
+    except (OSError, ValueError) as exc:
+        # pyarrow's ArrowInvalid/ArrowIOError derive from ValueError/OSError, so a corrupt
+        # or truncated Parquet file surfaces as a clean input error, never a traceback.
+        raise MalformedRecordError(f"cannot read Parquet source {path}: {exc}") from exc
 
 
 def read_source_rows(path: str | Path, *, dataset: str | None = None) -> list[dict[str, str]]:
     """Materialise a CSV/Parquet source into a list of dict rows (eager-path input)."""
     reader = open_row_source(path, dataset=dataset)
     try:
-        return [dict(record.values) for record in reader]
+        if isinstance(reader, CsvRowReader):
+            return [dict(record.values) for record in reader]
+        with _parquet_errors(Path(path)):  # iteration can hit mid-file corruption too
+            return [dict(record.values) for record in reader]
     finally:
         reader.close()
 

@@ -189,6 +189,29 @@ def test_bundle_rejects_one_shot_iterators(source):
         validate_dataset_bundle(bundle)
 
 
+def test_spilled_allocation_state_equals_in_memory(tmp_path):
+    # Split-allocation group state also honours the spillable-index contract: high group
+    # cardinality must not grow with the Cost and Usage row count.
+    from focus_data_toolkit.generators.scenarios import split_allocation_group
+    from focus_data_toolkit.validate.allocation import validate_split_allocation
+
+    rows = [
+        *split_allocation_group("origin-1", "100.00", weights=[3, 2, 1]),
+        *split_allocation_group("origin-2", "50.00", weights=[1, 1]),
+    ]
+    broken = [dict(r) for r in split_allocation_group("origin-3", "10.00", weights=[1, 1])]
+    broken[1]["AllocatedResourceId"] = broken[0]["AllocatedResourceId"]  # duplicate
+    reference = validate_split_allocation(rows + broken)
+    pool = SpillableIndexPool(tmp_path / "alloc.sqlite", threshold=1)
+    try:
+        spilled = validate_split_allocation(rows + broken, index_factory=pool.make_map)
+    finally:
+        pool.close()
+    assert pool.spilled
+    assert [d.as_dict() for d in spilled] == [d.as_dict() for d in reference]
+    assert any(d.code == "FDT-ALLOC-004" for d in spilled)
+
+
 def test_spilled_validation_equals_in_memory_validation(tmp_path, source, cc_source, full_bundle):
     result = convert_to_focus_1_4(
         source, cc_source, mode=Mode.STRICT, supplements=full_bundle, validate=False

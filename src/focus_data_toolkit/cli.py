@@ -85,18 +85,22 @@ def _cmd_gaps(args: argparse.Namespace) -> int:
     from focus_data_toolkit.convert import _resolve_source_version
     from focus_data_toolkit.supplement import compute_gaps
 
-    header = _read_header(args.cost_and_usage)
     try:
+        header = _read_header(args.cost_and_usage)
         version, _detection = _resolve_source_version(
             header,
             source_version=args.source_version,
             source_dataset=args.source_dataset,
             mode=Mode.STRICT,
         )
-    except ConversionError as exc:
+        cc_header = (
+            _read_header(args.contract_commitment) if args.contract_commitment else None
+        )
+    except (ConversionError, MalformedRecordError) as exc:
+        # MalformedRecordError: unreadable source header (malformed CSV, corrupt Parquet,
+        # or the missing-pyarrow install hint) — a CLI error, not a traceback.
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    cc_header = _read_header(args.contract_commitment) if args.contract_commitment else None
     report = compute_gaps(header, version, cc_columns=cc_header)
     payload = (
         json.dumps(report.as_dict(), indent=2, sort_keys=True) + "\n"
@@ -139,8 +143,14 @@ def _cmd_supplements_validate(args: argparse.Namespace) -> int:
     except SupplementError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    cau_rows = read_source_rows(args.cost_and_usage)
-    cc_rows = read_source_rows(args.contract_commitment) if args.contract_commitment else None
+    try:
+        cau_rows = read_source_rows(args.cost_and_usage)
+        cc_rows = (
+            read_source_rows(args.contract_commitment) if args.contract_commitment else None
+        )
+    except MalformedRecordError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     diagnostics = validate_supplements(bundle, source_key_sets(cau_rows, cc_rows))
     for diag in diagnostics:
         print(f"{diag.severity} {diag.code}: {diag.message}")
@@ -344,7 +354,11 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         return run_official_validator(args.file, args.focus_version)
 
     dataset = resolve_dataset(args.dataset.replace("-", " "))
-    rows = read_source_rows(args.file, dataset=dataset)
+    try:
+        rows = read_source_rows(args.file, dataset=dataset)
+    except MalformedRecordError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     report = lint_focus_1_4_structure(dataset, rows, profile=_capabilities(args))
     status = (
         f"structural+semantic lint OK ({', '.join(report.levels_passed)})"

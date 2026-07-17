@@ -16,7 +16,7 @@ allocated resources; and that every row carries the information the group needs.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
@@ -25,12 +25,18 @@ from focus_data_toolkit.errors import Diagnostic, Severity
 Rows = Sequence[Mapping[str, str]]
 #: The input is consumed in a single forward pass, so any iterable of rows works.
 RowStream = Iterable[Mapping[str, str]]
+#: Factory for per-key lookup state (``dict`` by default; a spillable map for streaming).
+IndexFactory = Callable[[], MutableMapping[str, str]]
 
 ORIGIN_ID_COLUMN = "x_SplitOriginId"
 ORIGIN_COST_COLUMN = "x_SplitOriginCost"
 
 DEFAULT_RATIO_TOLERANCE = Decimal("0.0001")
 DEFAULT_COST_TOLERANCE = Decimal("0.01")
+
+# Line numbers recorded per group for the incomplete-group diagnostic's ``rows`` context;
+# beyond this the context reports the overflow as ``+N more`` instead of growing unboundedly.
+_LINE_SAMPLE = 100
 
 
 def _dec(value: str | None) -> Decimal | None:
@@ -74,38 +80,48 @@ def _row_ratio_and_units(row: Mapping[str, str]) -> tuple[Decimal | None, frozen
 
 @dataclass
 class _GroupState:
-    """Running aggregate of one allocation group — bounded per group, never member rows.
+    """Running aggregate of one allocation group — fixed-size scalars, never member rows.
 
-    Mirrors the checks of the previous list-of-members implementation exactly: the first
+    Mirrors the checks of the original list-of-members implementation exactly: the first
     incomplete condition (in row order) short-circuits further accumulation, line numbers
-    keep accumulating so the incomplete diagnostic still lists every member row.
+    keep counting so the incomplete diagnostic still describes every member row. The state
+    is JSON round-trippable (:meth:`dump` / :meth:`load`), so it can live as a string value
+    in a disk-spilling map when the caller supplies an ``index_factory``.
     """
 
-    lines: list[int] = field(default_factory=list)
+    lines: list[int] = field(default_factory=list)  # first _LINE_SAMPLE member lines
+    line_count: int = 0
     incomplete: tuple[str, str | None] | None = None  # (reason, column)
-    ratios: list[Decimal] = field(default_factory=list)
+    ratio_sum: Decimal = Decimal(0)
+    out_of_range: list[Decimal] = field(default_factory=list)  # ratios outside [0, 1]
     units: set[str] = field(default_factory=set)
     methods: set[str] = field(default_factory=set)
     resource_count: int = 0
-    resources: set[str] = field(default_factory=set)
+    duplicate_resource: bool = False
     missing_resource: bool = False
     total_cost: Decimal = Decimal(0)
-    origin_costs: set[Decimal] = field(default_factory=set)
+    origin_cost: Decimal | None = None
+    origin_disagrees: bool = False
 
-    def observe(self, line: int, row: Mapping[str, str]) -> None:
-        self.lines.append(line)
+    def observe(self, line: int, row: Mapping[str, str], *, seen_resource: bool) -> None:
+        self.line_count += 1
+        if len(self.lines) < _LINE_SAMPLE:
+            self.lines.append(line)
         if self.incomplete is not None:
             return
         ratio, row_units = _row_ratio_and_units(row)
         if ratio is None:
             self.incomplete = ("a row has no usable AllocatedRatio", "AllocatedMethodDetails")
             return
-        self.ratios.append(ratio)
+        self.ratio_sum += ratio
+        if ratio < 0 or ratio > 1:
+            self.out_of_range.append(ratio)
         self.units |= row_units
         self.methods.add((row.get("AllocatedMethodId") or "").strip())
         resource = (row.get("AllocatedResourceId") or "").strip()
         self.resource_count += 1
-        self.resources.add(resource)
+        if seen_resource:
+            self.duplicate_resource = True
         if not resource:
             self.missing_resource = True
         cost = _dec(row.get("BilledCost"))
@@ -117,7 +133,46 @@ class _GroupState:
         if origin_cost is None:
             self.incomplete = ("missing x_SplitOriginCost", ORIGIN_COST_COLUMN)
             return
-        self.origin_costs.add(origin_cost)
+        if self.origin_cost is None:
+            self.origin_cost = origin_cost
+        elif origin_cost != self.origin_cost:
+            self.origin_disagrees = True
+
+    def dump(self) -> str:
+        return json.dumps({
+            "ln": self.lines,
+            "lc": self.line_count,
+            "inc": list(self.incomplete) if self.incomplete else None,
+            "rs": str(self.ratio_sum),
+            "oor": [str(r) for r in self.out_of_range],
+            "un": sorted(self.units),
+            "me": sorted(self.methods),
+            "rc": self.resource_count,
+            "dup": self.duplicate_resource,
+            "mr": self.missing_resource,
+            "tc": str(self.total_cost),
+            "oc": str(self.origin_cost) if self.origin_cost is not None else None,
+            "od": self.origin_disagrees,
+        }, separators=(",", ":"))
+
+    @classmethod
+    def load(cls, text: str) -> _GroupState:
+        d = json.loads(text)
+        return cls(
+            lines=d["ln"],
+            line_count=d["lc"],
+            incomplete=tuple(d["inc"]) if d["inc"] else None,
+            ratio_sum=Decimal(d["rs"]),
+            out_of_range=[Decimal(r) for r in d["oor"]],
+            units=set(d["un"]),
+            methods=set(d["me"]),
+            resource_count=d["rc"],
+            duplicate_resource=d["dup"],
+            missing_resource=d["mr"],
+            total_cost=Decimal(d["tc"]),
+            origin_cost=Decimal(d["oc"]) if d["oc"] is not None else None,
+            origin_disagrees=d["od"],
+        )
 
 
 def validate_split_allocation(
@@ -125,17 +180,32 @@ def validate_split_allocation(
     *,
     ratio_tolerance: Decimal = DEFAULT_RATIO_TOLERANCE,
     cost_tolerance: Decimal = DEFAULT_COST_TOLERANCE,
+    index_factory: IndexFactory = dict,
 ) -> list[Diagnostic]:
-    """Validate every split-cost-allocation group in ``cost_and_usage`` (single pass;
-    memory is bounded by the number of allocation *groups*, not their member rows)."""
-    groups: dict[str, _GroupState] = {}
+    """Validate every split-cost-allocation group in ``cost_and_usage`` (single pass).
+
+    Per-group state is a fixed-size JSON-serialised aggregate held in an ``index_factory``
+    map (as is the resource-duplicate lookup), so with a spillable factory memory stays
+    bounded even when allocation-group cardinality approaches the row count.
+    """
+    groups = index_factory()
+    resources_seen = index_factory()
     for i, row in enumerate(cost_and_usage, start=1):
         origin = (row.get(ORIGIN_ID_COLUMN) or "").strip()
-        if origin:
-            groups.setdefault(origin, _GroupState()).observe(i, row)
+        if not origin:
+            continue
+        raw = groups.get(origin)
+        state = _GroupState.load(raw) if raw is not None else _GroupState()
+        resource = (row.get("AllocatedResourceId") or "").strip()
+        resource_key = json.dumps([origin, resource], separators=(",", ":"))
+        state.observe(i, row, seen_resource=resource_key in resources_seen)
+        if state.incomplete is None:
+            resources_seen[resource_key] = ""
+        groups[origin] = state.dump()
 
     out: list[Diagnostic] = []
-    for origin_id, state in sorted(groups.items()):
+    for origin_id in sorted(groups):
+        state = _GroupState.load(groups[origin_id])
         out.extend(_group_diagnostics(origin_id, state, ratio_tolerance, cost_tolerance))
     return out
 
@@ -147,7 +217,9 @@ def _group_diagnostics(
     cost_tolerance: Decimal,
 ) -> list[Diagnostic]:
     keys = {ORIGIN_ID_COLUMN: origin_id}
-    lines = sorted(state.lines)
+    rows_context = ",".join(map(str, sorted(state.lines)))
+    if state.line_count > len(state.lines):
+        rows_context += f",+{state.line_count - len(state.lines)} more"
     out: list[Diagnostic] = []
 
     def incomplete(reason: str, column: str | None = None) -> Diagnostic:
@@ -159,32 +231,31 @@ def _group_diagnostics(
             dataset="Cost and Usage",
             column=column,
             record_keys=keys,
-            context={"rows": ",".join(map(str, lines))},
+            context={"rows": rows_context},
         )
 
     if state.incomplete is not None:
         return [incomplete(*state.incomplete)]
     if "" in state.methods or state.missing_resource:
         return [incomplete("a row is missing AllocatedMethodId or AllocatedResourceId")]
-    if len(state.origin_costs) != 1:
+    if state.origin_disagrees:
         return [incomplete("rows disagree on x_SplitOriginCost", ORIGIN_COST_COLUMN)]
 
-    for ratio in state.ratios:
-        if ratio < 0 or ratio > 1:
-            out.append(
-                Diagnostic(
-                    code="FDT-ALLOC-006",
-                    severity=Severity.ERROR,
-                    message=f"allocation ratio {ratio} outside [0, 1] in group {origin_id!r}",
-                    datasets=("Cost and Usage",),
-                    dataset="Cost and Usage",
-                    column="AllocatedMethodDetails",
-                    actual=str(ratio),
-                    record_keys=keys,
-                )
+    for ratio in state.out_of_range:
+        out.append(
+            Diagnostic(
+                code="FDT-ALLOC-006",
+                severity=Severity.ERROR,
+                message=f"allocation ratio {ratio} outside [0, 1] in group {origin_id!r}",
+                datasets=("Cost and Usage",),
+                dataset="Cost and Usage",
+                column="AllocatedMethodDetails",
+                actual=str(ratio),
+                record_keys=keys,
             )
+        )
 
-    ratio_sum = sum(state.ratios, Decimal(0))
+    ratio_sum = state.ratio_sum
     if abs(ratio_sum - Decimal(1)) > ratio_tolerance:
         out.append(
             Diagnostic(
@@ -200,7 +271,8 @@ def _group_diagnostics(
             )
         )
 
-    origin_cost = next(iter(state.origin_costs))
+    origin_cost = state.origin_cost
+    assert origin_cost is not None  # a complete group recorded one on every row
     if abs(state.total_cost - origin_cost) > cost_tolerance:
         out.append(
             Diagnostic(
@@ -245,7 +317,7 @@ def _group_diagnostics(
             )
         )
 
-    if len(state.resources) != state.resource_count:
+    if state.duplicate_resource:
         out.append(
             Diagnostic(
                 code="FDT-ALLOC-004",

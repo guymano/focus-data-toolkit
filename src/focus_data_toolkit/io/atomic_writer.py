@@ -82,15 +82,37 @@ def _fsync_dir(path: Path) -> None:
         os.close(fd)
 
 
+def _is_plain_name(name: object) -> bool:
+    """A single path component: non-empty, no separators/drive, no traversal, not absolute."""
+    if not isinstance(name, str) or not name or name in (".", ".."):
+        return False
+    if any(sep in name for sep in ("/", "\\", ":", "\x00")):
+        return False
+    return Path(name).name == name and not Path(name).is_absolute()
+
+
 def _read_journal(journal: Path) -> dict | None:
-    """Load a replace journal; None when unreadable/invalid (left for ``fdt clean``)."""
+    """Load a replace journal; None when unreadable/invalid (left for ``fdt clean``).
+
+    Every recorded name must be a plain sibling basename with the writer's own prefixes —
+    a crafted or corrupted journal (absolute paths, ``..``, foreign names) must never steer
+    recovery renames/removals outside the output parent, so it is rejected here before any
+    filesystem operation and later removed as stale by :func:`clean_leftovers`.
+    """
     try:
         info = json.loads(journal.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if isinstance(info, dict) and {"target", "tmp", "trash"} <= set(info):
-        return info
-    return None
+    if not (isinstance(info, dict) and {"target", "tmp", "trash"} <= set(info)):
+        return None
+    target, tmp, trash = info["target"], info["tmp"], info["trash"]
+    if not all(_is_plain_name(name) for name in (target, tmp, trash)):
+        return None
+    if not (tmp.startswith(_TMP_PREFIX) and trash.startswith(_TRASH_PREFIX)):
+        return None
+    if target.startswith((_TMP_PREFIX, _TRASH_PREFIX, _JOURNAL_PREFIX)):
+        return None  # a destination is never one of the writer's own scratch names
+    return info
 
 
 def recover_interrupted_replaces(
@@ -149,30 +171,47 @@ def recover_interrupted_replaces(
     return actions
 
 
-def clean_leftovers(directory: str | os.PathLike[str]) -> list[str]:
-    """Recover journaled replaces, then remove orphan staging/trash leftovers (``fdt clean``).
+def _remove_orphans(directory: Path) -> list[str]:
+    """Remove leftover staging/trash directories and stale journals inside ``directory``.
 
-    ``directory`` is scanned for leftovers (``.output.tmp-*`` staging directories from runs
-    that died before publishing, ``.trash-*`` from concluded swaps, unreadable journals);
-    journaled replaces *targeting* ``directory`` itself are recovered from its parent first.
-    Only call this when no conversion is currently publishing into ``directory`` — a live
-    run's staging directory is indistinguishable from a dead one's.
+    Runs after :func:`recover_interrupted_replaces`, so any journal still present is
+    unreadable or invalid — removed as stale, never acted upon.
     """
-    directory = Path(directory)
-    actions = list(recover_interrupted_replaces(directory.parent, dest_name=directory.name))
-    if not directory.is_dir():
-        return actions
-    actions.extend(recover_interrupted_replaces(directory))
+    actions: list[str] = []
     for leftover in sorted(directory.iterdir()):
-        if leftover.name.startswith((_TMP_PREFIX, _TRASH_PREFIX)):
+        if leftover.name.startswith((_TMP_PREFIX, _TRASH_PREFIX)) and leftover.is_dir():
             shutil.rmtree(leftover, ignore_errors=True)
             kind = "unpublished staging" if leftover.name.startswith(_TMP_PREFIX) else "trash"
             actions.append(f"removed orphan {kind} directory {leftover.name}")
-        elif leftover.name.startswith(_JOURNAL_PREFIX):
-            leftover.unlink(missing_ok=True)  # unreadable/foreign journal: recovery skipped it
+        elif leftover.name.startswith(_JOURNAL_PREFIX) and leftover.is_file():
+            leftover.unlink(missing_ok=True)
             actions.append(f"removed stale replace journal {leftover.name}")
     if actions:
         _fsync_dir(directory)
+    return actions
+
+
+def clean_leftovers(directory: str | os.PathLike[str]) -> list[str]:
+    """Recover journaled replaces, then remove orphan staging/trash leftovers (``fdt clean``).
+
+    ``AtomicOutputDir`` stages ``.output.tmp-*`` / ``.trash-*`` / journals in the
+    **destination's parent**, so when ``directory`` is an output directory its leftovers are
+    siblings: both ``directory`` itself (as a container of outputs) and its parent are
+    swept. Journaled replaces are recovered first (any destination — this is explicit
+    maintenance), then orphans (staging from runs that died before publishing, trash from
+    concluded swaps, unreadable journals) are removed. Only call this when no conversion is
+    currently publishing here — a live run's staging directory is indistinguishable from a
+    dead one's.
+    """
+    directory = Path(directory)
+    actions: list[str] = []
+    parent = directory.parent
+    if parent != directory and parent.is_dir():
+        actions.extend(recover_interrupted_replaces(parent))
+        actions.extend(_remove_orphans(parent))
+    if directory.is_dir():
+        actions.extend(recover_interrupted_replaces(directory))
+        actions.extend(_remove_orphans(directory))
     return actions
 
 

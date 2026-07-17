@@ -170,3 +170,55 @@ def test_clean_cli_reports_nothing_to_clean(tmp_path, capsys):
     rc = main(["clean", "--out", str(tmp_path)])
     assert rc == 0
     assert "nothing to clean" in capsys.readouterr().out
+
+
+def test_crafted_journal_paths_are_never_followed(tmp_path):
+    # A journal whose tmp/trash escape the parent must be rejected before any filesystem
+    # operation — recovery takes no action, and clean removes it as stale.
+    parent = tmp_path / "work"
+    parent.mkdir()
+    dest = parent / "out"
+    publish(dest, b"kept")
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "precious.txt").write_text("do not delete", encoding="utf-8")
+    (parent / ".replace-journal-evil.json").write_text(json.dumps({
+        "run_id": "evil",
+        "target": "out",
+        "tmp": ".output.tmp-evil",
+        "trash": "../victim",
+    }), encoding="utf-8")
+    assert recover_interrupted_replaces(parent, dest_name="out") == []
+    assert (victim / "precious.txt").exists()
+    actions = clean_leftovers(dest)
+    assert any("stale replace journal" in a for a in actions)
+    assert (victim / "precious.txt").exists()
+    assert (dest / "data.csv").read_bytes() == b"kept"
+
+
+def test_crafted_journal_absolute_paths_are_rejected(tmp_path):
+    parent = tmp_path / "work"
+    parent.mkdir()
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (parent / ".replace-journal-abs.json").write_text(json.dumps({
+        "run_id": "abs",
+        "target": "out",
+        "tmp": ".output.tmp-abs",
+        "trash": str(victim),
+    }), encoding="utf-8")
+    assert recover_interrupted_replaces(parent) == []
+    assert victim.exists()
+
+
+def test_clean_on_output_directory_sweeps_sibling_leftovers(tmp_path):
+    # Leftovers live NEXT to the destination (AtomicOutputDir stages in the parent):
+    # `fdt clean --out DEST` must sweep them without the user guessing the parent.
+    dest = tmp_path / "out"
+    publish(dest, b"kept")
+    _staged(tmp_path, "sibling1", b"junk")  # died during staging, no journal
+    _trashed(tmp_path, "sibling2", b"junk")
+    rc = main(["clean", "--out", str(dest)])
+    assert rc == 0
+    assert (dest / "data.csv").read_bytes() == b"kept"
+    assert [p.name for p in tmp_path.iterdir()] == ["out"]

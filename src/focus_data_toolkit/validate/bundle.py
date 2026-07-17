@@ -223,7 +223,10 @@ def validate_dataset_bundle(
 
     # Split cost allocation and correction integrity (self-contained within Cost and Usage).
     if has_cu:
-        run("split_allocation", allocation.validate_split_allocation(cu))
+        run(
+            "split_allocation",
+            allocation.validate_split_allocation(cu, index_factory=factory),
+        )
         run(
             "correction_references",
             corrections.check_correction_references(cu, index_factory=factory),
