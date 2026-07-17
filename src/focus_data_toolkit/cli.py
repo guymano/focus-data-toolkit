@@ -4,6 +4,8 @@ Subcommands:
 
 * ``generate`` — emit provider-realistic FOCUS 1.2/1.3 sample CSVs.
 * ``convert``  — convert a FOCUS 1.2/1.3 source into the four FOCUS 1.4 datasets.
+* ``gaps``     — report exactly which facts a client must supply for the four
+  FOCUS 1.4 datasets to be produced factually from a given source.
 * ``validate`` — validate a CSV against the built-in FOCUS 1.4 model, or run
   the official FinOps validator (``--official``).
 """
@@ -65,6 +67,47 @@ def _cmd_generate(args: argparse.Namespace) -> int:
         cc = out_dir / f"focus_{suffix}_contract_commitment_{args.provider}.csv"
         cc.write_bytes(module.generate_contract_commitment_csv_bytes(args.rows, args.seed))
         print(f"wrote {cc}")
+    return 0
+
+
+def _read_header(path: str) -> tuple[str, ...]:
+    """Read only the header of a CSV file (gzip auto-detected)."""
+    from focus_data_toolkit.io.csv_io import CsvRowReader
+
+    reader = CsvRowReader(path)
+    try:
+        return reader.source_columns
+    finally:
+        reader.close()
+
+
+def _cmd_gaps(args: argparse.Namespace) -> int:
+    from focus_data_toolkit.convert import _resolve_source_version
+    from focus_data_toolkit.supplement import compute_gaps
+
+    header = _read_header(args.cost_and_usage)
+    try:
+        version, _detection = _resolve_source_version(
+            header,
+            source_version=args.source_version,
+            source_dataset=args.source_dataset,
+            mode=Mode.STRICT,
+        )
+    except ConversionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    cc_header = _read_header(args.contract_commitment) if args.contract_commitment else None
+    report = compute_gaps(header, version, cc_columns=cc_header)
+    payload = (
+        json.dumps(report.as_dict(), indent=2, sort_keys=True) + "\n"
+        if args.format == "json"
+        else report.render_text()
+    )
+    if args.out:
+        Path(args.out).write_text(payload, encoding="utf-8")
+        print(f"wrote {args.out}")
+    else:
+        print(payload, end="")
     return 0
 
 
@@ -328,6 +371,25 @@ def build_parser() -> argparse.ArgumentParser:
         "a new part file once exceeded",
     )
     conv.set_defaults(func=_cmd_convert)
+
+    gaps = sub.add_parser(
+        "gaps",
+        help="report exactly which facts a client must supply to produce the four "
+        "FOCUS 1.4 datasets factually from this source",
+    )
+    gaps.add_argument("--cost-and-usage", required=True, help="FOCUS 1.2/1.3 Cost and Usage CSV")
+    gaps.add_argument(
+        "--contract-commitment", help="optional FOCUS 1.3 Contract Commitment CSV (13 columns)"
+    )
+    gaps.add_argument(
+        "--source-version", help="force the FOCUS source version (1.2 or 1.3)"
+    )
+    gaps.add_argument(
+        "--source-dataset", help="force the source dataset instead of auto-detecting it"
+    )
+    gaps.add_argument("--format", choices=("text", "json"), default="text")
+    gaps.add_argument("--out", help="write the report to this path instead of stdout")
+    gaps.set_defaults(func=_cmd_gaps)
 
     val = sub.add_parser("validate", help="validate a CSV file")
     val.add_argument("file", help="CSV file to validate")
