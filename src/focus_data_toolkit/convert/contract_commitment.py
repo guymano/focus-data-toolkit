@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
+from focus_data_toolkit.errors import Diagnostic, Severity
 from focus_data_toolkit.model import dataset_columns
 from focus_data_toolkit.provenance import ColumnRule, Lineage
 
@@ -64,9 +65,15 @@ PROVENANCE: dict[str, ColumnRule] = {
     "ContractCommitmentPaymentUpfrontPercentage": ColumnRule(Lineage.ASSUMED, note="assumed default"),
 }
 
+# The official ContractCommitmentApplicability object schema requires a scope
+# representation: when neither IsGlobalScope nor IsComplexScope is true, Inclusions
+# (min 1) and InclusionOperator become required. The authoritative terms are unknown
+# here, so the minimal conformant synthetic object declares a complex scope; the
+# value stays ASSUMED and never passes strict mode.
 _APPLICABILITY = json.dumps(
-    {"x_Source": "Derived from a FOCUS 1.3 Contract Commitment dataset; "
-                 "applicability terms were not present in the source."},
+    {"IsComplexScope": True,
+     "x_Source": "Synthetic applicability derived from a FOCUS 1.3 Contract Commitment "
+                 "dataset; authoritative applicability terms were not present in the source."},
     separators=(",", ":"),
 )
 
@@ -92,12 +99,21 @@ def _parse(ts: str) -> datetime | None:
 
 
 def _duration_type(start: str, end: str) -> str:
-    """Return an Expected-Format duration like ``"12 Months"`` from the period."""
+    """Return an Expected-Format duration like ``"12 Months"`` from the period.
+
+    An unparseable or inverted period yields ``""`` (never a fabricated duration):
+    the value cannot be derived from the source, and the mandatory-column lint will
+    flag the row rather than silently publish an arbitrary ``"12 Months"``.
+    """
     a, b = _parse(start or ""), _parse(end or "")
     if a is None or b is None or b <= a:
-        return "12 Months"
+        return ""
     months = max(1, round((b - a).days / 30.44))
     return f"{months} Months" if months > 1 else "1 Month"
+
+
+# How many offending ContractCommitmentIds a diagnostic lists inline.
+_ID_SAMPLE_CAP = 25
 
 
 def convert_contract_commitment(
@@ -105,10 +121,17 @@ def convert_contract_commitment(
     *,
     service_provider_name: str,
     invoice_issuer_name: str,
+    diagnostics: list[Diagnostic] | None = None,
 ) -> list[dict[str, str]]:
-    """Return the 13-column 1.3 ``rows`` expanded to the 1.4 30-column shape."""
+    """Return the 13-column 1.3 ``rows`` expanded to the 1.4 30-column shape.
+
+    Rows whose commitment period cannot be parsed get an empty
+    ``ContractCommitmentDurationType`` (the duration is not derivable) and are
+    reported through ``diagnostics`` as a single aggregated ``FDT-CC-001`` WARNING.
+    """
     target = dataset_columns(DATASET)
     out: list[dict[str, str]] = []
+    unparseable_ids: list[str] = []
     for row in rows:
         created = row.get("ContractCommitmentPeriodStart", "")
         converted: dict[str, str] = {}
@@ -120,10 +143,13 @@ def convert_contract_commitment(
             elif col == "ContractCommitmentLastUpdated":
                 converted[col] = created
             elif col == "ContractCommitmentDurationType":
-                converted[col] = _duration_type(
+                duration = _duration_type(
                     row.get("ContractCommitmentPeriodStart", ""),
                     row.get("ContractCommitmentPeriodEnd", ""),
                 )
+                if not duration:
+                    unparseable_ids.append(row.get("ContractCommitmentId", ""))
+                converted[col] = duration
             elif col == "InvoiceIssuerName":
                 converted[col] = invoice_issuer_name
             elif col == "ServiceProviderName":
@@ -137,4 +163,20 @@ def convert_contract_commitment(
             else:
                 converted[col] = ""
         out.append(converted)
+    if unparseable_ids and diagnostics is not None:
+        diagnostics.append(
+            Diagnostic(
+                code="FDT-CC-001",
+                severity=Severity.WARNING,
+                message="commitment period unparseable or inverted; "
+                "ContractCommitmentDurationType left empty (not derivable)",
+                datasets=(DATASET,),
+                context={
+                    "row_count": str(len(unparseable_ids)),
+                    "contract_commitment_ids": ", ".join(
+                        sorted(set(unparseable_ids))[:_ID_SAMPLE_CAP]
+                    ),
+                },
+            )
+        )
     return out

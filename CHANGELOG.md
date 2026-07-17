@@ -11,6 +11,17 @@ policy.
 
 ### Fixed — FOCUS conformance (may change output bytes)
 
+- **Synthetic `ContractCommitmentApplicability`**: the object now declares
+  `{"IsComplexScope": true, ...}` — the official object schema requires a scope
+  representation (`Inclusions` + `InclusionOperator` become required when no
+  scope flag is set), so the previous `x_Source`-only object was normatively
+  invalid. The value remains `ASSUMED` and still never passes strict mode.
+- **`ContractCommitmentDurationType`**: an unparseable or inverted commitment
+  period no longer yields a fabricated `"12 Months"`. The value stays empty
+  (not derivable) and the affected rows are reported as an aggregated
+  `FDT-CC-001` WARNING; the mandatory-column lint then flags the dataset
+  instead of silently publishing an arbitrary duration.
+
 - **1.2 participant-entity migration**: `HostProviderName` is no longer derived
   from the deprecated `PublisherName` (the entity that *produced* the service —
   not the infrastructure host). Per the official FOCUS 1.4 `HostProviderName`

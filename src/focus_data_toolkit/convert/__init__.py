@@ -327,6 +327,7 @@ def convert_to_focus_1_4(
                 cc_rows,
                 service_provider_name=provider_ctx.service_provider_name,
                 invoice_issuer_name=issuer,
+                diagnostics=diagnostics,
             )
             if provider_ambiguous:
                 diagnostics.append(
