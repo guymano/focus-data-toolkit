@@ -11,8 +11,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
-
 _ROOT = Path(__file__).resolve().parent.parent
 _MANIFEST = _ROOT / "src" / "focus_data_toolkit" / "model" / "model_provenance.json"
 _SCHEMA = _ROOT / "schema" / "model_provenance.schema.json"
@@ -37,17 +35,45 @@ def test_manifest_status_is_partial_and_honest():
 
 
 def test_schema_is_wellformed():
+    # jsonschema is a declared dev dependency, so this runs (and fails loudly) in CI — it does not
+    # silently skip. A broken schema must not be able to merge.
+    import jsonschema
+
     schema = json.loads(_SCHEMA.read_text(encoding="utf-8"))
     assert schema["type"] == "object"
-    jsonschema = pytest.importorskip("jsonschema")
     jsonschema.validators.validator_for(schema).check_schema(schema)
 
 
 def test_instance_matches_schema():
-    jsonschema = pytest.importorskip("jsonschema")
+    import jsonschema
+
     schema = json.loads(_SCHEMA.read_text(encoding="utf-8"))
     manifest = json.loads(_MANIFEST.read_text(encoding="utf-8"))
-    jsonschema.validate(manifest, schema)
+    # format_checker so `format: date` is enforced (jsonschema ignores formats otherwise).
+    jsonschema.validate(manifest, schema, format_checker=jsonschema.FormatChecker())
+
+
+def test_gate_complete_rejects_invalid_retrieved_date(tmp_path):
+    # `complete` with a non-date artifact_retrieved must be rejected (truthiness is not enough).
+    manifest = json.loads(_MANIFEST.read_text(encoding="utf-8"))
+    manifest["provenance_status"] = "complete"
+    manifest["source"]["artifact_sha256"] = "a" * 64
+    manifest["source"]["artifact_retrieved"] = "not-a-date"
+    forged = tmp_path / "model_provenance.json"
+    forged.write_text(json.dumps(manifest), encoding="utf-8")
+    errors = verify(forged)
+    assert any("artifact_retrieved" in e for e in errors), errors
+
+
+def test_verify_rejects_path_escape(tmp_path):
+    # A manifest pointing an artifact path outside the repository must be rejected, even if the
+    # hash is well-formed — otherwise the gate could "verify" an external file.
+    manifest = json.loads(_MANIFEST.read_text(encoding="utf-8"))
+    manifest["output"]["path"] = "../../../../nonexistent_escape.json"
+    forged = tmp_path / "model_provenance.json"
+    forged.write_text(json.dumps(manifest), encoding="utf-8")
+    errors = verify(forged)
+    assert any("escapes the repository" in e for e in errors), errors
 
 
 def test_gate_complete_requires_source_hash(tmp_path):

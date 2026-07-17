@@ -19,6 +19,7 @@ a note (the structural checks above still run).
 
 from __future__ import annotations
 
+import datetime as _dt
 import hashlib
 import json
 import re
@@ -35,12 +36,25 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _is_iso_date(value: str) -> bool:
+    try:
+        _dt.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
 def _check_hash(errors: list[str], label: str, rel_path: str, expected: str) -> None:
     """Confirm ``expected`` is a sha256 and matches the file at ``rel_path`` (repo-relative)."""
     if not isinstance(expected, str) or not _SHA256.match(expected):
         errors.append(f"{label}: sha256 is not a 64-hex string: {expected!r}")
         return
-    target = _REPO / rel_path
+    # Reject absolute paths and `..` escapes: the manifest must only vouch for files *inside* the
+    # repository, so a doctored manifest cannot claim to have verified some external file.
+    target = (_REPO / rel_path).resolve()
+    if not target.is_relative_to(_REPO):
+        errors.append(f"{label}: path escapes the repository: {rel_path!r}")
+        return
     if not target.is_file():
         errors.append(f"{label}: file not found: {rel_path}")
         return
@@ -91,8 +105,12 @@ def verify(manifest_path: Path = _MANIFEST) -> list[str]:
         art = source.get("artifact_sha256")
         if not isinstance(art, str) or not _SHA256.match(art):
             errors.append("provenance_status 'complete' requires source.artifact_sha256 (64-hex)")
-        if not source.get("artifact_retrieved"):
-            errors.append("provenance_status 'complete' requires source.artifact_retrieved (date)")
+        retrieved = source.get("artifact_retrieved")
+        if not isinstance(retrieved, str) or not _is_iso_date(retrieved):
+            errors.append(
+                "provenance_status 'complete' requires source.artifact_retrieved as an ISO date "
+                f"(YYYY-MM-DD), got {retrieved!r}"
+            )
         if source.get("license_verified") is not True:
             errors.append("provenance_status 'complete' requires source.license_verified = true")
     else:  # partial: the source artifact is intentionally un-hashed
@@ -116,7 +134,9 @@ def _schema_validate(manifest: dict) -> list[str]:
         return [f"cannot read/parse schema {_SCHEMA}: {exc}"]
     validator_cls = jsonschema.validators.validator_for(schema)
     validator_cls.check_schema(schema)
-    errors = sorted(validator_cls(schema).iter_errors(manifest), key=lambda e: e.path)
+    # format_checker so `format: date` is actually enforced (jsonschema ignores formats otherwise).
+    validator = validator_cls(schema, format_checker=jsonschema.FormatChecker())
+    errors = sorted(validator.iter_errors(manifest), key=lambda e: e.path)
     return [f"schema: {e.json_path}: {e.message}" for e in errors]
 
 

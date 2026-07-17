@@ -1,5 +1,5 @@
 {
-  "$schema": "../../../schema/model_provenance.schema.json",
+  "$schema": "https://raw.githubusercontent.com/guymano/focus-data-toolkit/main/schema/model_provenance.schema.json",
   "schema_version": "1.0",
   "focus_version": "1.4",
   "provenance_status": "partial",

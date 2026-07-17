@@ -57,6 +57,9 @@ dev = [
     "pytest-cov>=5,<7",
     "ruff>=0.6",
     "mypy>=1.11,<2.4",
+    # Validates the FOCUS model-provenance JSON Schema in CI (test_model_provenance). Dev/CI only;
+    # the runtime core and the stdlib provenance verifier do not require it.
+    "jsonschema>=4.21,<5",
 ]
 
 [project.scripts]
