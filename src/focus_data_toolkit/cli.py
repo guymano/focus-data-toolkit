@@ -27,10 +27,27 @@ from focus_data_toolkit.convert import (
     write_result,
 )
 from focus_data_toolkit.generators import FOCUS_VERSIONS, PROVIDERS, get_generator
+from focus_data_toolkit.io.parquet_io import COMPRESSIONS
 from focus_data_toolkit.io.records import MalformedRecordError
 from focus_data_toolkit.manifest import render as render_manifest
 from focus_data_toolkit.model.validator import lint_focus_1_4_structure, resolve_dataset
 from focus_data_toolkit.modes import Mode
+
+
+def _parse_size(value: str | None) -> int | None:
+    """Parse a byte size for --target-file-size (e.g. ``128MB``, ``512KB``, or a byte count)."""
+    if not value:
+        return None
+    text = value.strip().upper()
+    try:
+        for suffix, mult in (("KB", 1000), ("MB", 1000**2), ("GB", 1000**3), ("B", 1)):
+            if text.endswith(suffix):
+                return int(float(text[: -len(suffix)]) * mult)
+        return int(text)
+    except ValueError as exc:
+        raise ConversionError(
+            f"invalid --target-file-size {value!r}: use e.g. 128MB, 512KB, or a byte count"
+        ) from exc
 
 
 def _cmd_generate(args: argparse.Namespace) -> int:
@@ -52,7 +69,9 @@ def _cmd_generate(args: argparse.Namespace) -> int:
 
 def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
     """Bounded-memory streaming conversion (required for Parquet output / large inputs)."""
+    partition_by = [c.strip() for c in (args.partition_by or "").split(",") if c.strip()]
     try:
+        target_file_size = _parse_size(args.target_file_size)
         out = convert_files(
             args.cost_and_usage,
             args.out,
@@ -64,6 +83,9 @@ def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
             on_exists=OnExists(args.on_exists),
             keep_temp=args.keep_temp,
             output_format=args.output_format,
+            partition_by=partition_by,
+            compression=args.compression,
+            target_file_size=target_file_size,
         )
     except (ConversionError, DestinationExistsError, MalformedRecordError) as exc:
         # MalformedRecordError covers a malformed CSV record and a missing PyArrow (the clear
@@ -82,6 +104,8 @@ def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
             published_manifest.read_text(encoding="utf-8"), encoding="utf-8"
         )
     manifest = json.loads(published_manifest.read_text(encoding="utf-8"))
+    for diag in manifest.get("diagnostics", []):
+        print(f"note {diag.get('code')}: {diag.get('message')}", file=sys.stderr)
     print(f"wrote {out}/ (format {args.output_format}, mode {mode})")
     for name, entry in manifest["datasets"].items():
         if entry.get("status") == NOT_PRODUCED:
@@ -102,9 +126,9 @@ def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
 
 def _cmd_convert(args: argparse.Namespace) -> int:
     mode = Mode(args.mode)
-    # Parquet output and explicit --stream go through the bounded-memory streaming engine; the
-    # eager path (rich per-dataset reporting) stays the default for CSV output.
-    if args.output_format == "parquet" or args.stream:
+    # Parquet output, explicit --stream, or partitioning go through the bounded-memory streaming
+    # engine; the eager path (rich per-dataset reporting) stays the default for CSV output.
+    if args.output_format == "parquet" or args.stream or args.partition_by:
         return _cmd_convert_stream(args, mode)
 
     cau_rows = read_csv_rows(args.cost_and_usage)
@@ -265,6 +289,22 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="use the bounded-memory streaming engine (implied by --output-format parquet); "
         "recommended for large client files",
+    )
+    conv.add_argument(
+        "--partition-by",
+        help="Parquet only: comma-separated low-cardinality String/Date-Time Cost and Usage "
+        "columns to Hive-partition the dataset by (e.g. BillingCurrency,InvoiceIssuerName)",
+    )
+    conv.add_argument(
+        "--compression",
+        choices=list(COMPRESSIONS),
+        default="snappy",
+        help="Parquet compression codec (default: snappy)",
+    )
+    conv.add_argument(
+        "--target-file-size",
+        help="Parquet only: approximate max part-file size per partition (e.g. 128MB); rolls to "
+        "a new part file once exceeded",
     )
     conv.set_defaults(func=_cmd_convert)
 

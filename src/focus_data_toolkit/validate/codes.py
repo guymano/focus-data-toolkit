@@ -78,6 +78,7 @@ CATALOG: dict[str, CodeSpec] = dict([
     _s("FDT-IO-001", Severity.ERROR, "malformed input record (wrong field count)"),
     _s("FDT-IO-002", Severity.ERROR, "decimal value exceeds the target Parquet scale/precision"),
     _s("FDT-IO-003", Severity.ERROR, "destination already exists"),
+    _s("FDT-IO-004", Severity.WARNING, "high-cardinality Parquet partition key (many small files)"),
 ])
 
 

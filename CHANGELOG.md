@@ -97,6 +97,16 @@ multi-provider, multi-issuer, multi-currency, volumetric exports — without re-
   UTC timestamps, JSON/strings verbatim, empty string ↔ null. Exactness contract: **CSV is
   byte-exact, Parquet is decimal-value-exact**. PyArrow stays an optional `[parquet]` extra
   with a clear install hint; the core stays standard-library only.
+- **Partitioning & compression**: `--partition-by` writes the Cost and Usage dataset as a
+  Hive-partitioned Parquet tree (`COL=value/…/part-N.parquet`) on low-cardinality String /
+  Date-Time columns, keeping memory bounded to one open writer per partition; a high-cardinality
+  key is warned about (`FDT-IO-004`) and, past a hard cap, refused (nothing partial is
+  published). Partition columns live in the paths (standard Hive), so any `pyarrow.dataset`
+  reader — and the toolkit's own read-back lint gate — reconstruct full rows, with the values
+  round-tripping exactly (reconstructed as strings). `--compression`
+  (snappy default / zstd / gzip / none) and `--target-file-size` (approximate part-file roll)
+  tune the layout. The atomic writer now checksums files by path relative to the output root, so
+  every partition part appears in `SHA256SUMS`.
 
 ### Added — synthetic scenarios & lifecycle (Phase B)
 

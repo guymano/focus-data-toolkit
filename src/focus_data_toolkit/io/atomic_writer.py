@@ -151,16 +151,38 @@ class AtomicOutputDir:
         self._data_files.append(path)
         return path
 
+    def add_data_tree(self, name: str) -> list[Path]:
+        """Register every file under a staged directory (e.g. a partitioned Parquet dataset).
+
+        Each file is fsync'd and enrolled for checksums under its path relative to the staging
+        directory, so a partition tree is covered by ``SHA256SUMS`` file-by-file.
+        """
+        root = self.path_for(name)
+        added = sorted(p for p in root.rglob("*") if p.is_file())
+        for path in added:
+            _fsync_file(path)
+            self._data_files.append(path)
+        return added
+
     def discard(self, name: str) -> None:
         """Delete a staging file (e.g. scratch state) so it is never published."""
         self.path_for(name).unlink(missing_ok=True)
 
+    def _rel(self, path: Path) -> str:
+        """Path relative to the staging dir — the key under which a file is published/checksummed.
+
+        Using the relative path (not just the basename) keeps partition part files distinct
+        (many partitions each have a ``part-0.parquet``); for flat files it equals the basename,
+        so single-file output is unaffected.
+        """
+        return path.relative_to(self._tmp).as_posix()
+
     def checksums(self) -> dict[str, str]:
-        """SHA-256 of every data file written so far, keyed by file name (sorted)."""
-        return {p.name: sha256_file(p) for p in sorted(self._data_files, key=lambda p: p.name)}
+        """SHA-256 of every data file written so far, keyed by relative path (sorted)."""
+        return {self._rel(p): sha256_file(p) for p in sorted(self._data_files, key=self._rel)}
 
     def sizes(self) -> dict[str, int]:
-        return {p.name: p.stat().st_size for p in sorted(self._data_files, key=lambda p: p.name)}
+        return {self._rel(p): p.stat().st_size for p in sorted(self._data_files, key=self._rel)}
 
     # -- publishing ------------------------------------------------------------
     def commit(self, *, final_files: dict[str, bytes] | None = None) -> Path:
