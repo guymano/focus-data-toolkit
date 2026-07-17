@@ -263,4 +263,5 @@ The external report was accurate; only two statements needed refinement:
 
 The companion document
 [`2026-07-improvement-plan.md`](./2026-07-improvement-plan.md) turns every finding above into a
-sequenced backlog of 16 pull requests in 5 lots.
+sequenced backlog of 18 pull requests in 5 lots (revised 2026-07-17: Lot 2 gained
+provider-native supplement adapters for AWS/Azure/GCP exports).
