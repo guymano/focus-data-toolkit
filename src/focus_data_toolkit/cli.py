@@ -359,6 +359,23 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     return 0 if report.ok else 1
 
 
+def _cmd_clean(args: argparse.Namespace) -> int:
+    from focus_data_toolkit.io.atomic_writer import clean_leftovers
+
+    # The directory itself may be missing precisely because a crash interrupted a replace
+    # mid-swap — recovery restores it from the journal — so only its parent must exist.
+    target = Path(args.out)
+    if not target.exists() and not target.parent.is_dir():
+        print(f"error: neither {target} nor its parent directory exists", file=sys.stderr)
+        return 2
+    actions = clean_leftovers(target)
+    for action in actions:
+        print(action)
+    if not actions:
+        print("nothing to clean")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="focus-toolkit",
@@ -546,6 +563,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--focus-version", help="rule-model version for --official (e.g. 1.2.0.1)"
     )
     val.set_defaults(func=_cmd_validate)
+
+    clean = sub.add_parser(
+        "clean",
+        help="recover interrupted publishes and remove leftover staging/trash directories",
+    )
+    clean.add_argument(
+        "--out", required=True,
+        help="directory to clean (an output directory or the directory containing outputs); "
+        "run only when no conversion is publishing there",
+    )
+    clean.set_defaults(func=_cmd_clean)
     return parser
 
 

@@ -144,6 +144,10 @@ For consolidated, multi-provider, multi-issuer, multi-currency exports:
   per-key lookup state to a scratch SQLite database past a threshold.
 - **Atomic writes**: output appears only after validation succeeds and checksums + manifest
   are written; nothing partial is left on error. `--on-exists refuse|replace|version`.
+  A `replace` swap is **journaled**: if the process dies between its two renames, the next
+  publish to the same destination (or `focus-toolkit clean --out DIR`) reads the journal and
+  rolls the fully staged result forward — or the previous result back — so the destination
+  is never left missing. `clean` also removes orphan `.output.tmp-*` / `.trash-*` leftovers.
 
 ```python
 from focus_data_toolkit import convert_to_focus_1_4, detect_focus_schema, validate_bundle
