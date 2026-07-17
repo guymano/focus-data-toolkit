@@ -1,0 +1,26 @@
+# Normalize text files to LF in the repository and on checkout on every platform.
+#
+# Byte-reproducibility depends on this: the FOCUS model JSON and its provenance hashes
+# (model_provenance.json / scripts/verify_model_provenance.py) are computed over LF bytes, and the
+# synthetic generators emit LF. Without this, Windows autocrlf checks files out as CRLF, changing
+# their size and SHA-256 and breaking the provenance verification and any byte-for-byte golden.
+# Binary files are auto-detected and left untouched.
+* text=auto eol=lf
+
+# Be explicit for the reproducibility-critical, hashed / byte-compared artifacts.
+*.json  text eol=lf
+*.py    text eol=lf
+*.csv   text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.toml  text eol=lf
+*.cfg   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+
+# Known binary types: never apply EOL conversion even if git guesses wrong.
+*.xlsx     binary
+*.parquet  binary
+*.gz       binary
+*.zip       binary
+*.png       binary
