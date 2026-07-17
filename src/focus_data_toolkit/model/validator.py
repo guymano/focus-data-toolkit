@@ -395,6 +395,23 @@ _CROSS_FIELD: dict[str, list[Callable]] = {
 }
 
 
+def check_column_value(dataset: str, column: str, value: str) -> str | None:
+    """Format-check one non-empty value against the model spec of ``dataset.column``.
+
+    Returns the violated rule name (as in the lint report) or ``None``. Used by the
+    supplement validator so client-supplied facts obey exactly the same format rules
+    as converted data. An unknown column returns ``"unknown_column"``.
+    """
+    name = resolve_dataset(dataset)
+    spec = load_model()["datasets"][name]["columns"].get(column)
+    if spec is None:
+        return "unknown_column"
+    text = value.strip()
+    if not text:
+        return None
+    return _format_violation(spec, column, text)
+
+
 def lint_focus_1_4_structure(
     dataset: str,
     rows: list[dict[str, str]],

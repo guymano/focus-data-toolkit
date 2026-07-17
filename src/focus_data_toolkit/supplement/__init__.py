@@ -17,11 +17,32 @@ from __future__ import annotations
 
 from focus_data_toolkit.supplement.gaps import ColumnGap, GapReport, compute_gaps
 from focus_data_toolkit.supplement.kinds import SUPPLEMENT_KINDS, SupplementKind
+from focus_data_toolkit.supplement.loader import SupplementBundle, SupplementTable
+from focus_data_toolkit.supplement.spec import (
+    SupplementError,
+    SupplementFileSpec,
+    load_bundle_dir,
+    parse_supplement_arg,
+)
+from focus_data_toolkit.supplement.validate import (
+    SourceKeySets,
+    source_key_sets,
+    validate_supplements,
+)
 
 __all__ = [
     "SUPPLEMENT_KINDS",
     "ColumnGap",
     "GapReport",
+    "SourceKeySets",
+    "SupplementBundle",
+    "SupplementError",
+    "SupplementFileSpec",
     "SupplementKind",
+    "SupplementTable",
     "compute_gaps",
+    "load_bundle_dir",
+    "parse_supplement_arg",
+    "source_key_sets",
+    "validate_supplements",
 ]

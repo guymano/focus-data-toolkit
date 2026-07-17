@@ -111,6 +111,49 @@ def _cmd_gaps(args: argparse.Namespace) -> int:
     return 0
 
 
+def _supplement_specs(args: argparse.Namespace) -> list:
+    """Collect supplement file specs from --supplement / --supplements-dir."""
+    from focus_data_toolkit.supplement import load_bundle_dir, parse_supplement_arg
+
+    specs = [parse_supplement_arg(arg) for arg in (args.supplement or [])]
+    if getattr(args, "supplements_dir", None):
+        specs.extend(load_bundle_dir(args.supplements_dir))
+    return specs
+
+
+def _cmd_supplements_validate(args: argparse.Namespace) -> int:
+    from focus_data_toolkit.supplement import (
+        SupplementBundle,
+        SupplementError,
+        source_key_sets,
+        validate_supplements,
+    )
+    from focus_data_toolkit.supplement.validate import has_blocking_errors
+
+    try:
+        specs = _supplement_specs(args)
+        if not specs:
+            print("error: provide --supplement and/or --supplements-dir", file=sys.stderr)
+            return 2
+        bundle = SupplementBundle.load(specs)
+    except SupplementError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    cau_rows = read_csv_rows(args.cost_and_usage)
+    cc_rows = read_csv_rows(args.contract_commitment) if args.contract_commitment else None
+    diagnostics = validate_supplements(bundle, source_key_sets(cau_rows, cc_rows))
+    for diag in diagnostics:
+        print(f"{diag.severity} {diag.code}: {diag.message}")
+        for key, value in diag.context.items():
+            print(f"    {key}: {value}")
+    if has_blocking_errors(diagnostics):
+        print("supplements NOT usable: fix the ERROR diagnostics above", file=sys.stderr)
+        return 1
+    kinds = ", ".join(sorted(bundle.tables)) or "-"
+    print(f"supplements OK ({kinds}); see FDT-SUPP-010 entries for coverage")
+    return 0
+
+
 def _capabilities(args: argparse.Namespace) -> CapabilityProfile:
     """Build the capability profile from repeated ``--supports`` flags."""
     return CapabilityProfile(frozenset(args.supports), source="cli") if args.supports \
@@ -390,6 +433,31 @@ def build_parser() -> argparse.ArgumentParser:
     gaps.add_argument("--format", choices=("text", "json"), default="text")
     gaps.add_argument("--out", help="write the report to this path instead of stdout")
     gaps.set_defaults(func=_cmd_gaps)
+
+    supp = sub.add_parser(
+        "supplements", help="work with supplemental client data (see docs/supplements.md)"
+    )
+    supp_sub = supp.add_subparsers(dest="supplements_command", required=True)
+    supp_val = supp_sub.add_parser(
+        "validate", help="pre-flight check supplement files against a source"
+    )
+    supp_val.add_argument(
+        "--cost-and-usage", required=True, help="FOCUS 1.2/1.3 Cost and Usage CSV"
+    )
+    supp_val.add_argument(
+        "--contract-commitment", help="optional FOCUS 1.3 Contract Commitment CSV"
+    )
+    supp_val.add_argument(
+        "--supplement",
+        action="append",
+        default=[],
+        metavar="FILE[:KIND]",
+        help="supplement file (CSV/JSON, gzip ok); repeatable; ':KIND' forces the kind",
+    )
+    supp_val.add_argument(
+        "--supplements-dir", help="directory containing a supplements.json bundle manifest"
+    )
+    supp_val.set_defaults(func=_cmd_supplements_validate)
 
     val = sub.add_parser("validate", help="validate a CSV file")
     val.add_argument("file", help="CSV file to validate")
