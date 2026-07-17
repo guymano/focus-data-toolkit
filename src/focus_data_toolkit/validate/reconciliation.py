@@ -8,12 +8,16 @@ explicit, documented tolerance rather than requiring exact equality.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
 from decimal import Decimal, InvalidOperation
 
 from focus_data_toolkit.errors import Diagnostic, Severity
 
 Rows = Sequence[Mapping[str, str]]
+#: Inputs are consumed in forward passes only, so any (re-)iterable of rows works.
+RowStream = Iterable[Mapping[str, str]]
+#: Factory for per-key lookup state (``dict`` by default; a spillable map for streaming).
+IndexFactory = Callable[[], MutableMapping[str, str]]
 
 # Default rounding-variance tolerance for a reconciled sum (absolute, in billing currency).
 DEFAULT_TOLERANCE = Decimal("0.01")
@@ -30,10 +34,11 @@ def _dec(value: str | None) -> Decimal:
 
 
 def reconcile_invoice_detail(
-    cost_and_usage: Rows,
-    invoice_detail: Rows,
+    cost_and_usage: RowStream,
+    invoice_detail: RowStream,
     *,
     tolerance: Decimal = DEFAULT_TOLERANCE,
+    index_factory: IndexFactory = dict,
 ) -> list[Diagnostic]:
     """Compare each Invoice Detail BilledCost to the sum of its Cost and Usage lines.
 
@@ -41,11 +46,16 @@ def reconcile_invoice_detail(
     back-link. A line with no matching Cost and Usage rows is a warning; a sum that differs
     beyond ``tolerance`` is an error carrying the expected/actual amounts.
     """
-    sums: dict[str, Decimal] = {}
+    # Sums are stored as exact Decimal strings so the state can live in a spillable map.
+    sums = index_factory()
     for row in cost_and_usage:
         ref = (row.get("InvoiceDetailId") or "").strip()
         if ref:
-            sums[ref] = sums.get(ref, Decimal(0)) + _dec(row.get("BilledCost"))
+            current = sums.get(ref)
+            sums[ref] = str(
+                (Decimal(current) if current is not None else Decimal(0))
+                + _dec(row.get("BilledCost"))
+            )
 
     out: list[Diagnostic] = []
     for i, detail in enumerate(invoice_detail, start=1):
@@ -68,7 +78,7 @@ def reconcile_invoice_detail(
                 )
             )
             continue
-        summed = sums[detail_id]
+        summed = Decimal(sums[detail_id])
         if abs(summed - invoiced) > tolerance:
             out.append(
                 Diagnostic(

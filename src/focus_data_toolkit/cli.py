@@ -297,7 +297,8 @@ def _cmd_convert(args: argparse.Namespace) -> int:
 
     try:
         written = write_result(
-            result, args.out, on_exists=OnExists(args.on_exists), keep_temp=args.keep_temp
+            result, args.out, on_exists=OnExists(args.on_exists), keep_temp=args.keep_temp,
+            validate_bundle=not args.no_validate,
         )
     except DestinationExistsError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -395,7 +396,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--manifest", help="also write the conversion manifest JSON to this path"
     )
     conv.add_argument(
-        "--no-validate", action="store_true", help="skip the built-in FOCUS 1.4 structural lint"
+        "--no-validate", action="store_true",
+        help="skip the built-in FOCUS 1.4 structural lint and the cross-dataset bundle "
+        "validation gate (the skip is recorded in the manifest)",
     )
     conv.add_argument(
         "--supports",

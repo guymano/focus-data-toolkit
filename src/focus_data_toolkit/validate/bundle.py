@@ -6,19 +6,28 @@ uniqueness, currency/period/issuer coherence, reconciliation, split cost allocat
 commitment lifecycle. ``validate_dataset_bundle`` returns a :class:`BundleReport` whose
 diagnostics are grouped by severity (error / warning / info / not-executable / not-applicable)
 and which serialises to JSON.
+
+Memory model: no dataset is ever materialised. Each check consumes its inputs in independent
+forward passes, so every bundle value must be **re-iterable** — a list, or an object whose
+``__iter__`` opens a fresh scan (e.g. a staged-file reader); a one-shot generator is rejected.
+Per-key lookup state (seen ids, foreign-key targets, running sums) is created through
+``index_factory``, which a streaming caller points at a disk-spilling map
+(:class:`~focus_data_toolkit.storage.spill.SpillableIndexPool`) to validate bundles far
+larger than RAM.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
 from decimal import Decimal
 
 from focus_data_toolkit.errors import Diagnostic, Severity
 from focus_data_toolkit.validate import allocation, corrections, reconciliation, referential
 
-Rows = Sequence[Mapping[str, str]]
+Rows = Iterable[Mapping[str, str]]
 Bundle = Mapping[str, Rows]
+IndexFactory = Callable[[], MutableMapping[str, str]]
 
 
 @dataclass
@@ -71,24 +80,45 @@ def _note(code: str, severity: Severity, message: str, datasets: tuple[str, ...]
     return Diagnostic(code=code, severity=severity, message=message, datasets=datasets)
 
 
+def _reiterable(name: str, rows: Rows) -> Rows:
+    """Reject one-shot iterators: every check opens its own fresh pass over the rows."""
+    if iter(rows) is rows:
+        raise TypeError(
+            f"bundle dataset {name!r} is a one-shot iterator; validate_dataset_bundle "
+            "requires re-iterable rows (a list, or an object whose __iter__ opens a fresh scan)"
+        )
+    return rows
+
+
+def _has_rows(rows: Rows) -> bool:
+    for _ in rows:
+        return True
+    return False
+
+
 def validate_dataset_bundle(
     bundle: Bundle,
     *,
     invoice_detail_authoritative: bool = False,
     rounding_tolerance: Decimal | None = None,
+    index_factory: IndexFactory | None = None,
 ) -> BundleReport:
     """Validate the datasets in ``bundle`` against each other.
 
-    ``bundle`` maps FOCUS dataset names to their rows. ``invoice_detail_authoritative`` gates
+    ``bundle`` maps FOCUS dataset names to their rows — each value must be re-iterable (see
+    the module docstring); nothing is materialised. ``invoice_detail_authoritative`` gates
     the Cost-and-Usage <-> Invoice-Detail sum reconciliation: it runs only when the Invoice
     Detail comes from a real invoice (a toolkit-derived Invoice Detail reconciles by
     construction, so reconciling it would be circular). ``rounding_tolerance`` overrides the
-    reconciliation tolerance.
+    reconciliation tolerance. ``index_factory`` supplies the per-key lookup state (``dict``
+    when omitted; pass ``SpillableIndexPool(...).make_map`` for bounded memory).
     """
-    cu = list(bundle.get("Cost and Usage", []))
-    invd = list(bundle.get("Invoice Detail", []))
-    bp = list(bundle.get("Billing Period", []))
-    cc = list(bundle.get("Contract Commitment", []))
+    factory: IndexFactory = index_factory if index_factory is not None else dict
+    cu = _reiterable("Cost and Usage", bundle.get("Cost and Usage", ()))
+    invd = _reiterable("Invoice Detail", bundle.get("Invoice Detail", ()))
+    bp = _reiterable("Billing Period", bundle.get("Billing Period", ()))
+    cc = _reiterable("Contract Commitment", bundle.get("Contract Commitment", ()))
+    has_cu, has_invd, has_bp, has_cc = (_has_rows(r) for r in (cu, invd, bp, cc))
 
     diagnostics: list[Diagnostic] = []
     checks: list[str] = []
@@ -97,27 +127,34 @@ def validate_dataset_bundle(
         checks.append(name)
         diagnostics.extend(produced)
 
-    def _refs_present(rows: list, column: str) -> bool:
+    def _refs_present(rows: Rows, column: str) -> bool:
         return any((r.get(column) or "").strip() for r in rows)
 
     # Referential integrity.
-    if invd:
-        run("unique_invoice_detail_ids", referential.check_unique_invoice_detail_ids(invd))
-    if cc:
+    if has_invd:
+        run(
+            "unique_invoice_detail_ids",
+            referential.check_unique_invoice_detail_ids(invd, index_factory=factory),
+        )
+    if has_cc:
         run(
             "unique_contract_commitment_ids",
-            referential.check_unique_contract_commitment_ids(cc),
+            referential.check_unique_contract_commitment_ids(cc, index_factory=factory),
         )
-    if cu and invd:
+    if has_cu and has_invd:
         run(
             "cost_and_usage_invoice_detail_fk",
-            referential.check_cost_and_usage_invoice_detail_fk(cu, invd),
+            referential.check_cost_and_usage_invoice_detail_fk(
+                cu, invd, index_factory=factory
+            ),
         )
         run(
             "cost_and_usage_invoice_detail_consistency",
-            referential.check_cost_and_usage_invoice_detail_consistency(cu, invd),
+            referential.check_cost_and_usage_invoice_detail_consistency(
+                cu, invd, index_factory=factory
+            ),
         )
-    elif cu and _refs_present(cu, "InvoiceDetailId"):
+    elif has_cu and _refs_present(cu, "InvoiceDetailId"):
         # References exist but their target table is absent -> the FK check cannot resolve them.
         diagnostics.append(
             _note(
@@ -128,9 +165,12 @@ def validate_dataset_bundle(
                 ("Cost and Usage", "Invoice Detail"),
             )
         )
-    if cu and cc:
-        run("contract_applied_fk", referential.check_contract_applied_fk(cu, cc))
-    elif cu and _refs_present(cu, "ContractApplied"):
+    if has_cu and has_cc:
+        run(
+            "contract_applied_fk",
+            referential.check_contract_applied_fk(cu, cc, index_factory=factory),
+        )
+    elif has_cu and _refs_present(cu, "ContractApplied"):
         diagnostics.append(
             _note(
                 "FDT-BUNDLE-001",
@@ -140,11 +180,14 @@ def validate_dataset_bundle(
                 ("Cost and Usage", "Contract Commitment"),
             )
         )
-    if cu and bp:
-        run("billing_period_coverage", referential.check_billing_period_coverage(cu, bp))
+    if has_cu and has_bp:
+        run(
+            "billing_period_coverage",
+            referential.check_billing_period_coverage(cu, bp, index_factory=factory),
+        )
 
     # Reconciliation (only for an authoritative Invoice Detail).
-    if cu and invd:
+    if has_cu and has_invd:
         if invoice_detail_authoritative:
             tolerance = (
                 rounding_tolerance
@@ -153,7 +196,9 @@ def validate_dataset_bundle(
             )
             run(
                 "reconcile_invoice_detail",
-                reconciliation.reconcile_invoice_detail(cu, invd, tolerance=tolerance),
+                reconciliation.reconcile_invoice_detail(
+                    cu, invd, tolerance=tolerance, index_factory=factory
+                ),
             )
         else:
             diagnostics.append(
@@ -177,14 +222,23 @@ def validate_dataset_bundle(
         )
 
     # Split cost allocation and correction integrity (self-contained within Cost and Usage).
-    if cu:
+    if has_cu:
         run("split_allocation", allocation.validate_split_allocation(cu))
-        run("correction_references", corrections.check_correction_references(cu))
-        run("correction_net_sums", corrections.check_correction_net_sums(cu))
-        run("no_duplicate_charge_keys", corrections.check_no_duplicate_charge_keys(cu))
+        run(
+            "correction_references",
+            corrections.check_correction_references(cu, index_factory=factory),
+        )
+        run(
+            "correction_net_sums",
+            corrections.check_correction_net_sums(cu, index_factory=factory),
+        )
+        run(
+            "no_duplicate_charge_keys",
+            corrections.check_no_duplicate_charge_keys(cu, index_factory=factory),
+        )
 
     # Commitment lifecycle.
-    if cc:
+    if has_cc:
         run("contract_commitment_periods", corrections.check_contract_commitment_periods(cc))
         run(
             "contract_commitment_percentages",

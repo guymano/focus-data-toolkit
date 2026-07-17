@@ -26,6 +26,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # imported lazily at runtime (validate.bundle imports from this package)
+    from focus_data_toolkit.validate.bundle import BundleReport
 
 from focus_data_toolkit import manifest as manifest_mod
 from focus_data_toolkit.context import describe_source_contexts, representative_provider
@@ -120,6 +124,7 @@ class ConversionResult:
     detection: SchemaDetectionResult | None = None
     contexts: dict = field(default_factory=dict)
     diagnostics: list[Diagnostic] = field(default_factory=list)
+    bundle_report: BundleReport | None = None
 
     @property
     def ok(self) -> bool:
@@ -518,6 +523,13 @@ def convert_to_focus_1_4(
                     manifest_mod.CONF_STRUCTURAL_LINT if report.ok
                     else manifest_mod.CONF_LINT_FAILED
                 )
+        # Cross-dataset bundle validation: recorded in the manifest exactly as the
+        # streaming path records it, so both paths render identical manifests. The
+        # publication *gate* itself is enforced by write_result.
+        from focus_data_toolkit.validate.bundle import validate_dataset_bundle
+
+        result.bundle_report = validate_dataset_bundle(produced)
+        result.manifest["bundle_validation"] = result.bundle_report.as_dict()
     return result
 
 
@@ -590,6 +602,7 @@ def write_result(
     on_exists: OnExists | str = OnExists.REFUSE,
     keep_temp: bool = False,
     require_valid: bool = True,
+    validate_bundle: bool = True,
 ) -> list[Path]:
     """Write every produced dataset plus the manifest to ``out_dir`` **atomically**.
 
@@ -599,10 +612,14 @@ def write_result(
     removed and ``out_dir`` is left untouched (existing results are never partially clobbered).
 
     ``on_exists`` chooses the policy when ``out_dir`` already exists (refuse / replace /
-    version). ``require_valid`` refuses to publish when the built-in lint failed. Returns the
-    published dataset + manifest paths.
+    version). ``require_valid`` refuses to publish when the built-in lint failed.
+    ``validate_bundle`` runs the cross-dataset bundle validation
+    (:func:`~focus_data_toolkit.validate.bundle.validate_dataset_bundle`) as a publication
+    gate — its result is recorded in the manifest and, under ``require_valid``, an ERROR
+    blocks publication. Returns the published dataset + manifest paths.
     """
     from focus_data_toolkit import __version__
+    from focus_data_toolkit.validate.bundle import validate_dataset_bundle
 
     generated_at = datetime.now(UTC).isoformat()
     data_files = [
@@ -620,6 +637,25 @@ def write_result(
             raise AtomicWriteError(
                 f"lint failed for {failed}; final output not written to {out_dir}"
             )
+
+        # Cross-dataset publication gate: the produced datasets must agree with each other
+        # (referential integrity, billing-period coverage, corrections, allocation) before
+        # anything is published. The outcome — or the explicit skip — lands in the manifest.
+        if validate_bundle:
+            # Always validated fresh at publication time (never a report cached from
+            # convert time), so datasets mutated in between cannot slip past the gate.
+            bundle_report = validate_dataset_bundle(result.datasets)
+            result.bundle_report = bundle_report
+            result.manifest["bundle_validation"] = bundle_report.as_dict()
+            if require_valid and not bundle_report.ok:
+                first = bundle_report.errors[0]
+                raise AtomicWriteError(
+                    f"bundle validation failed ({len(bundle_report.errors)} error(s); "
+                    f"first: [{first.code}] {first.message}); final output not written "
+                    f"to {out_dir}"
+                )
+        else:
+            result.manifest["bundle_validation"] = {"skipped": True}
 
         checksums = out.checksums()
         manifest_bytes = manifest_mod.render(result.manifest).encode("utf-8")

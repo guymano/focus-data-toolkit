@@ -137,7 +137,11 @@ For consolidated, multi-provider, multi-issuer, multi-currency exports:
 - **Cross-dataset validation** (`validate_dataset_bundle`) checks referential integrity,
   currency/period/issuer coherence, invoice reconciliation (with a rounding tolerance),
   Split Cost Allocation, and correction/lifecycle integrity — separately from the
-  per-dataset linter.
+  per-dataset linter. It runs as a **publication gate** on every conversion (eager and
+  streaming): an ERROR refuses to publish, the outcome is recorded in the manifest's
+  `bundle_validation` section, and `--no-validate` skips it (the skip is recorded too).
+  In the streaming path the checks re-read the staged files in bounded memory, spilling
+  per-key lookup state to a scratch SQLite database past a threshold.
 - **Atomic writes**: output appears only after validation succeeds and checksums + manifest
   are written; nothing partial is left on error. `--on-exists refuse|replace|version`.
 

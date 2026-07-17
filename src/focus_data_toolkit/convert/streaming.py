@@ -90,6 +90,34 @@ from focus_data_toolkit.supplement.validate import (
 _LINT_CHUNK = 5000
 
 _INDEX_DB = "_index.sqlite"
+_BUNDLE_DB = "_bundle_index.sqlite"
+
+
+class _StagedRows:
+    """Re-iterable row stream over a staged output file (or partition tree).
+
+    Each ``__iter__`` opens a fresh reader, so the bundle validator can run several
+    independent forward passes without ever materialising the dataset.
+    """
+
+    def __init__(
+        self, path: Path, output_format: str, dataset: str, partition_by=None
+    ) -> None:
+        self._path = path
+        self._output_format = output_format
+        self._dataset = dataset
+        self._partition_by = partition_by
+
+    def __iter__(self):
+        reader = _open_reader(
+            self._path, self._output_format,
+            dataset=self._dataset, partition_by=self._partition_by,
+        )
+        try:
+            for record in reader:
+                yield record.values
+        finally:
+            reader.close()
 
 
 def _dataset_is_assumed(name: str, provenance: dict, synthetic: bool) -> bool:
@@ -600,6 +628,40 @@ def convert_files(
                     raise AtomicWriteError(
                         f"lint failed for {name}; final output not written to {out_dir}"
                     )
+
+        # Cross-dataset publication gate: re-read the staged files (bounded memory — each
+        # check is an independent forward pass, per-key state spills to a scratch SQLite DB
+        # past a threshold) and refuse to publish on any ERROR. The outcome — or the
+        # explicit skip — lands in the manifest, exactly as in the eager path.
+        if validate:
+            from focus_data_toolkit.storage.spill import SpillableIndexPool
+            from focus_data_toolkit.validate.bundle import validate_dataset_bundle
+
+            bundle_rows = {
+                name: _StagedRows(
+                    out.path_for(fname), output_format, name,
+                    partition_by=partition_map.get(name),
+                )
+                for name, fname in produced_output_files.items()
+            }
+            spill = SpillableIndexPool(out.path_for(_BUNDLE_DB))
+            try:
+                bundle_report = validate_dataset_bundle(
+                    bundle_rows, index_factory=spill.make_map
+                )
+            finally:
+                spill.close()
+            out.discard(_BUNDLE_DB)  # scratch spill DB must never be published
+            manifest["bundle_validation"] = bundle_report.as_dict()
+            if not bundle_report.ok:
+                first = bundle_report.errors[0]
+                raise AtomicWriteError(
+                    f"bundle validation failed ({len(bundle_report.errors)} error(s); "
+                    f"first: [{first.code}] {first.message}); final output not written "
+                    f"to {out_dir}"
+                )
+        else:
+            manifest["bundle_validation"] = {"skipped": True}
 
         # Enroll produced files for fsync + checksums: a partitioned dataset is a tree of parts.
         for name, fname in produced_output_files.items():

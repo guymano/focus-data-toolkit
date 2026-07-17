@@ -16,12 +16,15 @@ allocated resources; and that every row carries the information the group needs.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
 from focus_data_toolkit.errors import Diagnostic, Severity
 
 Rows = Sequence[Mapping[str, str]]
+#: The input is consumed in a single forward pass, so any iterable of rows works.
+RowStream = Iterable[Mapping[str, str]]
 
 ORIGIN_ID_COLUMN = "x_SplitOriginId"
 ORIGIN_COST_COLUMN = "x_SplitOriginCost"
@@ -69,33 +72,82 @@ def _row_ratio_and_units(row: Mapping[str, str]) -> tuple[Decimal | None, frozen
     return ratio, frozenset(units)
 
 
+@dataclass
+class _GroupState:
+    """Running aggregate of one allocation group — bounded per group, never member rows.
+
+    Mirrors the checks of the previous list-of-members implementation exactly: the first
+    incomplete condition (in row order) short-circuits further accumulation, line numbers
+    keep accumulating so the incomplete diagnostic still lists every member row.
+    """
+
+    lines: list[int] = field(default_factory=list)
+    incomplete: tuple[str, str | None] | None = None  # (reason, column)
+    ratios: list[Decimal] = field(default_factory=list)
+    units: set[str] = field(default_factory=set)
+    methods: set[str] = field(default_factory=set)
+    resource_count: int = 0
+    resources: set[str] = field(default_factory=set)
+    missing_resource: bool = False
+    total_cost: Decimal = Decimal(0)
+    origin_costs: set[Decimal] = field(default_factory=set)
+
+    def observe(self, line: int, row: Mapping[str, str]) -> None:
+        self.lines.append(line)
+        if self.incomplete is not None:
+            return
+        ratio, row_units = _row_ratio_and_units(row)
+        if ratio is None:
+            self.incomplete = ("a row has no usable AllocatedRatio", "AllocatedMethodDetails")
+            return
+        self.ratios.append(ratio)
+        self.units |= row_units
+        self.methods.add((row.get("AllocatedMethodId") or "").strip())
+        resource = (row.get("AllocatedResourceId") or "").strip()
+        self.resource_count += 1
+        self.resources.add(resource)
+        if not resource:
+            self.missing_resource = True
+        cost = _dec(row.get("BilledCost"))
+        if cost is None:
+            self.incomplete = ("a row has no numeric BilledCost", "BilledCost")
+            return
+        self.total_cost += cost
+        origin_cost = _dec(row.get(ORIGIN_COST_COLUMN))
+        if origin_cost is None:
+            self.incomplete = ("missing x_SplitOriginCost", ORIGIN_COST_COLUMN)
+            return
+        self.origin_costs.add(origin_cost)
+
+
 def validate_split_allocation(
-    cost_and_usage: Rows,
+    cost_and_usage: RowStream,
     *,
     ratio_tolerance: Decimal = DEFAULT_RATIO_TOLERANCE,
     cost_tolerance: Decimal = DEFAULT_COST_TOLERANCE,
 ) -> list[Diagnostic]:
-    """Validate every split-cost-allocation group in ``cost_and_usage``."""
-    groups: dict[str, list[tuple[int, Mapping[str, str]]]] = {}
+    """Validate every split-cost-allocation group in ``cost_and_usage`` (single pass;
+    memory is bounded by the number of allocation *groups*, not their member rows)."""
+    groups: dict[str, _GroupState] = {}
     for i, row in enumerate(cost_and_usage, start=1):
         origin = (row.get(ORIGIN_ID_COLUMN) or "").strip()
         if origin:
-            groups.setdefault(origin, []).append((i, row))
+            groups.setdefault(origin, _GroupState()).observe(i, row)
 
     out: list[Diagnostic] = []
-    for origin_id, members in sorted(groups.items()):
-        out.extend(_validate_group(origin_id, members, ratio_tolerance, cost_tolerance))
+    for origin_id, state in sorted(groups.items()):
+        out.extend(_group_diagnostics(origin_id, state, ratio_tolerance, cost_tolerance))
     return out
 
 
-def _validate_group(
+def _group_diagnostics(
     origin_id: str,
-    members: list[tuple[int, Mapping[str, str]]],
+    state: _GroupState,
     ratio_tolerance: Decimal,
     cost_tolerance: Decimal,
 ) -> list[Diagnostic]:
     keys = {ORIGIN_ID_COLUMN: origin_id}
-    lines = sorted(i for i, _ in members)
+    lines = sorted(state.lines)
     out: list[Diagnostic] = []
 
     def incomplete(reason: str, column: str | None = None) -> Diagnostic:
@@ -110,36 +162,14 @@ def _validate_group(
             context={"rows": ",".join(map(str, lines))},
         )
 
-    ratios: list[Decimal] = []
-    units: set[str] = set()
-    methods: set[str] = set()
-    resources: list[str] = []
-    total_cost = Decimal(0)
-    origin_costs: set[Decimal] = set()
-
-    for _i, row in members:
-        ratio, row_units = _row_ratio_and_units(row)
-        if ratio is None:
-            return [incomplete("a row has no usable AllocatedRatio", "AllocatedMethodDetails")]
-        ratios.append(ratio)
-        units |= row_units
-        methods.add((row.get("AllocatedMethodId") or "").strip())
-        resources.append((row.get("AllocatedResourceId") or "").strip())
-        cost = _dec(row.get("BilledCost"))
-        if cost is None:
-            return [incomplete("a row has no numeric BilledCost", "BilledCost")]
-        total_cost += cost
-        origin_cost = _dec(row.get(ORIGIN_COST_COLUMN))
-        if origin_cost is None:
-            return [incomplete("missing x_SplitOriginCost", ORIGIN_COST_COLUMN)]
-        origin_costs.add(origin_cost)
-
-    if "" in methods or any(not r for r in resources):
+    if state.incomplete is not None:
+        return [incomplete(*state.incomplete)]
+    if "" in state.methods or state.missing_resource:
         return [incomplete("a row is missing AllocatedMethodId or AllocatedResourceId")]
-    if len(origin_costs) != 1:
+    if len(state.origin_costs) != 1:
         return [incomplete("rows disagree on x_SplitOriginCost", ORIGIN_COST_COLUMN)]
 
-    for ratio in ratios:
+    for ratio in state.ratios:
         if ratio < 0 or ratio > 1:
             out.append(
                 Diagnostic(
@@ -154,7 +184,7 @@ def _validate_group(
                 )
             )
 
-    ratio_sum = sum(ratios, Decimal(0))
+    ratio_sum = sum(state.ratios, Decimal(0))
     if abs(ratio_sum - Decimal(1)) > ratio_tolerance:
         out.append(
             Diagnostic(
@@ -170,30 +200,30 @@ def _validate_group(
             )
         )
 
-    origin_cost = next(iter(origin_costs))
-    if abs(total_cost - origin_cost) > cost_tolerance:
+    origin_cost = next(iter(state.origin_costs))
+    if abs(state.total_cost - origin_cost) > cost_tolerance:
         out.append(
             Diagnostic(
                 code="FDT-ALLOC-002",
                 severity=Severity.ERROR,
-                message=f"allocated costs in group {origin_id!r} sum to {total_cost}, not the "
-                f"origin cost {origin_cost}",
+                message=f"allocated costs in group {origin_id!r} sum to {state.total_cost}, "
+                f"not the origin cost {origin_cost}",
                 datasets=("Cost and Usage",),
                 dataset="Cost and Usage",
                 column="BilledCost",
                 expected=str(origin_cost),
-                actual=str(total_cost),
+                actual=str(state.total_cost),
                 record_keys=keys,
             )
         )
 
-    if len({m for m in methods if m}) > 1:
+    if len({m for m in state.methods if m}) > 1:
         out.append(
             Diagnostic(
                 code="FDT-ALLOC-003",
                 severity=Severity.ERROR,
                 message=f"inconsistent AllocatedMethodId within group {origin_id!r}: "
-                f"{sorted(methods)}",
+                f"{sorted(state.methods)}",
                 datasets=("Cost and Usage",),
                 dataset="Cost and Usage",
                 column="AllocatedMethodId",
@@ -201,12 +231,13 @@ def _validate_group(
             )
         )
 
-    if len(units) > 1:
+    if len(state.units) > 1:
         out.append(
             Diagnostic(
                 code="FDT-ALLOC-007",
                 severity=Severity.ERROR,
-                message=f"inconsistent UsageUnit within group {origin_id!r}: {sorted(units)}",
+                message=f"inconsistent UsageUnit within group {origin_id!r}: "
+                f"{sorted(state.units)}",
                 datasets=("Cost and Usage",),
                 dataset="Cost and Usage",
                 column="AllocatedMethodDetails",
@@ -214,7 +245,7 @@ def _validate_group(
             )
         )
 
-    if len(set(resources)) != len(resources):
+    if len(state.resources) != state.resource_count:
         out.append(
             Diagnostic(
                 code="FDT-ALLOC-004",
