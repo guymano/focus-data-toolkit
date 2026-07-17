@@ -45,18 +45,37 @@ def is_parquet(path: str | Path) -> bool:
         return p.suffix.lower() == ".parquet"
 
 
-def open_row_source(path: str | Path, *, dataset: str | None = None) -> RowSource:
-    """Open ``path`` as a :class:`RowSource`, auto-detecting CSV (``.gz`` ok) vs Parquet.
+def _hive_partition_columns(base_dir: Path) -> tuple[str, ...]:
+    """Partition column names of a Hive-layout directory, walking ``COL=value`` segments."""
+    cols: list[str] = []
+    current = base_dir
+    while True:
+        subdirs = [e for e in current.iterdir() if e.is_dir() and "=" in e.name]
+        if not subdirs:
+            return tuple(cols)
+        cols.append(subdirs[0].name.split("=", 1)[0])
+        current = subdirs[0]
 
-    ``dataset`` optionally names the FOCUS dataset the file holds, letting the Parquet
-    reader render typed values by the right model columns instead of inferring the dataset
-    from the header overlap. CSV input ignores it (values are already strings).
+
+def open_row_source(path: str | Path, *, dataset: str | None = None) -> RowSource:
+    """Open ``path`` as a :class:`RowSource`, auto-detecting the physical format.
+
+    A file is sniffed as CSV (``.gz`` ok) or Parquet; a directory is read as a
+    Hive-partitioned Parquet dataset (partition columns inferred from the ``COL=value``
+    path segments). ``dataset`` optionally names the FOCUS dataset the file holds, letting
+    the Parquet readers render typed values by the right model columns instead of inferring
+    the dataset from the header overlap. CSV input ignores it (values are already strings).
     """
-    if is_parquet(path):
+    p = Path(path)
+    if p.is_dir():
+        from focus_data_toolkit.io.parquet_io import PartitionedParquetReader
+
+        return PartitionedParquetReader(p, dataset or "Cost and Usage", _hive_partition_columns(p))
+    if is_parquet(p):
         from focus_data_toolkit.io.parquet_io import ParquetRowReader
 
-        return ParquetRowReader(path, dataset=dataset)
-    return CsvRowReader(path)
+        return ParquetRowReader(p, dataset=dataset)
+    return CsvRowReader(p)
 
 
 def read_source_rows(path: str | Path, *, dataset: str | None = None) -> list[dict[str, str]]:

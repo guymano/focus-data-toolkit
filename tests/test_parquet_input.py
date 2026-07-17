@@ -92,6 +92,26 @@ def test_streaming_parquet_source_with_supplements(tmp_path, source):
     assert manifest["datasets"]["Billing Period"]["status"] == "PRODUCED"
 
 
+def test_open_row_source_reads_hive_partitioned_directory(tmp_path, source):
+    # Hive layout: SubAccountId=<v>/part-0.parquet, partition column omitted from the parts.
+    base = tmp_path / "partitioned"
+    by_value: dict[str, list[dict[str, str]]] = {}
+    for row in source:
+        by_value.setdefault(row["SubAccountId"], []).append(row)
+    for value, rows in by_value.items():
+        part_dir = base / f"SubAccountId={value}"
+        part_dir.mkdir(parents=True)
+        cols = [c for c in rows[0] if c != "SubAccountId"]
+        pq.write_table(
+            pa.table({c: [r[c] for r in rows] for c in cols}), part_dir / "part-0.parquet"
+        )
+    reader = open_row_source(base)
+    assert set(reader.source_columns) == set(source[0].keys())
+    rows_back = [dict(r.values) for r in reader]
+    key = lambda r: tuple(sorted(r.items()))  # noqa: E731 - partition order is not source order
+    assert sorted(rows_back, key=key) == sorted(source, key=key)
+
+
 def test_eager_cli_accepts_parquet_source(tmp_path, source):
     src = write_parquet(tmp_path / "cau.parquet", source)
     out = tmp_path / "out"
