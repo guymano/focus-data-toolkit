@@ -25,12 +25,12 @@ from focus_data_toolkit.convert import (
     OnExists,
     convert_files,
     convert_to_focus_1_4,
-    read_csv_rows,
     write_result,
 )
 from focus_data_toolkit.generators import FOCUS_VERSIONS, PROVIDERS, get_generator
 from focus_data_toolkit.io.parquet_io import COMPRESSIONS
 from focus_data_toolkit.io.records import MalformedRecordError
+from focus_data_toolkit.io.row_source import read_source_rows
 from focus_data_toolkit.manifest import render as render_manifest
 from focus_data_toolkit.model.capabilities import KNOWN_CONDITIONS, CapabilityProfile
 from focus_data_toolkit.model.validator import lint_focus_1_4_structure, resolve_dataset
@@ -71,10 +71,10 @@ def _cmd_generate(args: argparse.Namespace) -> int:
 
 
 def _read_header(path: str) -> tuple[str, ...]:
-    """Read only the header of a CSV file (gzip auto-detected)."""
-    from focus_data_toolkit.io.csv_io import CsvRowReader
+    """Read only the header of a CSV (gzip auto-detected) or Parquet file."""
+    from focus_data_toolkit.io.row_source import open_row_source
 
-    reader = CsvRowReader(path)
+    reader = open_row_source(path)
     try:
         return reader.source_columns
     finally:
@@ -139,8 +139,8 @@ def _cmd_supplements_validate(args: argparse.Namespace) -> int:
     except SupplementError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    cau_rows = read_csv_rows(args.cost_and_usage)
-    cc_rows = read_csv_rows(args.contract_commitment) if args.contract_commitment else None
+    cau_rows = read_source_rows(args.cost_and_usage)
+    cc_rows = read_source_rows(args.contract_commitment) if args.contract_commitment else None
     diagnostics = validate_supplements(bundle, source_key_sets(cau_rows, cc_rows))
     for diag in diagnostics:
         print(f"{diag.severity} {diag.code}: {diag.message}")
@@ -256,9 +256,11 @@ def _cmd_convert(args: argparse.Namespace) -> int:
 
     from focus_data_toolkit.supplement import SupplementError
 
-    cau_rows = read_csv_rows(args.cost_and_usage)
-    cc_rows = read_csv_rows(args.contract_commitment) if args.contract_commitment else None
     try:
+        cau_rows = read_source_rows(args.cost_and_usage)
+        cc_rows = (
+            read_source_rows(args.contract_commitment) if args.contract_commitment else None
+        )
         result = convert_to_focus_1_4(
             cau_rows,
             cc_rows,
@@ -272,7 +274,9 @@ def _cmd_convert(args: argparse.Namespace) -> int:
     except SupplementError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    except ConversionError as exc:
+    except (ConversionError, MalformedRecordError) as exc:
+        # MalformedRecordError covers a malformed source record and a missing PyArrow
+        # (its clear install hint) for Parquet input — a CLI error, not a traceback.
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
@@ -339,10 +343,9 @@ def _cmd_validate(args: argparse.Namespace) -> int:
             return 2
         return run_official_validator(args.file, args.focus_version)
 
-    rows = read_csv_rows(args.file)
-    report = lint_focus_1_4_structure(
-        resolve_dataset(args.dataset.replace("-", " ")), rows, profile=_capabilities(args)
-    )
+    dataset = resolve_dataset(args.dataset.replace("-", " "))
+    rows = read_source_rows(args.file, dataset=dataset)
+    report = lint_focus_1_4_structure(dataset, rows, profile=_capabilities(args))
     status = (
         f"structural+semantic lint OK ({', '.join(report.levels_passed)})"
         if report.ok
@@ -372,9 +375,13 @@ def build_parser() -> argparse.ArgumentParser:
     gen.set_defaults(func=_cmd_generate)
 
     conv = sub.add_parser("convert", help="convert FOCUS 1.2/1.3 towards the FOCUS 1.4 datasets")
-    conv.add_argument("--cost-and-usage", required=True, help="FOCUS 1.2/1.3 Cost and Usage CSV")
     conv.add_argument(
-        "--contract-commitment", help="optional FOCUS 1.3 Contract Commitment CSV (13 columns)"
+        "--cost-and-usage", required=True,
+        help="FOCUS 1.2/1.3 Cost and Usage source (CSV, gzip ok, or Parquet)",
+    )
+    conv.add_argument(
+        "--contract-commitment",
+        help="optional FOCUS 1.3 Contract Commitment source (CSV or Parquet, 13 columns)"
     )
     conv.add_argument("--out", default="focus-1.4", help="output directory (default: ./focus-1.4)")
     conv.add_argument(
@@ -469,7 +476,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="report exactly which facts a client must supply to produce the four "
         "FOCUS 1.4 datasets factually from this source",
     )
-    gaps.add_argument("--cost-and-usage", required=True, help="FOCUS 1.2/1.3 Cost and Usage CSV")
+    gaps.add_argument(
+        "--cost-and-usage", required=True,
+        help="FOCUS 1.2/1.3 Cost and Usage source (CSV, gzip ok, or Parquet)",
+    )
     gaps.add_argument(
         "--contract-commitment", help="optional FOCUS 1.3 Contract Commitment CSV (13 columns)"
     )
@@ -491,7 +501,8 @@ def build_parser() -> argparse.ArgumentParser:
         "validate", help="pre-flight check supplement files against a source"
     )
     supp_val.add_argument(
-        "--cost-and-usage", required=True, help="FOCUS 1.2/1.3 Cost and Usage CSV"
+        "--cost-and-usage", required=True,
+        help="FOCUS 1.2/1.3 Cost and Usage source (CSV, gzip ok, or Parquet)",
     )
     supp_val.add_argument(
         "--contract-commitment", help="optional FOCUS 1.3 Contract Commitment CSV"
@@ -512,8 +523,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     supp_adapters.set_defaults(func=_cmd_supplements_adapters)
 
-    val = sub.add_parser("validate", help="validate a CSV file")
-    val.add_argument("file", help="CSV file to validate")
+    val = sub.add_parser("validate", help="validate a produced CSV/Parquet file")
+    val.add_argument("file", help="CSV or Parquet file to validate")
     val.add_argument(
         "--dataset",
         default="Cost and Usage",

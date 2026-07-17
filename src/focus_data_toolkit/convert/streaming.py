@@ -39,7 +39,6 @@ from focus_data_toolkit.convert import (
     ConversionError,
     assemble_manifest,
     output_filename_for,
-    read_csv_rows,
 )
 from focus_data_toolkit.convert.billing_period import PROVENANCE as BILLING_PERIOD_PROVENANCE
 from focus_data_toolkit.convert.billing_period import billing_period_row
@@ -62,6 +61,7 @@ from focus_data_toolkit.errors import Diagnostic, Severity
 from focus_data_toolkit.io.atomic_writer import AtomicOutputDir, AtomicWriteError, OnExists
 from focus_data_toolkit.io.csv_io import CsvRowReader, open_csv_writer
 from focus_data_toolkit.io.records import DatasetSchema
+from focus_data_toolkit.io.row_source import open_row_source, read_source_rows
 from focus_data_toolkit.model import dataset_columns, load_model
 from focus_data_toolkit.model.capabilities import CapabilityProfile
 from focus_data_toolkit.modes import Mode
@@ -277,6 +277,8 @@ def convert_files(
 ) -> Path:
     """Stream-convert a Cost and Usage file to the FOCUS 1.4 datasets in ``out_dir``.
 
+    Inputs (``cost_and_usage``, ``contract_commitment``) may each be CSV (gzip ok) or
+    Parquet — the format is sniffed per file, so they can be mixed freely.
     The Cost and Usage file is read once (twice with ``supplements``: a cheap key-collection
     pre-pass validates the bundle before anything is staged); Invoice Detail / Billing Period
     aggregation happens on disk (SQLite) so memory stays bounded by the *supplement-scale*
@@ -325,7 +327,7 @@ def convert_files(
             tool_version=__version__,
         )
 
-    reader = CsvRowReader(cost_and_usage)
+    reader = open_row_source(cost_and_usage)
     try:
         version, detection = _resolve_source_version(
             reader.source_columns,
@@ -337,7 +339,7 @@ def convert_files(
         reader.close()
         raise
 
-    cc_rows = read_csv_rows(contract_commitment) if contract_commitment else None
+    cc_rows = read_source_rows(contract_commitment) if contract_commitment else None
     source_cols = set(reader.source_columns)
     diagnostics: list[Diagnostic] = []
 
@@ -350,7 +352,7 @@ def convert_files(
     line_table = supplements.get("invoice_line") if supplements else None
     if supplements:
         supp_keys = SourceKeySets()
-        pre = CsvRowReader(cost_and_usage)
+        pre = open_row_source(cost_and_usage)
         try:
             for record in pre:
                 supp_keys.observe_cau_row(record.values)

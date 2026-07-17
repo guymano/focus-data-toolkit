@@ -162,6 +162,10 @@ converting 50k or 300k rows (6× the rows, ×1.05 the memory; `tools/benchmark_s
 Its output is **byte-identical** to the in-memory path — both call the same pure
 per-row/per-group functions and the same manifest assembler.
 
+Sources may be **CSV (gzip ok) or Parquet** — the format is sniffed per file (magic bytes,
+extension as fallback), so `--cost-and-usage export.parquet` works everywhere a CSV does
+(`convert`, `gaps`, `supplements validate`), in both the eager and streaming paths.
+
 ```bash
 # bounded-memory streaming to CSV (recommended for large exports)
 focus-toolkit convert --cost-and-usage huge_cost_and_usage.csv.gz --out ./focus-1.4 \
