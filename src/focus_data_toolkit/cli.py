@@ -162,6 +162,8 @@ def _capabilities(args: argparse.Namespace) -> CapabilityProfile:
 
 def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
     """Bounded-memory streaming conversion (required for Parquet output / large inputs)."""
+    from focus_data_toolkit.supplement import SupplementError
+
     partition_by = [c.strip() for c in (args.partition_by or "").split(",") if c.strip()]
     try:
         target_file_size = _parse_size(args.target_file_size)
@@ -180,7 +182,11 @@ def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
             compression=args.compression,
             target_file_size=target_file_size,
             capabilities=_capabilities(args),
+            supplements=_load_supplements(args),
         )
+    except SupplementError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     except (ConversionError, DestinationExistsError, MalformedRecordError) as exc:
         # MalformedRecordError covers a malformed CSV record and a missing PyArrow (the clear
         # install hint) — surface both as a normal CLI error, not a traceback.
@@ -218,12 +224,22 @@ def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
     return 0
 
 
+def _load_supplements(args: argparse.Namespace):
+    """Load the supplement bundle from CLI args (None when no supplements given)."""
+    from focus_data_toolkit.supplement import SupplementBundle
+
+    specs = _supplement_specs(args)
+    return SupplementBundle.load(specs) if specs else None
+
+
 def _cmd_convert(args: argparse.Namespace) -> int:
     mode = Mode(args.mode)
     # Parquet output, explicit --stream, or partitioning go through the bounded-memory streaming
     # engine; the eager path (rich per-dataset reporting) stays the default for CSV output.
     if args.output_format == "parquet" or args.stream or args.partition_by:
         return _cmd_convert_stream(args, mode)
+
+    from focus_data_toolkit.supplement import SupplementError
 
     cau_rows = read_csv_rows(args.cost_and_usage)
     cc_rows = read_csv_rows(args.contract_commitment) if args.contract_commitment else None
@@ -236,7 +252,11 @@ def _cmd_convert(args: argparse.Namespace) -> int:
             mode=mode,
             validate=not args.no_validate,
             capabilities=_capabilities(args),
+            supplements=_load_supplements(args),
         )
+    except SupplementError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     except ConversionError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -371,6 +391,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="declare a FOCUS applicability condition the source supports (repeatable); "
         "conditionally-required columns are enforced only for declared conditions "
         f"(known: {', '.join(sorted(KNOWN_CONDITIONS))})",
+    )
+    conv.add_argument(
+        "--supplement",
+        action="append",
+        default=[],
+        metavar="FILE[:KIND]",
+        help="supplemental client facts (CSV/JSON, gzip ok); repeatable; ':KIND' forces "
+        "the kind; see 'fdt gaps' and docs/supplements.md",
+    )
+    conv.add_argument(
+        "--supplements-dir", help="directory containing a supplements.json bundle manifest"
     )
     conv.add_argument(
         "--on-exists",

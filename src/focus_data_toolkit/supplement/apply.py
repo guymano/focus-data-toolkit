@@ -81,6 +81,11 @@ def _flip_rules(
     return rules
 
 
+# Public alias: the streaming pipeline pre-computes the rule flips (rows-independent)
+# to decide strict back-link gating before the main pass.
+flip_enriched_rules = _flip_rules
+
+
 def _apply_column(
     row: dict[str, str],
     column: str,

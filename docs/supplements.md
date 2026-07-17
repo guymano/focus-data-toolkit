@@ -45,6 +45,46 @@ Rules that apply to every kind:
 - Supplied values are validated against the embedded FOCUS 1.4 model (types, formats,
   allowed values) and cross-checked against the source before use.
 
+## Step 2 — pre-flight check (optional but recommended)
+
+```console
+$ focus-toolkit supplements validate --cost-and-usage my_focus_1_2.csv \
+      --supplement invoices.csv --supplement billing_periods.csv
+```
+
+Reports every `FDT-SUPP-0xx` diagnostic (duplicate keys, unknown columns, values outside
+the model's formats/allowed values, orphan rows, `BilledCost` reconciliation conflicts,
+and per-column coverage) without converting anything. Exit 1 on any ERROR.
+
+## Step 3 — convert with supplements
+
+```console
+$ focus-toolkit convert --cost-and-usage my_focus_1_2.csv \
+      --supplement billing_periods.csv --supplement invoices.csv \
+      --supplement lines.csv:invoice_line --out focus-1.4 --mode strict
+
+# or with a bundle directory (its supplements.json carries per-file provenance/as_of):
+$ focus-toolkit convert --cost-and-usage my_focus_1_2.csv \
+      --supplements-dir ./supplements --out focus-1.4 --stream
+```
+
+Behavior (identical in the eager and streaming paths — outputs are byte-identical):
+
+- The bundle is validated against the exact source **before anything is staged**; any
+  ERROR refuses the conversion.
+- Supplied facts are applied with **`ENRICHED` lineage** and full attribution; the
+  manifest gains a `supplements` section (kind, sha256, row counts, declared provenance)
+  and per-value `lineage_summary` counters.
+- **Strict mode**: a non-nullable column becomes factual only at 100 % key coverage —
+  at full coverage all four FOCUS 1.4 datasets are `PRODUCED` with nothing invented
+  (exit 0); partial coverage leaves the dataset `NOT_PRODUCED` with the remaining
+  `blocking_columns` and `FDT-SUPP-010` coverage counts telling you exactly what is
+  missing. Uncovered nullable assumed columns are emitted empty (synthetic defaults
+  never leak into a strict output). Real issuer-assigned `InvoiceDetailId`s replace the
+  locally generated `x_fdt_idl_v1_*` back-links.
+- **Synthetic mode**: supplied values win, documented defaults fill the rest, and the
+  counters record the enriched/assumed mix per column.
+
 > **Provider-native exports (AWS / Azure / GCP):** adapters that translate documented
 > provider export formats (invoice summaries, reservation/commitment inventories) into
 > these kinds automatically are part of this feature set — see the improvement plan
