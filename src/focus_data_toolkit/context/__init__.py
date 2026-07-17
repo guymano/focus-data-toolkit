@@ -13,6 +13,7 @@ from focus_data_toolkit.context.provider import (
     ProviderContext,
     distinct_provider_contexts,
     provider_context_of_row,
+    representative_from_contexts,
     representative_provider,
 )
 
@@ -24,19 +25,14 @@ def _capped(values: list[str]) -> dict:
     return {"count": len(values), "sample": values[:_SAMPLE_CAP]}
 
 
-def describe_source_contexts(
-    rows: Iterable[Mapping[str, str]], source_version: str
+def summarize_contexts(
+    providers: list[ProviderContext], billing: list[BillingContext]
 ) -> dict:
-    """A bounded, JSON-serialisable summary of the contexts present in a source.
+    """Build the bounded context summary from already-distinct provider/billing contexts.
 
-    Reports distinct providers, issuers, accounts, currencies and periods, and boolean
-    ``multi_*`` flags — enough for the manifest to show that (e.g.) the source mixed two
-    issuers and three currencies, without embedding the full cross-product.
+    Shared by :func:`describe_source_contexts` (eager) and the streaming pipeline, which
+    accumulates the distinct contexts incrementally — so both produce an identical summary.
     """
-    rows = list(rows)
-    providers = distinct_provider_contexts(rows, source_version)
-    billing = distinct_billing_contexts(rows)
-
     issuers = sorted({b.invoice_issuer_name for b in billing if b.invoice_issuer_name})
     accounts = sorted({b.billing_account_id for b in billing if b.billing_account_id})
     currencies = sorted({b.billing_currency for b in billing if b.billing_currency})
@@ -63,6 +59,21 @@ def describe_source_contexts(
     }
 
 
+def describe_source_contexts(
+    rows: Iterable[Mapping[str, str]], source_version: str
+) -> dict:
+    """A bounded, JSON-serialisable summary of the contexts present in a source.
+
+    Reports distinct providers, issuers, accounts, currencies and periods, and boolean
+    ``multi_*`` flags — enough for the manifest to show that (e.g.) the source mixed two
+    issuers and three currencies, without embedding the full cross-product.
+    """
+    rows = list(rows)
+    return summarize_contexts(
+        distinct_provider_contexts(rows, source_version), distinct_billing_contexts(rows)
+    )
+
+
 __all__ = [
     "BillingContext",
     "ProviderContext",
@@ -71,5 +82,7 @@ __all__ = [
     "distinct_billing_contexts",
     "distinct_provider_contexts",
     "provider_context_of_row",
+    "representative_from_contexts",
     "representative_provider",
+    "summarize_contexts",
 ]

@@ -176,10 +176,12 @@ def validate_dataset_bundle(
             )
         )
 
-    # Split cost allocation (self-contained within Cost and Usage).
+    # Split cost allocation and correction integrity (self-contained within Cost and Usage).
     if cu:
         run("split_allocation", allocation.validate_split_allocation(cu))
         run("correction_references", corrections.check_correction_references(cu))
+        run("correction_net_sums", corrections.check_correction_net_sums(cu))
+        run("no_duplicate_charge_keys", corrections.check_no_duplicate_charge_keys(cu))
 
     # Commitment lifecycle.
     if cc:

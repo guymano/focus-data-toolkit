@@ -4,6 +4,8 @@ Public API:
 
 - :func:`focus_data_toolkit.convert.convert_to_focus_1_4` — convert FOCUS 1.2/1.3
   rows into the four FOCUS 1.4 datasets (small-volume, in-memory).
+- :func:`focus_data_toolkit.convert.convert_files` — the same conversion, streamed from a
+  Cost and Usage file with **bounded memory** (large client data), to CSV or Parquet.
 - :func:`focus_data_toolkit.schema.detect_focus_schema` — identify the FOCUS dataset and
   version of a header row, with a confidence assessment.
 - :func:`validate_dataset_bundle` (alias :func:`validate_bundle`) — cross-dataset
@@ -16,7 +18,8 @@ Public API:
   source generators for AWS, Azure and GCP.
 """
 
-from focus_data_toolkit.convert import ConversionResult, convert_to_focus_1_4
+from focus_data_toolkit.convert import ConversionResult, convert_files, convert_to_focus_1_4
+from focus_data_toolkit.lifecycle import DatasetInstance, check_status_transitions
 from focus_data_toolkit.model.validator import (
     LintReport,
     ValidationReport,
@@ -35,11 +38,14 @@ __version__ = "0.3.0"
 __all__ = [
     "BundleReport",
     "ConversionResult",
+    "DatasetInstance",
     "LintReport",
     "SchemaDetectionResult",
     "ValidationReport",
     "Violation",
     "__version__",
+    "check_status_transitions",
+    "convert_files",
     "convert_to_focus_1_4",
     "detect_focus_schema",
     "lint_focus_1_4_structure",

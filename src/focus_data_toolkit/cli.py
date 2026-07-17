@@ -11,19 +11,23 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from focus_data_toolkit.convert import (
+    OUTPUT_FORMATS,
     AtomicWriteError,
     ConversionError,
     DestinationExistsError,
     OnExists,
+    convert_files,
     convert_to_focus_1_4,
     read_csv_rows,
     write_result,
 )
 from focus_data_toolkit.generators import FOCUS_VERSIONS, PROVIDERS, get_generator
+from focus_data_toolkit.io.records import MalformedRecordError
 from focus_data_toolkit.manifest import render as render_manifest
 from focus_data_toolkit.model.validator import lint_focus_1_4_structure, resolve_dataset
 from focus_data_toolkit.modes import Mode
@@ -46,8 +50,63 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
+    """Bounded-memory streaming conversion (required for Parquet output / large inputs)."""
+    try:
+        out = convert_files(
+            args.cost_and_usage,
+            args.out,
+            contract_commitment=args.contract_commitment,
+            source_version=args.source_version,
+            source_dataset=args.source_dataset,
+            mode=mode,
+            validate=not args.no_validate,
+            on_exists=OnExists(args.on_exists),
+            keep_temp=args.keep_temp,
+            output_format=args.output_format,
+        )
+    except (ConversionError, DestinationExistsError, MalformedRecordError) as exc:
+        # MalformedRecordError covers a malformed CSV record and a missing PyArrow (the clear
+        # install hint) — surface both as a normal CLI error, not a traceback.
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except AtomicWriteError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    from focus_data_toolkit.manifest import NOT_PRODUCED
+
+    published_manifest = out / "focus_1_4_manifest.json"
+    if args.manifest:  # honour --manifest for the streaming path too (parity with eager)
+        Path(args.manifest).write_text(
+            published_manifest.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+    manifest = json.loads(published_manifest.read_text(encoding="utf-8"))
+    print(f"wrote {out}/ (format {args.output_format}, mode {mode})")
+    for name, entry in manifest["datasets"].items():
+        if entry.get("status") == NOT_PRODUCED:
+            print(f"not produced [{name}]: {entry.get('reason', 'unavailable')}")
+    if mode is Mode.SYNTHETIC and manifest.get("assumptions_present"):
+        print(
+            "WARNING: synthetic mode — datasets marked PRODUCED_SYNTHETIC contain ASSUMED "
+            "values and are NOT fully FOCUS-conformant. See the manifest.",
+            file=sys.stderr,
+        )
+        return 4
+    if mode is Mode.STRICT and any(
+        e.get("status") == NOT_PRODUCED for e in manifest["datasets"].values()
+    ):
+        return 3
+    return 0
+
+
 def _cmd_convert(args: argparse.Namespace) -> int:
     mode = Mode(args.mode)
+    # Parquet output and explicit --stream go through the bounded-memory streaming engine; the
+    # eager path (rich per-dataset reporting) stays the default for CSV output.
+    if args.output_format == "parquet" or args.stream:
+        return _cmd_convert_stream(args, mode)
+
     cau_rows = read_csv_rows(args.cost_and_usage)
     cc_rows = read_csv_rows(args.contract_commitment) if args.contract_commitment else None
     try:
@@ -193,6 +252,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--keep-temp",
         action="store_true",
         help="keep the staging directory on error for diagnosis",
+    )
+    conv.add_argument(
+        "--output-format",
+        choices=list(OUTPUT_FORMATS),
+        default="csv",
+        help="output format: csv (default, byte-exact) or parquet (value-exact decimal128; "
+        "uses the streaming engine and requires the [parquet] extra)",
+    )
+    conv.add_argument(
+        "--stream",
+        action="store_true",
+        help="use the bounded-memory streaming engine (implied by --output-format parquet); "
+        "recommended for large client files",
     )
     conv.set_defaults(func=_cmd_convert)
 

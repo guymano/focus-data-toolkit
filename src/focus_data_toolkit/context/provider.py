@@ -57,16 +57,10 @@ def distinct_provider_contexts(
     return [seen[key] for key in sorted(seen)]
 
 
-def representative_provider(
-    rows: Iterable[Mapping[str, str]], source_version: str
+def representative_from_contexts(
+    contexts: list[ProviderContext],
 ) -> tuple[ProviderContext, bool]:
-    """Return ``(context, ambiguous)`` — the first distinct context and whether >1 exist.
-
-    Used only where a single value must be chosen for enrichment (e.g. synthetic Contract
-    Commitment, which the 1.3 source leaves without a provider). ``ambiguous`` is surfaced to
-    the caller so the choice is never silent.
-    """
-    contexts = distinct_provider_contexts(rows, source_version)
+    """Choose a representative provider from already-distinct contexts (see below)."""
     if not contexts:
         return ProviderContext("", ""), False
     # Prefer a usable representative: a fully complete context, else one with a non-empty
@@ -78,3 +72,15 @@ def representative_provider(
         or contexts[0]
     )
     return chosen, len(contexts) > 1
+
+
+def representative_provider(
+    rows: Iterable[Mapping[str, str]], source_version: str
+) -> tuple[ProviderContext, bool]:
+    """Return ``(context, ambiguous)`` — a usable representative and whether >1 exist.
+
+    Used only where a single value must be chosen for enrichment (e.g. synthetic Contract
+    Commitment, which the 1.3 source leaves without a provider). ``ambiguous`` is surfaced to
+    the caller so the choice is never silent.
+    """
+    return representative_from_contexts(distinct_provider_contexts(rows, source_version))

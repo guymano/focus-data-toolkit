@@ -34,7 +34,9 @@ validator = [
     "focus_validator @ git+https://github.com/finopsfoundation/focus_validator",
 ]
 all = ["focus-data-toolkit[parquet,validator]"]
-dev = ["pytest>=8", "ruff>=0.6"]
+# `dev` includes pyarrow so the Parquet test suite actually runs in CI (otherwise it would
+# silently skip via importorskip). The runtime core stays dependency-free.
+dev = ["pytest>=8", "ruff>=0.6", "pyarrow>=15,<21"]
 
 [project.scripts]
 focus-toolkit = "focus_data_toolkit.cli:main"

@@ -1,0 +1,10 @@
+{
+  "_comment": "Precision/scale for FOCUS 1.4 Decimal columns written as Parquet decimal128. The FOCUS model does not fix a numeric precision/scale; this committed, reviewed registry supplies one so Parquet output preserves financial decimals EXACTLY (never float). decimal128 holds 38 significant digits; a value with more fractional digits than the column scale raises rather than rounding silently. The default (38, 12) preserves any value with <= 12 fractional digits and <= 26 integer digits; unit-price columns use scale 16 for sub-nano per-unit pricing.",
+  "default": { "precision": 38, "scale": 12 },
+  "columns": {
+    "ContractedUnitPrice": { "precision": 38, "scale": 16 },
+    "ListUnitPrice": { "precision": 38, "scale": 16 },
+    "PricingCurrencyContractedUnitPrice": { "precision": 38, "scale": 16 },
+    "PricingCurrencyListUnitPrice": { "precision": 38, "scale": 16 }
+  }
+}
