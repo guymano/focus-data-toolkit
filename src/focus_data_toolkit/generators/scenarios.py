@@ -22,24 +22,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from decimal import Decimal
 
+from focus_data_toolkit.generators.engine.json_focus import allocated_method_details
 from focus_data_toolkit.lifecycle import DatasetInstance
 
 _RATIO_QUANTUM = Decimal("0.000001")
 _COST_QUANTUM = Decimal("0.000001")
-
-
-def _allocation_details(ratio: Decimal, unit: str, quantity: str) -> str:
-    # Build the JSON literally so the AllocatedRatio stays an exact decimal number (json.dumps
-    # cannot serialise Decimal, and a float would reintroduce binary rounding).
-    return (
-        '{"Elements":[{"AllocatedRatio":'
-        + str(ratio)
-        + ',"UsageUnit":"'
-        + unit
-        + '","UsageQuantity":'
-        + quantity
-        + "}]}"
-    )
 
 
 def split_allocation_group(
@@ -89,7 +76,9 @@ def split_allocation_group(
             "x_SplitOriginCost": str(origin),
             "AllocatedMethodId": method,
             "AllocatedResourceId": f"{resource_prefix}-{i}",
-            "AllocatedMethodDetails": _allocation_details(ratios[i], unit, "1"),
+            "AllocatedMethodDetails": allocated_method_details(
+                [{"AllocatedRatio": str(ratios[i]), "UsageUnit": unit, "UsageQuantity": "1"}]
+            ),
             "BilledCost": str(costs[i]),
             "ChargeCategory": "Usage",
         }
