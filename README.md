@@ -265,13 +265,32 @@ The FOCUS 1.4 model JSON (`src/focus_data_toolkit/model/focus_1_4_model.json`)
 is the artifact of record, extracted from the FinOps Foundation "FOCUS 1.4
 Data Model" workbook with `tools/extract_focus_1_4_model.py` (the workbook
 itself is not redistributed here — download it from
-[focus.finops.org](https://focus.finops.org)).
+[focus.finops.org](https://focus.finops.org)). Its machine-readable provenance
+is recorded in `model_provenance.json` and can be checked with
+`python scripts/verify_model_provenance.py`; see
+[docs/model-provenance.md](docs/model-provenance.md).
+
+## Contributing, security & docs
+
+- **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)
+- **Security policy / reporting:** [SECURITY.md](SECURITY.md) (private reporting;
+  a FOCUS conformance bug is a normal issue, not a security report)
+- **Versioning & reproducibility:** [docs/versioning.md](docs/versioning.md)
+- **Compatibility (Python / OS / FOCUS):** [docs/compatibility.md](docs/compatibility.md)
+- **Security model:** [docs/security-model.md](docs/security-model.md)
+- **Releasing:** [docs/releasing.md](docs/releasing.md)
+- **Changelog:** [CHANGELOG.md](CHANGELOG.md)
 
 ## License and credits
 
-MIT. FOCUS is a trademark of the FinOps Foundation; the FOCUS specification,
-data model workbook and official validator are © the FinOps Foundation — this
-project is an independent community toolkit and is not endorsed by the FinOps
-Foundation. Related sample datasets from the same generators were contributed
-to [FOCUS-Sample-Data](https://github.com/FinOps-Open-Cost-and-Usage-Spec/FOCUS-Sample-Data)
+The toolkit code is **MIT** (see [LICENSE](LICENSE)). The embedded FOCUS 1.4 data
+model is a derivative of the FinOps FOCUS specification / data-model workbook,
+which is © the FinOps Foundation and licensed **CC-BY-4.0**; it is redistributed
+here with attribution (see [NOTICE](NOTICE) and
+[docs/model-provenance.md](docs/model-provenance.md)). "FOCUS" and "FinOps" are
+trademarks of the FinOps Foundation; the FOCUS specification, data-model workbook
+and official validator are © the FinOps Foundation — this project is an
+independent community toolkit and is not endorsed by the FinOps Foundation.
+Related sample datasets from the same generators were contributed to
+[FOCUS-Sample-Data](https://github.com/FinOps-Open-Cost-and-Usage-Spec/FOCUS-Sample-Data)
 (PRs #6 and #7).

@@ -1,0 +1,51 @@
+focus-data-toolkit
+==================
+
+This product includes software and data developed by the focus-data-toolkit
+contributors and by third parties, under the terms noted below.
+
+
+1. Toolkit source code
+----------------------
+Copyright (c) 2026 focus-data-toolkit contributors.
+Licensed under the MIT License. See the LICENSE file for the full text.
+
+
+2. Embedded FOCUS data model
+----------------------------
+This package embeds a machine-readable representation of the FinOps Open Cost
+and Usage Specification (FOCUS(TM)) 1.4 data model, in:
+
+    src/focus_data_toolkit/model/focus_1_4_model.json
+    src/focus_data_toolkit/model/focus_1_4_servicesubcategory.json
+
+These files are a derivative work of the FOCUS(TM) specification and its
+"FOCUS 1.4 Data Model" workbook, which are (c) the FinOps Foundation and are
+published under the Creative Commons Attribution 4.0 International license
+(CC-BY-4.0):
+
+    https://github.com/FinOps-Open-Cost-and-Usage-Spec/FOCUS_Spec/blob/main/license.md
+    https://creativecommons.org/licenses/by/4.0/
+
+They are redistributed here under CC-BY-4.0 with attribution to the FinOps
+Foundation. The provenance of the embedded model — its source, license, the
+extraction process, and the reproducible output hash — is recorded in
+src/focus_data_toolkit/model/model_provenance.json and documented in
+docs/model-provenance.md. The source workbook itself is NOT redistributed in
+this repository; download it from https://focus.finops.org.
+
+
+3. Optional dependency: the official FinOps FOCUS validator
+-----------------------------------------------------------
+The optional `[validator]` extra installs `focus-validator` from PyPI, which is
+published by the FinOps Foundation under its own license. It is not vendored or
+redistributed by this project; it is resolved by your package manager on
+install.
+
+
+4. Trademarks and endorsement
+-----------------------------
+"FOCUS" and "FinOps" are trademarks of the FinOps Foundation. This project is an
+independent, community-maintained toolkit. It is NOT affiliated with, sponsored
+by, or endorsed by the FinOps Foundation. References to FOCUS and FinOps are for
+identification and interoperability purposes only.

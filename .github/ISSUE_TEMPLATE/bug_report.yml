@@ -1,0 +1,74 @@
+name: Bug report
+description: Report a defect (including a FOCUS conformance / data-correctness bug).
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug! For a **security vulnerability**, do not use this
+        form — follow [SECURITY.md](../blob/main/SECURITY.md) (private reporting).
+
+        A FOCUS conformance or data-correctness bug (wrong column/value/rounding/
+        verdict) belongs here, not in security reporting.
+  - type: checkboxes
+    id: preconditions
+    attributes:
+      label: Preconditions
+      options:
+        - label: This is not a security vulnerability (those go through private reporting).
+          required: true
+        - label: My reproduction uses synthetic data only — no real client/billing data.
+          required: true
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: Toolkit version
+      description: 'Output of: python -c "import focus_data_toolkit as f; print(f.__version__)"'
+      placeholder: "0.9.0"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "3.12.4"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Minimal, synthetic steps or code that reproduce the problem.
+      placeholder: |
+        from focus_data_toolkit.generators import get_generator
+        ...
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What you expected, and (for conformance bugs) the FOCUS spec reference.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What actually happened (error, wrong value, etc.). Redact any sensitive data.
+    validations:
+      required: true

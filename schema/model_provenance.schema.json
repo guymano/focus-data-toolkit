@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/guymano/focus-data-toolkit/blob/main/schema/model_provenance.schema.json",
+  "title": "FOCUS model provenance",
+  "description": "Provenance manifest for the committed FOCUS machine-readable model JSON. Records the upstream source, its license, the generator process, and the reproducible output hash. The `partial` -> `complete` gate is enforced below: a `complete` status requires the source artifact to be hashed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "focus_version",
+    "provenance_status",
+    "source",
+    "generator",
+    "output"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+    "focus_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+    "provenance_status": {
+      "type": "string",
+      "enum": ["partial", "complete"],
+      "description": "`partial`: source known (name/URL/license) but the exact artifact is not archived/hashed. `complete`: source artifact identified, hashed and license-verified, output reproducible."
+    },
+    "description": { "type": "string" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "publisher", "license", "artifact_sha256"],
+      "properties": {
+        "name": { "type": "string" },
+        "publisher": { "type": "string" },
+        "homepage": { "type": "string", "format": "uri" },
+        "repository": { "type": "string", "format": "uri" },
+        "license": { "type": "string", "description": "SPDX license identifier of the upstream source." },
+        "license_verified": { "type": "boolean" },
+        "license_reference": { "type": "string" },
+        "artifact": { "type": "string" },
+        "artifact_sha256": { "$ref": "#/$defs/sha256OrNull" },
+        "artifact_retrieved": {
+          "anyOf": [{ "type": "string", "format": "date" }, { "type": "null" }]
+        }
+      }
+    },
+    "supplements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string" },
+          "sha256": { "$ref": "#/$defs/sha256" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["script", "script_sha256"],
+      "properties": {
+        "script": { "type": "string" },
+        "script_sha256": { "$ref": "#/$defs/sha256" },
+        "command": { "type": "string" },
+        "runtime": { "type": "string" },
+        "serialization": { "type": "string" }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "bytes"],
+      "properties": {
+        "path": { "type": "string" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "focus_version": { "type": "string" },
+        "datasets": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "reproducibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "byte_for_byte": { "type": "string" },
+        "verifiable_in_ci": { "type": "array", "items": { "type": "string" } },
+        "limitation": { "type": "string" }
+      }
+    },
+    "attribution": { "type": "string" },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  },
+  "allOf": [
+    {
+      "$comment": "Release gate (R8bis): a `complete` provenance must hash the exact source artifact and record when it was retrieved.",
+      "if": {
+        "required": ["provenance_status"],
+        "properties": { "provenance_status": { "const": "complete" } }
+      },
+      "then": {
+        "properties": {
+          "source": {
+            "required": ["artifact_sha256", "artifact_retrieved", "license_verified"],
+            "properties": {
+              "artifact_sha256": { "$ref": "#/$defs/sha256" },
+              "artifact_retrieved": { "type": "string", "format": "date" },
+              "license_verified": { "const": true }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "sha256OrNull": {
+      "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }]
+    }
+  }
+}

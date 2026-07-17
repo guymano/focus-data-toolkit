@@ -50,7 +50,9 @@ def test_version_is_single_sourced(dists):
 def test_wheel_contents(dists):
     names = zipfile.ZipFile(dists["wheel"]).namelist()
     assert any(n.endswith("focus_data_toolkit/py.typed") for n in names), "py.typed missing"
-    assert sum(1 for n in names if "/model/" in n and n.endswith(".json")) == 4, "model JSON missing"
+    # The embedded FOCUS model/reference JSON: 4 model files + model_provenance.json.
+    assert sum(1 for n in names if "/model/" in n and n.endswith(".json")) == 5, "model JSON missing"
+    assert any(n.endswith("focus_data_toolkit/model/model_provenance.json") for n in names)
     assert any(n.endswith("cli.py") for n in names)
     # No tests, no scratch, no golden fixtures leak into the wheel.
     assert not any("/tests/" in n or n.startswith("tests/") for n in names)
@@ -59,9 +61,15 @@ def test_wheel_contents(dists):
 def test_sdist_contents(dists):
     names = tarfile.open(dists["sdist"]).getnames()
     assert any(n.endswith("/LICENSE") for n in names)
+    assert any(n.endswith("/NOTICE") for n in names)
     assert any(n.endswith("/CHANGELOG.md") for n in names)
+    assert any(n.endswith("/SECURITY.md") for n in names)
     # The model extractor ships in the sdist so the embedded model is reproducible from source.
     assert any(n.endswith("tools/extract_focus_1_4_model.py") for n in names)
+    # The provenance verifier + schema travel with the source so the model is verifiable from sdist.
+    assert any(n.endswith("scripts/verify_model_provenance.py") for n in names)
+    assert any(n.endswith("schema/model_provenance.schema.json") for n in names)
+    assert any(n.endswith("docs/model-provenance.md") for n in names)
     assert any(n.endswith("focus_data_toolkit/py.typed") for n in names)
 
 

@@ -1,9 +1,86 @@
 # Changelog
 
-All notable changes to this project are documented here. This project adheres to
-[Semantic Versioning](https://semver.org/).
+All notable changes to this project are documented here. The format is based on
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
+adheres to [Semantic Versioning](https://semver.org/) with
+[PEP 440](https://peps.python.org/pep-0440/) version strings. See
+[docs/versioning.md](docs/versioning.md) for the versioning and reproducibility
+policy.
 
-## [0.3.0] — unreleased
+## [Unreleased]
+
+## [0.9.0] — 2026-07-17
+
+**First public release.** `0.9.0` is the first version prepared for publication
+to PyPI (a deliberate "near-stable" signal; `1.0.0` is reserved for after
+real-world feedback — see [docs/versioning.md](docs/versioning.md)). It bundles
+all functionality developed across the `0.2.0` (P0) and `0.3.0` (P1) milestones,
+detailed in their sections below, and adds the packaging, CI/supply-chain,
+governance, and provenance work that makes the project publishable. Publication
+itself is performed by the release pipeline (see
+[docs/releasing.md](docs/releasing.md)).
+
+### Added — packaging & distribution
+
+- **PyPI-ready packaging**: single-sourced version (`focus_data_toolkit._version`),
+  PEP 639 SPDX license metadata (`license = "MIT"` + `license-files`), a PEP 561
+  `py.typed` marker with the `Typing :: Typed` classifier, project URLs, and a
+  `MANIFEST.in` that ships the sources needed to build and verify from an sdist.
+- **Reproducible installs**: a committed `uv.lock` and hash-pinned
+  `constraints/*.txt`; the optional `[validator]` extra now resolves
+  `focus-validator` from **PyPI** (Python 3.12+) instead of a git URL, so wheels
+  and sdists upload and install cleanly. New `[release]` extra (`build`, `twine`).
+- **Packaging tests** build and install a wheel **and** an sdist in a clean
+  environment and smoke-test the result.
+
+### Added — CI & supply-chain hardening
+
+- Modular workflows: lint, type-check (mypy), a test matrix across
+  ubuntu/windows × Python 3.11–3.13, coverage floor, and a packaging job.
+- Least-privilege `permissions: contents: read` with per-job elevation; every
+  GitHub Action pinned to a full commit SHA (Docker image actions to an
+  `@sha256` digest), enforced by `scripts/check_pinned_actions.py` and a test.
+- Security scanning: `pip-audit` (pinned), `gitleaks`, `actionlint`, and
+  `zizmor`; `Dependabot` for actions and Python dependencies; CodeQL and OpenSSF
+  Scorecard workflows (gated behind `workflow_dispatch` until repository code
+  scanning is enabled — see [docs/releasing.md](docs/releasing.md)).
+
+### Added — governance & documentation
+
+- `SECURITY.md` (GitHub Private Vulnerability Reporting; the security-vulnerability
+  vs FOCUS-conformance-bug distinction; a supported-versions matrix; a "no client
+  data" rule), `CONTRIBUTING.md`, a `NOTICE` file, `.github/CODEOWNERS`, and
+  GitHub issue / pull-request templates.
+- Documentation under `docs/`: `versioning.md`, `compatibility.md` (Python/OS/
+  FOCUS matrix, including the Windows streaming limitation), `security-model.md`,
+  `releasing.md` (with the operational, owner-only checklist), and
+  `model-provenance.md`.
+- A test that scans committed fixtures for secrets/PII and requires each fixture
+  directory to document its synthetic provenance.
+
+### Added — FOCUS model provenance
+
+- A machine-readable provenance manifest
+  (`src/focus_data_toolkit/model/model_provenance.json`) with a JSON Schema
+  (`schema/model_provenance.schema.json`) and a verifier
+  (`scripts/verify_model_provenance.py`, run in CI). It records the source
+  (FinOps FOCUS 1.4 Data Model workbook), the **verified CC-BY-4.0** license, the
+  extraction process, and the reproducible output hash. Status is `partial`
+  (the source workbook is not redistributed/hashed here); a `partial` → `complete`
+  gate blocks a fully-reproducible-provenance claim until the source is hashed.
+
+### Changed
+
+- Project version set to **0.9.0** (first public release).
+
+### Fixed
+
+- The committed FOCUS 1.4 model JSON `source` field pointed at a non-existent
+  `docs/focus/…xlsx` path, diverging from what `tools/extract_focus_1_4_model.py`
+  emits. It now matches the extractor's output, so re-running the extractor on
+  the same workbook reproduces the committed JSON byte-for-byte.
+
+## [0.3.0] — pre-release development (P1)
 
 The 0.3.0 line ("P1") makes the toolkit reliable on **real client data** — consolidated,
 multi-provider, multi-issuer, multi-currency, volumetric exports — without re-implementing the
@@ -141,7 +218,7 @@ multi-provider, multi-issuer, multi-currency, volumetric exports — without re-
   package root: `convert_files`, `DatasetInstance`, `check_status_transitions`. Reproducible
   benchmark at `tools/benchmark_streaming.py`.
 
-## [0.2.0] — unreleased
+## [0.2.0] — pre-release development (P0)
 
 The 0.2.0 line makes the toolkit honest about what it produces and fixes real FOCUS
 conformance defects.
@@ -231,3 +308,8 @@ conformance defects.
 - New typed API `focus_data_toolkit.convert.contract_applied` (parse / validate / migrate).
 - Fixed a whitespace-mismatch bug in the Cost-and-Usage → Invoice Detail back-link key.
 - README/docs no longer describe the linter as a full conformance validator.
+
+<!-- Reference links. 0.2.0/0.3.0 were pre-release development milestones and were never tagged
+     or published, so only the first public release (0.9.0) has a tag link. -->
+[Unreleased]: https://github.com/guymano/focus-data-toolkit/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/guymano/focus-data-toolkit/releases/tag/v0.9.0
