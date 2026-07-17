@@ -27,6 +27,7 @@ _WINDOWS_SKIP_TESTS = {
     "test_atomic_write.py::test_path_traversal_names_are_rejected",
     "test_cli.py::test_convert_stream_csv_matches_eager",
     "test_cli.py::test_convert_stream_honors_manifest_option",
+    "test_cli.py::test_convert_parquet_output",
     "test_parquet.py::test_convert_files_parquet_reconciles_with_csv",
     "test_parquet.py::test_convert_files_parquet_row_count_matches_csv",
     "test_parquet.py::test_metadata_records_target_and_source_version",
