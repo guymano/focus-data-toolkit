@@ -11,6 +11,8 @@ import random
 
 from focus_data_toolkit.generators.engine import scenarios_core
 
+DEFAULT_ROWS = 1000
+
 _BUILDERS = {
     "credit": scenarios_core.credit_row,
     "tax": scenarios_core.tax_row,
@@ -21,14 +23,20 @@ _BUILDERS = {
 
 
 def generate_rows(
-    rows: int,
-    seed: int,
+    rows: int = DEFAULT_ROWS,
+    seed: int | None = None,
     *,
     include_credits: bool = False,
     profile,
     adapter,
 ) -> list[dict[str, str]]:
-    """Return ``rows`` synthetic records for ``profile``/``adapter`` as ordered string dicts."""
+    """Return ``rows`` synthetic records for ``profile``/``adapter`` as ordered string dicts.
+
+    ``rows``/``seed`` default to the historical per-module values (1000 rows; the adapter's
+    default seed) so the shim ``generate_rows()`` / ``generate_rows(rows=N)`` calls keep working.
+    """
+    if seed is None:
+        seed = adapter.default_seed
     if rows < 1:
         raise ValueError("rows must be >= 1")
     rng = random.Random(seed)

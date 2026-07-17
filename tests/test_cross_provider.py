@@ -74,6 +74,18 @@ def test_deterministic(provider, version):
     assert module.generate_csv_bytes(40, 9) == module.generate_csv_bytes(40, 9)
 
 
+@pytest.mark.parametrize("provider", PROVIDERS)
+@pytest.mark.parametrize(("version", "adapter"), [("1.2", V12), ("1.3", V13)])
+def test_module_api_defaults(provider, version, adapter):
+    # The historical module API had default arguments: generate_rows() /
+    # generate_rows(rows=N) / generate_csv_bytes() must work without an explicit seed.
+    module = get_generator(provider, version)
+    assert len(module.generate_rows()) == 1000
+    assert len(module.generate_rows(rows=12)) == 12
+    # No-arg output uses the adapter's default seed and is byte-stable.
+    assert module.generate_csv_bytes() == module.generate_csv_bytes(1000, adapter.default_seed)
+
+
 def test_profiles_have_distinct_identities():
     names = {p.provider_name for p in PROFILES.values()}
     assert len(names) == len(PROFILES) == 3
