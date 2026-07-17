@@ -7,10 +7,13 @@ FOCUS 1.4 Cost and Usage keeps 1.3's 65-column count but:
 * adds ``CommitmentProgramEligibilityDetails`` and ``InvoiceDetailId``
   (both conditional and nullable).
 
-A 1.2 source is first lifted to the 1.3 shape: ``ServiceProviderName`` /
-``HostProviderName`` are derived from ``ProviderName`` / ``PublisherName``,
-and the 1.3-only columns (Split Cost Allocation set, ``ContractApplied``)
-are null.
+A 1.2 source is first lifted to the 1.3 shape: ``ServiceProviderName`` is
+derived from ``ProviderName`` (its 1.3 replacement), ``HostProviderName``
+takes the ``ServiceProviderName`` value — FOCUS requires the host to match
+the service provider when the source does not expose the underlying host,
+and a 1.2 source never exposes it. The deprecated ``PublisherName`` ("entity
+that produced the service") is dropped: it does not identify the host. The
+1.3-only columns (Split Cost Allocation set, ``ContractApplied``) are null.
 """
 
 from __future__ import annotations
@@ -24,10 +27,15 @@ from focus_data_toolkit.provenance import ColumnRule, Lineage
 
 DATASET = "Cost and Usage"
 
-# 1.2 -> 1.3/1.4 provider-identity derivations.
+# 1.2 -> 1.3/1.4 participant-entity derivations. Both columns derive from
+# ProviderName: FOCUS 1.3 replaced ProviderName with ServiceProviderName, and the
+# HostProviderName rules require the value to match ServiceProviderName when the
+# source does not expose the underlying host (a 1.2 source never does). The
+# deprecated PublisherName is NOT a host equivalent and is dropped with the other
+# removed 1.2 columns.
 _DERIVED_FROM_1_2 = {
     "ServiceProviderName": "ProviderName",
-    "HostProviderName": "PublisherName",
+    "HostProviderName": "ProviderName",
 }
 
 
@@ -56,8 +64,21 @@ def cost_and_usage_provenance(
             )
         elif col in present:
             rules[col] = ColumnRule(Lineage.OBSERVED, f"CostAndUsage.{col}")
-        elif source_version == "1.2" and col in _DERIVED_FROM_1_2:
-            rules[col] = ColumnRule(Lineage.RENAMED, _DERIVED_FROM_1_2[col])
+        elif source_version == "1.2" and col == "ServiceProviderName":
+            rules[col] = ColumnRule(
+                Lineage.DERIVED,
+                "ProviderName",
+                note="FOCUS 1.3 replaced ProviderName with ServiceProviderName",
+            )
+        elif source_version == "1.2" and col == "HostProviderName":
+            rules[col] = ColumnRule(
+                Lineage.DERIVED,
+                "ServiceProviderName (from ProviderName)",
+                note=(
+                    "host not exposed by a 1.2 source; FOCUS requires "
+                    "HostProviderName to match ServiceProviderName in that case"
+                ),
+            )
         elif col == "InvoiceDetailId":
             # A locally generated hash presented as an issuer-assigned id -> assumed
             # when linked (so synthetic Cost and Usage is labelled synthetic); else null.

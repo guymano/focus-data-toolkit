@@ -33,16 +33,20 @@ class ProviderContext:
 def provider_context_of_row(row: Mapping[str, str], source_version: str) -> ProviderContext:
     """Derive the provider context of a single Cost and Usage row.
 
-    A 1.2 source expresses these as ``ProviderName`` / ``PublisherName``; 1.3+ uses the
+    A 1.2 source expresses the service provider as ``ProviderName``; 1.3+ uses the
     ``ServiceProviderName`` / ``HostProviderName`` split (falling back to the deprecated
-    names if a 1.3 export still carries them). Absent values stay empty (UNAVAILABLE).
+    ``ProviderName`` if a 1.3 export still carries it). A source that does not expose the
+    underlying host gets ``host == service`` — FOCUS requires ``HostProviderName`` to
+    match ``ServiceProviderName`` in that case. The deprecated ``PublisherName`` (the
+    entity that *produced* the service) is never treated as a host. Absent values stay
+    empty (UNAVAILABLE).
     """
     if source_version == "1.2":
         service = row.get("ProviderName", "") or ""
-        host = row.get("PublisherName", "") or ""
+        host = service
     else:
         service = row.get("ServiceProviderName", "") or row.get("ProviderName", "") or ""
-        host = row.get("HostProviderName", "") or row.get("PublisherName", "") or ""
+        host = row.get("HostProviderName", "") or service
     return ProviderContext(service.strip(), host.strip())
 
 

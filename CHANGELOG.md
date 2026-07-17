@@ -9,6 +9,18 @@ policy.
 
 ## [Unreleased]
 
+### Fixed — FOCUS conformance (may change output bytes)
+
+- **1.2 participant-entity migration**: `HostProviderName` is no longer derived
+  from the deprecated `PublisherName` (the entity that *produced* the service —
+  not the infrastructure host). Per the official FOCUS 1.4 `HostProviderName`
+  rules, when the source does not expose the underlying host the value MUST
+  match `ServiceProviderName`; a 1.2 source never exposes it, so both columns
+  now derive from `ProviderName` and carry `DERIVED` lineage (previously
+  `RENAMED`) with the spec rule recorded in the manifest. The per-row provider
+  context applies the same rule (`host == service` when the host is not
+  exposed; the publisher is never used as a fallback host).
+
 ### Added — release pipeline
 
 - Secure release workflows (`.github/workflows/`): a reusable **build-once**
