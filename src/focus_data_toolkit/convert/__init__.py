@@ -56,12 +56,25 @@ from focus_data_toolkit.model.validator import LintReport, lint_focus_1_4_struct
 from focus_data_toolkit.modes import Mode
 from focus_data_toolkit.provenance import (
     ColumnRule,
+    Lineage,
     LineageCounters,
     has_assumptions,
     strict_blockers,
 )
 from focus_data_toolkit.schema import registry
 from focus_data_toolkit.schema.detection import SchemaDetectionResult, detect_focus_schema
+from focus_data_toolkit.supplement.apply import (
+    apply_billing_periods,
+    apply_contract_commitments,
+    apply_invoice_details,
+)
+from focus_data_toolkit.supplement.loader import SupplementBundle
+from focus_data_toolkit.supplement.validate import (
+    SourceKeySets,
+    coverage,
+    source_key_sets,
+    validate_supplements,
+)
 
 # Base output file name per dataset (stable, snake_case). Synthetic datasets are written
 # with a ``synthetic_`` prefix so they are unmistakable on disk.
@@ -208,6 +221,7 @@ def assemble_manifest(
     partitioned_by: dict[str, list[str]] | None = None,
     lineage_counts: dict[str, LineageCounters] | None = None,
     capabilities: CapabilityProfile | None = None,
+    supplements: list[dict] | None = None,
 ) -> tuple[dict, dict, dict[str, str]]:
     """Build the manifest entries + manifest from per-dataset provenance and row counts.
 
@@ -288,6 +302,7 @@ def assemble_manifest(
         contexts=contexts,
         diagnostics=[d.as_dict() for d in diagnostics],
         capability_profile=(capabilities or CapabilityProfile.none()).as_dict(),
+        supplements=supplements,
     )
     return entries, manifest, produced_output_files
 
@@ -301,14 +316,18 @@ def convert_to_focus_1_4(
     mode: Mode | str = Mode.STRICT,
     validate: bool = True,
     capabilities: CapabilityProfile | None = None,
+    supplements: SupplementBundle | None = None,
 ) -> ConversionResult:
     """Convert FOCUS 1.2/1.3 rows into the FOCUS 1.4 datasets for the given ``mode``.
 
     ``cau_rows`` is a FOCUS 1.2 or 1.3 Cost and Usage table; ``cc_rows`` is the optional
     FOCUS 1.3 Contract Commitment table. ``source_version`` / ``source_dataset`` force schema
-    detection. Returns a :class:`ConversionResult` carrying the produced datasets, per-column
-    provenance, the detected schema, a per-row context summary, diagnostics, a manifest and
-    (when ``validate``) lint reports.
+    detection. ``supplements`` is an optional loaded supplement bundle: supplied facts are
+    validated against the source, applied with ``ENRICHED`` lineage, and — at full coverage —
+    let **strict** mode produce the derived datasets factually. Returns a
+    :class:`ConversionResult` carrying the produced datasets, per-column provenance, the
+    detected schema, a per-row context summary, diagnostics, a manifest and (when
+    ``validate``) lint reports.
     """
     if not cau_rows:
         raise ConversionError("no Cost and Usage rows to convert")
@@ -331,9 +350,26 @@ def convert_to_focus_1_4(
     issuer = issuers[0] if issuers else provider_ctx.service_provider_name
     diagnostics: list[Diagnostic] = []
 
-    # Synthetic-only builders (Billing Period / Invoice Detail / Contract Commitment are
-    # never strictly producible from a Cost-and-Usage source).
-    if synthetic:
+    # Supplements: validate against this exact source before any use. ERRORs block the
+    # conversion outright — a supplement that does not describe this source is never
+    # partially applied.
+    supp_keys: SourceKeySets | None = None
+    if supplements:
+        supp_keys = source_key_sets(cau_rows, cc_rows)
+        supp_diags = validate_supplements(supplements, supp_keys)
+        diagnostics.extend(supp_diags)
+        errors = [d for d in supp_diags if d.severity is Severity.ERROR]
+        if errors:
+            raise ConversionError(
+                f"{len(errors)} supplement validation error(s); first: "
+                f"[{errors[0].code}] {errors[0].message}"
+            )
+
+    # Derived-dataset builders. Historically synthetic-only (Billing Period / Invoice
+    # Detail / Contract Commitment are never strictly producible from a Cost-and-Usage
+    # source alone); with supplements they also run in strict mode — whether each
+    # dataset is then actually produced is decided by its (supplemented) provenance.
+    if synthetic or supplements:
         invoice_rows, id_mapping = build_invoice_details(cau_rows)
         billing_rows = build_billing_periods(cau_rows)
         if cc_rows:
@@ -370,17 +406,63 @@ def convert_to_focus_1_4(
     else:
         invoice_rows, id_mapping, billing_rows, commitment_rows = None, {}, None, None
 
+    # Apply supplements to the derived datasets (ENRICHED lineage, per-value counters).
+    bp_prov: dict[str, ColumnRule] = BILLING_PERIOD_PROVENANCE
+    invd_prov: dict[str, ColumnRule] = INVOICE_DETAIL_PROVENANCE
+    cc_prov: dict[str, ColumnRule] = CONTRACT_COMMITMENT_PROVENANCE
+    lineage_counts: dict[str, LineageCounters] = {}
+    if supplements and supp_keys is not None:
+        if billing_rows is not None:
+            applied = apply_billing_periods(
+                billing_rows, supplements, supp_keys, bp_prov, synthetic=synthetic
+            )
+            billing_rows, bp_prov = applied.rows, applied.provenance
+            lineage_counts["Billing Period"] = applied.counters
+        if invoice_rows is not None:
+            applied, id_mapping = apply_invoice_details(
+                invoice_rows, id_mapping, supplements, supp_keys, invd_prov,
+                synthetic=synthetic,
+            )
+            invoice_rows, invd_prov = applied.rows, applied.provenance
+            lineage_counts["Invoice Detail"] = applied.counters
+        if commitment_rows is not None:
+            applied = apply_contract_commitments(
+                commitment_rows, supplements, supp_keys, cc_prov, synthetic=synthetic
+            )
+            commitment_rows, cc_prov = applied.rows, applied.provenance
+            lineage_counts["Contract Commitment"] = applied.counters
+        # In strict mode the Cost and Usage back-link only exists when Invoice Detail is
+        # actually produced (its supplemented provenance clears every blocker).
+        if not synthetic and strict_blockers(
+            invd_prov, load_model()["datasets"]["Invoice Detail"]["columns"]
+        ):
+            id_mapping = {}
+
+    linked = bool(id_mapping)
     cu_counters = LineageCounters()
     cu_rows = convert_cost_and_usage(
         cau_rows, version, invoice_detail_ids=id_mapping, counters=cu_counters
     )
-    cu_prov = cost_and_usage_provenance(source_cols, version, invoice_detail_linked=synthetic)
+    lineage_counts["Cost and Usage"] = cu_counters
+    cu_prov = cost_and_usage_provenance(source_cols, version, invoice_detail_linked=linked)
+    if supplements and supp_keys is not None and linked:
+        # Real, fully-covering issuer-assigned ids from an invoice_line supplement make
+        # the Cost and Usage back-link factual instead of a locally generated id.
+        line_table = supplements.get("invoice_line")
+        if line_table is not None and "InvoiceDetailId" in line_table.fact_columns:
+            id_cov = coverage(line_table, supp_keys.invoice_grains)["InvoiceDetailId"]
+            if id_cov.complete:
+                cu_prov["InvoiceDetailId"] = ColumnRule(
+                    Lineage.ENRICHED,
+                    f"supplement:invoice_line:{line_table.path.name}",
+                    note="issuer-assigned back-link to Invoice Detail",
+                )
 
     provenance: dict[str, dict[str, ColumnRule]] = {
         "Cost and Usage": cu_prov,
-        "Contract Commitment": CONTRACT_COMMITMENT_PROVENANCE,
-        "Billing Period": BILLING_PERIOD_PROVENANCE,
-        "Invoice Detail": INVOICE_DETAIL_PROVENANCE,
+        "Contract Commitment": cc_prov,
+        "Billing Period": bp_prov,
+        "Invoice Detail": invd_prov,
     }
     built_rows: dict[str, list[dict[str, str]] | None] = {
         "Cost and Usage": cu_rows,
@@ -406,8 +488,9 @@ def convert_to_focus_1_4(
         provenance=provenance,
         source_available=source_available,
         row_counts=row_counts,
-        lineage_counts={"Cost and Usage": cu_counters},
+        lineage_counts=lineage_counts,
         capabilities=capabilities,
+        supplements=supplements.manifest_entries() if supplements else None,
     )
     produced: dict[str, list[dict[str, str]]] = {
         name: built_rows[name] or [] for name in produced_output_files

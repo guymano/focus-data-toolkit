@@ -9,6 +9,31 @@ policy.
 
 ## [Unreleased]
 
+### Added — supplemental client data (promise #3)
+
+- **Gap analysis** (`fdt gaps`): reports, per FOCUS 1.4 dataset, exactly which
+  columns block strict production for a given 1.2/1.3 source — computed from
+  the converter's own provenance rules and annotated from the embedded model —
+  plus ready-to-fill CSV templates per supplement kind. Missing mandatory
+  source columns are reported as source-completeness gaps.
+- **Supplement bundles**: clients supply the missing provider-issued facts as
+  sidecar files (CSV/JSON, gzip ok; kinds `billing_period`, `invoice`,
+  `invoice_line`, `contract_commitment`; kind auto-detected from the header or
+  forced with `FILE:KIND`). Supplements are validated against the source and
+  the model before any use (`FDT-SUPP-0xx`: duplicate keys, unknown columns,
+  format/allowed-value violations, orphans, `BilledCost` reconciliation
+  conflicts, per-column coverage). Pre-flight command:
+  `fdt supplements validate`.
+- **ENRICHED conversion**: `convert_to_focus_1_4(..., supplements=...)`
+  applies supplied facts with `ENRICHED` lineage and full attribution
+  (`supplement:<kind>:<file>` + sha256 in the new manifest `supplements`
+  section). At full coverage, **strict mode now produces all four FOCUS 1.4
+  datasets** with nothing invented; partial coverage keeps the dataset
+  `NOT_PRODUCED` with per-value counters showing how close it is. In strict
+  mode uncovered nullable assumed columns are emitted empty (synthetic
+  defaults never leak); real issuer-assigned `InvoiceDetailId`s replace the
+  locally generated back-links.
+
 ### Added — capability profiles
 
 - New `CapabilityProfile` (`focus_data_toolkit.model.capabilities`): an
