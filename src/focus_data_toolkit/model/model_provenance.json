@@ -1,0 +1,58 @@
+{
+  "$schema": "https://raw.githubusercontent.com/guymano/focus-data-toolkit/main/schema/model_provenance.schema.json",
+  "schema_version": "1.0",
+  "focus_version": "1.4",
+  "provenance_status": "partial",
+  "description": "Provenance for the committed FOCUS 1.4 machine-readable model (focus_1_4_model.json). The JSON is a deterministic extraction of the FinOps Foundation FOCUS 1.4 Data Model and is the artifact of record for this package.",
+  "source": {
+    "name": "FinOps FOCUS 1.4 Data Model workbook",
+    "publisher": "FinOps Foundation",
+    "homepage": "https://focus.finops.org",
+    "repository": "https://github.com/FinOps-Open-Cost-and-Usage-Spec/FOCUS_Spec",
+    "license": "CC-BY-4.0",
+    "license_verified": true,
+    "license_reference": "https://github.com/FinOps-Open-Cost-and-Usage-Spec/FOCUS_Spec/blob/main/license.md",
+    "artifact": "FOCUS 1.4 Data Model workbook (spreadsheet), downloaded from https://focus.finops.org; not redistributed in this repository",
+    "artifact_sha256": null,
+    "artifact_retrieved": null
+  },
+  "supplements": [
+    {
+      "path": "src/focus_data_toolkit/model/focus_1_4_servicesubcategory.json",
+      "sha256": "8532467093bedd1e228a82f07c782d8b29286de75d0a79bccbf896debd867f64",
+      "description": "ServiceSubcategory -> parent Category map, transcribed from the FOCUS v1.4 specification; an input to the extractor."
+    }
+  ],
+  "generator": {
+    "script": "tools/extract_focus_1_4_model.py",
+    "script_sha256": "4fc4c8d6f30f3b3045c7f6afcc46b81ebbb44d800e63993246878374d4ee9403",
+    "command": "python tools/extract_focus_1_4_model.py <focus_1_4_data_model.xlsx>",
+    "runtime": "Dev-time only; requires openpyxl. Neither the runtime package nor the test suite imports openpyxl — the committed JSON is the artifact of record.",
+    "serialization": "json.dumps(model, indent=2, sort_keys=True) + trailing newline; UTF-8. Deterministic: identical (workbook, supplement, generator) reproduce identical output bytes."
+  },
+  "output": {
+    "path": "src/focus_data_toolkit/model/focus_1_4_model.json",
+    "sha256": "8b006e1a36bc9678fef6b79c847654f914ea7abe25c827478aa44ee1d15b214b",
+    "bytes": 64971,
+    "focus_version": "1.4",
+    "datasets": {
+      "Cost and Usage": 65,
+      "Billing Period": 6,
+      "Contract Commitment": 30,
+      "Invoice Detail": 22
+    }
+  },
+  "reproducibility": {
+    "byte_for_byte": "The committed output is byte-reproducible by re-running the pinned generator on the same source workbook: the serialization is deterministic (sorted keys, fixed indent, UTF-8, trailing newline).",
+    "verifiable_in_ci": [
+      "output.sha256 matches the committed focus_1_4_model.json",
+      "generator.script_sha256 matches the committed extractor",
+      "supplements[].sha256 match the committed supplement files"
+    ],
+    "limitation": "The exact source workbook is not committed or hashed (provenance_status = partial), so end-to-end reproduction requires obtaining the same workbook revision from the FinOps Foundation. source.artifact_sha256 is therefore null and is NOT verifiable from this repository."
+  },
+  "attribution": "FOCUS(TM) is a trademark of the FinOps Foundation. The FOCUS specification and data model are (c) the FinOps Foundation and are licensed CC-BY-4.0. The committed model JSON and this provenance file are a derivative work distributed under CC-BY-4.0 with attribution. This project is an independent community toolkit and is not endorsed by the FinOps Foundation.",
+  "notes": [
+    "provenance_status is 'partial' until the exact source workbook artifact is archived and hashed (source.artifact_sha256, source.artifact_retrieved). Per the release gate, a stable release that claims fully verifiable, end-to-end reproducible model provenance requires provenance_status = 'complete'; see docs/model-provenance.md."
+  ]
+}

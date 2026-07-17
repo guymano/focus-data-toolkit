@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/guymano/focus-data-toolkit/security/advisories/new
+    about: >-
+      Do NOT open a public issue for a security vulnerability. Use GitHub Private
+      Vulnerability Reporting instead (see SECURITY.md). Note: a FOCUS conformance
+      or data-correctness bug is NOT a security issue — use the Bug report form.
+  - name: Question / discussion
+    url: https://github.com/guymano/focus-data-toolkit/discussions
+    about: For usage questions and open-ended discussion (if Discussions is enabled).

@@ -1909,5 +1909,5 @@
     "Virtual Machines": "Compute",
     "Workflow Orchestration": "Integration"
   },
-  "source": "docs/focus/focus_1_4_data_model.xlsx (FinOps FOCUS 1.4 Data Model) + FOCUS spec v1.4 ServiceSubcategory list"
+  "source": "FinOps FOCUS 1.4 Data Model workbook (https://focus.finops.org) + FOCUS spec v1.4 ServiceSubcategory list"
 }

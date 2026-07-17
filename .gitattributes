@@ -1,12 +1,14 @@
 # Normalize text files to LF in the repository and on checkout on every platform.
 #
-# Byte-reproducibility depends on this: the synthetic generators emit LF and the golden snapshots
-# (tests/fixtures/golden/) are compared byte-for-byte. Without this, Windows autocrlf checks .csv
-# files out as CRLF, changing their bytes and breaking the byte-for-byte golden comparison on the
-# new Windows CI matrix. Binary files are auto-detected and left untouched.
+# Byte-reproducibility depends on this: the synthetic generators emit LF, the golden snapshots
+# (tests/fixtures/golden/) are compared byte-for-byte, and the FOCUS model JSON + its provenance
+# hashes (model_provenance.json / scripts/verify_model_provenance.py) are computed over LF bytes.
+# Without this, Windows autocrlf checks files out as CRLF, changing their bytes and SHA-256 and
+# breaking both the golden comparison and the provenance verification on the Windows CI matrix.
+# Binary files are auto-detected and left untouched.
 * text=auto eol=lf
 
-# Be explicit for the reproducibility-critical, byte-compared artifacts.
+# Be explicit for the reproducibility-critical, hashed / byte-compared artifacts.
 *.json  text eol=lf
 *.py    text eol=lf
 *.csv   text eol=lf

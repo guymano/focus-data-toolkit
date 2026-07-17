@@ -1,0 +1,32 @@
+# Code owners — required reviewers for the security-, supply-chain- and release-sensitive
+# surfaces. GitHub requests a review from the owner on any PR that touches a matching path;
+# pair this with a branch protection rule ("Require review from Code Owners") to enforce it.
+# See docs/releasing.md for the operational (owner-only) setup steps.
+
+# Default owner for everything in the repo.
+*                                           @guymano
+
+# CI / supply-chain workflows and automation config.
+/.github/                                   @guymano
+
+# Packaging, versioning and dependency locks (a compromised release starts here).
+/pyproject.toml                             @guymano
+/MANIFEST.in                                @guymano
+/uv.lock                                    @guymano
+/constraints/                               @guymano
+/src/focus_data_toolkit/_version.py         @guymano
+
+# FOCUS model, its provenance, and the tools that produce/verify it.
+/src/focus_data_toolkit/model/              @guymano
+/schema/                                    @guymano
+/tools/extract_focus_1_4_model.py           @guymano
+/scripts/verify_model_provenance.py         @guymano
+
+# Security policy, licensing, attribution and the pinning guard.
+/SECURITY.md                                @guymano
+/LICENSE                                    @guymano
+/NOTICE                                     @guymano
+/CODEOWNERS                                 @guymano
+/.github/CODEOWNERS                         @guymano
+/docs/security-model.md                     @guymano
+/scripts/check_pinned_actions.py            @guymano
