@@ -1,0 +1,28 @@
+{
+  "adapter": "gcp-compute-commitments",
+  "version": "1",
+  "target_kind": "contract_commitment",
+  "provenance": {
+    "source": "Google Compute Engine — regionCommitments (Commitment resource)",
+    "doc_url": "https://docs.cloud.google.com/compute/docs/reference/rest/v1/regionCommitments",
+    "field_names_from": "Compute Engine v1 Commitment resource: name, plan (TWELVE_MONTH/THIRTY_SIX_MONTH), status (CREATING/NOT_YET_ACTIVE/ACTIVE/EXPIRED/CANCELLED), startTimestamp, endTimestamp",
+    "retrieved": "2026-07-17",
+    "notes": "Shape of 'gcloud compute commitments list --format=json'. The three constants are invariant facts of GCP committed use discounts: they discount usage (BenefitCategory=Discount), apply continuously to eligible usage (Model=Continuous), and commit to an hourly rate (FulfillmentInterval=Hourly). GCP CUDs are billed monthly with no upfront payment, so PaymentModel=No Upfront and PaymentInterval=Monthly. ContractCommitmentLastUpdated and ContractCommitmentApplicability are NOT emitted (not present in the export) — the client supplies them and coverage reporting shows the residual gap. OfferCategory is left out (a commitment may be public or under a negotiated agreement, which the export does not distinguish)."
+  },
+  "detect": {
+    "all_of": ["name", "plan", "startTimestamp"],
+    "any_of": ["endTimestamp", "status", "region"]
+  },
+  "fields": [
+    {"target": "ContractCommitmentId", "source": "name"},
+    {"target": "ContractCommitmentCreated", "source": "startTimestamp", "transform": "date_to_utc"},
+    {"target": "ContractCommitmentLifecycleStatus", "source": "status",
+     "value_map": {"ACTIVE": "Active", "EXPIRED": "Expired", "NOT_YET_ACTIVE": "Proposed",
+                   "CREATING": "Pending", "CANCELLED": "Canceled"}},
+    {"target": "ContractCommitmentPaymentModel", "const": "No Upfront"},
+    {"target": "ContractCommitmentPaymentInterval", "const": "Monthly"},
+    {"target": "ContractCommitmentBenefitCategory", "const": "Discount"},
+    {"target": "ContractCommitmentModel", "const": "Continuous"},
+    {"target": "ContractCommitmentFulfillmentInterval", "const": "Hourly"}
+  ]
+}

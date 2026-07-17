@@ -18,6 +18,22 @@
       "source": "AWS Savings Plans API \u2014 SavingsPlan (DescribeSavingsPlans)",
       "doc_url": "https://docs.aws.amazon.com/savingsplans/latest/APIReference/API_SavingsPlan.html",
       "sha256": "baf099ba17753672c52ba504d9deef978c279c4a168c8be72b05501a878df6fb"
+    },
+    {
+      "file": "azure_invoice.json",
+      "adapter": "azure-invoice",
+      "target_kind": "invoice",
+      "source": "Azure Billing \u2014 Invoices REST API (Invoice resource)",
+      "doc_url": "https://learn.microsoft.com/en-us/rest/api/billing/invoices/get?view=rest-billing-2024-04-01",
+      "sha256": "3539beba9d84cab5ae7fa8f7e2c35fb32d3c333e85a01ff887748ad6a4780e85"
+    },
+    {
+      "file": "gcp_compute_commitments.json",
+      "adapter": "gcp-compute-commitments",
+      "target_kind": "contract_commitment",
+      "source": "Google Compute Engine \u2014 regionCommitments (Commitment resource)",
+      "doc_url": "https://docs.cloud.google.com/compute/docs/reference/rest/v1/regionCommitments",
+      "sha256": "a163eb59c1b4cb7d0cd4fdc51baa3f4f45783ded4d35c6a52e72310c14238648"
     }
   ]
 }

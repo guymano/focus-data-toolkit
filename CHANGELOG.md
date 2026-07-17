@@ -25,7 +25,11 @@ policy.
   `ENRICHED` lineage attributed as `supplement:<adapter>@<version>:<file>`. An
   adapter only maps fields its table describes (residual gaps are reported, not
   guessed); an unrecognized export falls back to the generic FOCUS-named path.
-  New command: `fdt supplements adapters`.
+  New command: `fdt supplements adapters`. Adapters ship for **AWS**
+  (`aws-invoice-summary`, `aws-savings-plans`), **Azure** (`azure-invoice` —
+  Billing Invoices REST API; `InvoiceStatus` Due/OverDue/Paid → `Issued`,
+  Void → `Voided`) and **GCP** (`gcp-compute-commitments` — Compute Engine
+  `regionCommitments`; `status` and CUD payment facts → `contract_commitment`).
 
 ### Added — supplemental client data (promise #3)
 

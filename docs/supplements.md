@@ -97,8 +97,19 @@ aws-invoice-summary (v1) -> invoice
     source: AWS Invoicing API — InvoiceSummary (ListInvoiceSummaries)
     doc:    https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_invoicing_InvoiceSummary.html
 aws-savings-plans (v1) -> contract_commitment
+azure-invoice (v1) -> invoice
+gcp-compute-commitments (v1) -> contract_commitment
     ...
 ```
+
+Shipped adapters:
+
+| Adapter | Provider export | Target kind |
+|---|---|---|
+| `aws-invoice-summary` | AWS Invoicing API `InvoiceSummary` (`aws invoicing list-invoice-summaries`) | `invoice` |
+| `aws-savings-plans` | AWS Savings Plans inventory (`aws savingsplans describe-savings-plans`) | `contract_commitment` |
+| `azure-invoice` | Azure Billing Invoices REST API (`az billing invoice list`) | `invoice` |
+| `gcp-compute-commitments` | GCP Compute Engine commitments (`gcloud compute commitments list --format=json`) | `contract_commitment` |
 
 Then just pass the export straight to `convert` / `supplements validate`:
 

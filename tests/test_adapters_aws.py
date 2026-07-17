@@ -52,7 +52,7 @@ def test_adapter_provenance_hashes_match_files():
     for entry in manifest["adapters"]:
         data = (ADAPTERS_DIR / entry["file"]).read_bytes()
         assert hashlib.sha256(data).hexdigest() == entry["sha256"], entry["file"]
-        assert entry["doc_url"].startswith("https://docs.aws.amazon.com/")
+        assert entry["doc_url"].startswith("https://")
 
 
 def test_all_adapters_declare_a_known_target_kind():
