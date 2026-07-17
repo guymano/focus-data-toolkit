@@ -1,0 +1,4 @@
+x_ChargeKey,ChargeClass,ChargeCategory,BilledCost,InvoiceId,BillingCurrency,x_CorrectionOf,x_NetCharge
+chg-1,,Usage,100.00,INV-1,USD,,
+chg-1-c1,Correction,Credit,-30.00,INV-1,USD,chg-1,70.00
+chg-1-c2,Correction,Usage,5.00,INV-1,USD,chg-1,75.00
