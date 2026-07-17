@@ -75,11 +75,26 @@ def test_no_real_emails_in_fixtures():
     )
 
 
+def _has_provenance_doc(directory: Path) -> bool:
+    """True if this dir, or any ancestor up to tests/fixtures, carries a provenance doc.
+
+    A doc covering a subtree counts (e.g. tests/fixtures/golden/README.md documents the
+    golden/compatibility_golden/ and golden/correctness_migration/ snapshot dirs beneath it).
+    """
+    current = directory
+    while True:
+        if any((current / doc).is_file() for doc in _PROVENANCE_DOCS):
+            return True
+        if current == _FIXTURES:
+            return False
+        current = current.parent
+
+
 def test_every_fixture_data_dir_documents_provenance():
     findings: list[str] = []
     dirs_with_data = {p.parent for p in _data_files()}
     for directory in sorted(dirs_with_data):
-        if not any((directory / doc).is_file() for doc in _PROVENANCE_DOCS):
+        if not _has_provenance_doc(directory):
             rel = directory.relative_to(_ROOT)
             findings.append(f"{rel}: has data files but no SOURCES.md/README.md provenance doc")
     assert not findings, "fixture directories missing a synthetic-provenance doc:\n" + "\n".join(findings)
