@@ -1,4 +1,4 @@
-# Improvement plan — 16 PRs in 5 lots
+# Improvement plan — 18 PRs in 5 lots
 
 Companion to [`2026-07-repo-audit.md`](./2026-07-repo-audit.md). Every PR is intended to be
 independently green (ruff + mypy + pytest) and reviewable (< ~800 diff lines). Spec references
@@ -14,7 +14,8 @@ operations (Lot 5).
 ```
 Lot 1: PR-1 ─┬─ PR-4
        PR-2 ─┴─ PR-3 ── PR-5
-Lot 2: (Lot 1) ── PR-6 ── PR-7 ── PR-8 ── PR-9
+Lot 2: (Lot 1) ── PR-6 ── PR-7 ─┬─ PR-8 ── PR-9
+                                └─ PR-9a ── PR-9b   (provider-native adapters)
 Lot 3: PR-9 ── PR-10, PR-11        PR-12, PR-13 (independent)
 Lot 4: PR-14, PR-15 ── PR-16
 Lot 5: owner checklist (no code)
@@ -109,11 +110,30 @@ Lot 5: owner checklist (no code)
 
 ## Lot 2 — Promise #3: supplemental client data (new feature)
 
+> **Revised 2026-07-17 (product review).** The primary client journey is a cloud-provider
+> customer holding a FOCUS 1.2/1.3 export **plus native provider artifacts** (invoice
+> exports, reservation/commitment inventories) from AWS, Azure or GCP — not hand-authored
+> FOCUS-named files. Lot 2 therefore ships **two intake paths over one canonical core**:
+> provider-native adapters (PR-9a/PR-9b) translate known official export formats into the
+> canonical supplement tables automatically, and the generic FOCUS-named path (PR-6/PR-7)
+> remains for everything the adapters don't cover (SaaS vendors, other providers, ERP
+> extracts). A client with provider exports renames nothing by hand.
+
 New package `src/focus_data_toolkit/supplement/`. Goal: a client with a 1.2/1.3 source learns
-*exactly* which facts are missing, supplies them as sidecar files, and a **strict** run then
+*exactly* which facts are missing, supplies them as sidecar files — provider-native exports
+where an adapter exists, FOCUS-named templates otherwise — and a **strict** run then
 produces all four FOCUS 1.4 datasets with factual (`ENRICHED`) lineage — no code change to the
 gate itself, because `ENRICHED` is already in `FACTUAL_LINEAGES` and `strict_blockers` already
 unblocks datasets whose mandatory non-nullable columns are all factual.
+
+**Where the missing facts live at the providers** (all officially documented; the adapter
+mapping tables in PR-9a/PR-9b are vendored from these sources, like the FOCUS schemas):
+
+| FOCUS 1.4 need | AWS | Azure | GCP |
+|---|---|---|---|
+| Invoice facts (status, issue/due dates, PO, payment terms, amounts) | [Invoice Summary API](https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_invoicing_ListInvoiceSummaries.html) (`ListInvoiceSummaries`: due date, PO number, billing period, base/tax-currency amounts) | [Invoices REST API / MCA invoice documents](https://learn.microsoft.com/en-us/azure/cost-management-billing/understand/mca-understand-your-invoice) (status `Due`/`Past due`/`Paid`, Net-30 terms, due date, billing profile) | [Cloud Billing BigQuery export](https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-tables) (`invoice.month` maps rows to issued invoices; invoice CSV/PDF from the console) |
+| Commitment terms (payment model/interval, lifecycle, created/updated) | RI / Savings Plans inventory (Savings Plans API, CUR commitment fields) | Reservations / Savings Plan APIs and exports | CUD metadata export (`cud_subscriptions_export`: commitment amounts, consumption model, periods) |
+| Billing-period facts (status, created/last-updated) | derived from the invoice artifacts above | idem | idem |
 
 **Verified gap analysis** (from the embedded model + real provenance dicts —
 `gap = Mandatory ∧ ¬allows_nulls ∧ ¬factual`, i.e. exactly `strict_blockers()`):
@@ -144,7 +164,8 @@ unblocks datasets whose mandatory non-nullable columns are all factual.
 - **Scope:** `supplement/spec.py` (bundle manifest `supplements.json`: path, kind,
   free-text provenance, `as_of`), `supplement/loader.py` (`SupplementBundle.load`; CSV via
   `CsvRowReader` (gzip-aware), JSON sidecars; kind resolution: explicit `:kind` suffix wins,
-  else header matching — ambiguity is a hard error), `supplement/validate.py` with
+  else header matching — ambiguity is a hard error; provider-native header detection is
+  added on top by the PR-9a adapters), `supplement/validate.py` with
   `FDT-SUPP-0xx` diagnostics: duplicate join keys (001, ERROR), missing join-key column (002,
   ERROR), unknown non-`x_` column (003, ERROR), value fails model type/allowed values (004,
   ERROR, reusing `model/validator.py` checkers), orphan rows (005, WARNING), conflicts with
@@ -185,6 +206,55 @@ unblocks datasets whose mandatory non-nullable columns are all factual.
 - **Tests:** eager-vs-streaming equivalence with supplements; large line-supplement fixture
   exercising the SQLite path; CLI parsing.
 - **Depends on:** PR-8.
+
+### PR-9a — Provider adapter framework + AWS adapters
+
+- **Scope:** `supplement/adapters/` — a declarative adapter layer that recognizes **official
+  provider export formats by their native headers/fields** (same scoring mechanic as
+  `detect_focus_schema`) and translates them into the canonical supplement tables of PR-7.
+  An adapter is data, not code: a vendored mapping table (`adapters/aws_invoice.json`, …)
+  recording source format + version, native column → FOCUS column, native value → FOCUS
+  allowed value (e.g. an invoice status vocabulary → `InvoiceIssueStatus`), join-key
+  construction, plus a provenance block (official doc URL, retrieval date, sha256) — the same
+  vendoring discipline as `model/json_schemas/`. First adapters: **AWS** invoice summaries
+  (`ListInvoiceSummaries` JSON/CSV: due date, PO number, billing period, amounts → `invoice`
+  kind) and AWS commitment inventories (RI/Savings Plans → `contract_commitment` kind).
+  UX: `fdt convert ... --supplement aws_invoices.json` — the adapter is auto-detected;
+  `:aws-invoice` forces it. Translated tables then flow through the **unchanged** PR-7
+  validation (`FDT-SUPP-0xx`) — adapters never bypass it. An unrecognized file falls back to
+  the generic FOCUS-named path with a clear diagnostic (`FDT-SUPP-020`, listing the adapter
+  candidates that were considered); never a silent guess. Manifest attribution becomes
+  `supplement:<adapter>@<mapping-version>:<file>` so every ENRICHED value is auditable back
+  to the native provider artifact.
+- **Files:** `supplement/adapters/{__init__,registry}.py`, `supplement/adapters/*.json`
+  (mapping tables + provenance), `supplement/loader.py` (detection hook), `cli.py`,
+  `docs/supplements.md` (per-adapter "how to export this from your provider" walkthrough).
+- **Tests:** fixture files mirroring the documented AWS output shapes (synthetic values);
+  auto-detection + forced-kind; value-vocabulary translation; unrecognized file → clean
+  fallback diagnostic; adapter mapping-table provenance hashes.
+- **Depends on:** PR-7 (canonical tables + validation); delivers end-user value with PR-8/9.
+
+### PR-9b — Azure and GCP adapters
+
+- **Scope:** same framework, two more provider families: **Azure** invoice data (Invoices
+  REST API / MCA-EA invoice detail exports: status `Due`/`Past due`/`Paid` →
+  `InvoiceIssueStatus`, Net-terms → `PaymentTerms`, due date, billing profile → issuer) and
+  reservation/savings-plan exports → `contract_commitment`; **GCP** Cloud Billing BigQuery
+  exports (`invoice.month` grouping → billing-period/invoice facts) and the CUD metadata
+  export (`cud_subscriptions_export` → `contract_commitment`). Account-type variants (Azure
+  EA vs MCA; GCP standard vs detailed export) are **distinct versioned mapping tables**, each
+  with its own provenance block — a format the tables don't cover falls back cleanly rather
+  than half-matching.
+- **Files:** `supplement/adapters/azure_*.json`, `supplement/adapters/gcp_*.json`, fixtures.
+- **Tests:** per-format fixtures (synthetic); EA-vs-MCA disambiguation; vocabulary
+  translations; fallback on unknown variants.
+- **Depends on:** PR-9a.
+
+**Honesty rules for adapters** (both PRs): provider export formats vary by account type and
+evolve over time — an adapter only ever claims the formats its vendored, versioned mapping
+tables describe, translated values keep `ENRICHED` lineage with full attribution (adapter id,
+mapping version, source file sha256), and anything unrecognized is a visible diagnostic plus
+generic-path fallback, never an inference.
 
 ---
 
