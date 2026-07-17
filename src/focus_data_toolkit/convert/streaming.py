@@ -63,8 +63,9 @@ from focus_data_toolkit.io.atomic_writer import AtomicOutputDir, AtomicWriteErro
 from focus_data_toolkit.io.csv_io import CsvRowReader, open_csv_writer
 from focus_data_toolkit.io.records import DatasetSchema
 from focus_data_toolkit.model import dataset_columns, load_model
+from focus_data_toolkit.model.capabilities import CapabilityProfile
 from focus_data_toolkit.modes import Mode
-from focus_data_toolkit.provenance import has_assumptions, strict_blockers
+from focus_data_toolkit.provenance import LineageCounters, has_assumptions, strict_blockers
 
 # Rows per chunk when linting a produced file (bounded memory; the linter has no cross-row
 # state, so chunked linting equals whole-file linting for the fixed model column set).
@@ -133,7 +134,14 @@ def _open_reader(
     return CsvRowReader(path)
 
 
-def _lint_file(dataset: str, path: Path, output_format: str = "csv", *, partition_by=None):
+def _lint_file(
+    dataset: str,
+    path: Path,
+    output_format: str = "csv",
+    *,
+    partition_by=None,
+    capabilities: CapabilityProfile | None = None,
+):
     """Lint a produced file (or partition tree) in bounded chunks, returning a merged LintReport."""
     from focus_data_toolkit.model.validator import (
         _CHECKED_LEVELS,
@@ -149,7 +157,7 @@ def _lint_file(dataset: str, path: Path, output_format: str = "csv", *, partitio
 
     def flush(rows: list[dict[str, str]]) -> None:
         nonlocal total, levels
-        report = lint_focus_1_4_structure(dataset, rows)
+        report = lint_focus_1_4_structure(dataset, rows, profile=capabilities)
         levels = report.levels_checked
         for v in report.violations:
             if v.row_index is None:
@@ -218,6 +226,7 @@ def convert_files(
     partition_by: Sequence[str] | None = None,
     compression: str = "snappy",
     target_file_size: int | None = None,
+    capabilities: CapabilityProfile | None = None,
 ) -> Path:
     """Stream-convert a Cost and Usage file to the FOCUS 1.4 datasets in ``out_dir``.
 
@@ -309,6 +318,7 @@ def convert_files(
 
         provider_seen: dict[tuple[str, str], ProviderContext] = {}
         billing_seen: dict[tuple, BillingContext] = {}
+        cu_counters = LineageCounters()
         cu_count = 0
 
         try:
@@ -322,7 +332,10 @@ def convert_files(
                 grain = invoice_detail_grain_key(row)
                 detail_id = invoice_detail_id(grain) if (synthetic and grain[1]) else ""
                 cu_writer.write(
-                    convert_cost_and_usage_row(row, version, detail_id=detail_id, target=cu_columns)
+                    convert_cost_and_usage_row(
+                        row, version, detail_id=detail_id, target=cu_columns,
+                        counters=cu_counters,
+                    )
                 )
                 cu_count += 1
 
@@ -393,6 +406,7 @@ def convert_files(
                     cc_rows,
                     service_provider_name=provider_ctx.service_provider_name,
                     invoice_issuer_name=issuer,
+                    diagnostics=diagnostics,
                 )
                 cc_columns = dataset_columns("Contract Commitment")
                 cc_file = _output_filename(
@@ -438,6 +452,8 @@ def convert_files(
             row_counts=row_counts,
             output_format=output_format,
             partitioned_by={k: list(v) for k, v in partition_map.items()},
+            lineage_counts={"Cost and Usage": cu_counters},
+            capabilities=capabilities,
         )
 
         # Remove any staged file whose dataset turned out NOT produced (e.g. zero derivable rows).
@@ -453,7 +469,8 @@ def convert_files(
         if validate:
             for name, fname in produced_output_files.items():
                 report = _lint_file(
-                    name, out.path_for(fname), output_format, partition_by=partition_map.get(name)
+                    name, out.path_for(fname), output_format,
+                    partition_by=partition_map.get(name), capabilities=capabilities,
                 )
                 entry = manifest["datasets"][name]
                 if entry["conformance"] == manifest_mod.CONF_NOT_VALIDATED:

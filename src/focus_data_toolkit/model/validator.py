@@ -10,7 +10,10 @@ presented as a FOCUS 1.4 dataset is well-formed against the committed 1.4 data m
   JSON/Key-Value well-formedness with the ``x_`` custom-key rule).
 * ``SEMANTIC_VALID`` — single-row cross-field rules (Tax nulls, consumption gating,
   ``LastUpdated >= Created``, ServiceSubcategory↔ServiceCategory, upfront-percentage vs
-  payment model, condition-aware required columns, ContractApplied deep structure).
+  payment model, condition-aware required columns, ContractApplied deep structure), and
+  the official FOCUS JSON object schemas (vendored verbatim in ``model/json_schemas/``)
+  for ``ContractApplied``, ``AllocatedMethodDetails``,
+  ``CommitmentProgramEligibilityDetails`` and ``ContractCommitmentApplicability``.
 
 It does **not** assert ``CROSS_DATASET_VALID`` (referential integrity across the four
 datasets) or ``OFFICIALLY_VALIDATED`` (the FinOps ``focus_validator``, which does not yet
@@ -32,10 +35,18 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # import cycle: capabilities re-uses the COND_* constants below
+    from focus_data_toolkit.model.capabilities import CapabilityProfile
 
 from focus_data_toolkit.model.focus_json_keys import (
     XPREFIX_ENFORCED_ELEMENTS_COLUMNS,
     XPREFIX_ENFORCED_KEYVALUE_COLUMNS,
+)
+from focus_data_toolkit.model.json_schema_check import (
+    OFFICIAL_SCHEMA_COLUMNS,
+    check_against_official_schema,
 )
 
 _HERE = Path(__file__).resolve().parent
@@ -137,6 +148,10 @@ class _DuplicateKey(Exception):
     pass
 
 
+class _NonFiniteConstant(Exception):
+    pass
+
+
 def _no_dup_pairs(pairs: list[tuple[str, object]]) -> dict:
     seen: dict = {}
     for key, value in pairs:
@@ -146,11 +161,18 @@ def _no_dup_pairs(pairs: list[tuple[str, object]]) -> dict:
     return seen
 
 
+def _reject_constant(const: str) -> float:
+    # NaN / Infinity / -Infinity are Python extensions, not valid JSON.
+    raise _NonFiniteConstant(const)
+
+
 def _load_json_object(value: str) -> tuple[dict | None, str | None]:
     try:
-        obj = json.loads(value, object_pairs_hook=_no_dup_pairs)
+        obj = json.loads(value, object_pairs_hook=_no_dup_pairs, parse_constant=_reject_constant)
     except _DuplicateKey:
         return None, "duplicate_json_key"
+    except _NonFiniteConstant:
+        return None, "bad_json"
     except json.JSONDecodeError:
         return None, "bad_json"
     if not isinstance(obj, dict):
@@ -211,7 +233,9 @@ def _validate_json_column(column: str, value: str, value_format: str) -> str | N
         return None
     # JSON Object columns.
     if column == "ContractApplied":
-        return _validate_contract_applied(value)
+        err = _validate_contract_applied(value)
+        if err:
+            return err
     entry = XPREFIX_ENFORCED_ELEMENTS_COLUMNS.get(column)
     if entry is not None:
         array_key, focus_keys = entry
@@ -226,6 +250,10 @@ def _validate_json_column(column: str, value: str, value_format: str) -> str | N
                 return "element_not_object"
             if not _keys_are_focus_or_prefixed(element, focus_keys):
                 return "custom_key_not_prefixed"
+    # Normative depth: the official FOCUS JSON Schemas (vendored verbatim, see
+    # model/json_schemas/) — conditional scope rules, metric exclusivity, ranges.
+    if column in OFFICIAL_SCHEMA_COLUMNS and check_against_official_schema(column, obj):
+        return "official_schema_violation"
     return None
 
 
@@ -373,6 +401,7 @@ def lint_focus_1_4_structure(
     *,
     model: dict | None = None,
     supported_conditions: Iterable[str] | None = None,
+    profile: CapabilityProfile | None = None,
 ) -> LintReport:
     """Structurally + semantically lint ``rows`` against the FOCUS 1.4 model.
 
@@ -380,13 +409,17 @@ def lint_focus_1_4_structure(
     ``STRUCTURAL_VALID`` and ``SEMANTIC_VALID`` only (see :data:`LEVEL_CROSS_DATASET`
     / :data:`LEVEL_OFFICIAL`, which are never asserted here).
 
-    ``supported_conditions`` declares the FOCUS applicability conditions the provider
-    supports; conditionally-required columns are enforced only for those conditions
-    (default: none enforced, so sparse-but-valid rows pass).
+    ``supported_conditions`` (raw strings) and/or ``profile`` (a validated
+    :class:`~focus_data_toolkit.model.capabilities.CapabilityProfile`) declare the
+    FOCUS applicability conditions the provider supports; conditionally-required
+    columns are enforced only for those conditions (default: none enforced, so
+    sparse-but-valid rows pass — an undeclared condition is *not evaluated*).
     """
     name = resolve_dataset(dataset)
     model = model or load_model()
     supported = frozenset(supported_conditions or ())
+    if profile is not None:
+        supported |= profile.supported_conditions
     columns: dict = model["datasets"][name]["columns"]
     violations: list[Violation] = []
 

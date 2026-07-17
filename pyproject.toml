@@ -81,9 +81,10 @@ version = { attr = "focus_data_toolkit._version.__version__" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-# PEP 561 typing marker + the embedded FOCUS 1.4 model/reference JSON.
+# PEP 561 typing marker + the embedded FOCUS 1.4 model/reference JSON and the
+# vendored official FOCUS JSON object schemas (with their provenance manifest).
 "focus_data_toolkit" = ["py.typed"]
-"focus_data_toolkit.model" = ["*.json"]
+"focus_data_toolkit.model" = ["*.json", "json_schemas/*.json"]
 
 [tool.ruff]
 line-length = 100

@@ -9,6 +9,65 @@ policy.
 
 ## [Unreleased]
 
+### Added — capability profiles
+
+- New `CapabilityProfile` (`focus_data_toolkit.model.capabilities`): an
+  explicit, validated declaration of the FOCUS applicability conditions a
+  source supports (`SupportsUnitPricing`,
+  `SupportsMultiplePricingCategories`). The linter enforces
+  conditionally-required columns only for declared conditions; the conversion
+  pipeline records the active profile in the manifest (`capability_profile`),
+  so an unevaluated condition set is visible instead of silent. CLI:
+  repeatable `--supports CONDITION` on `convert` and `validate`.
+
+### Added — per-value lineage counters
+
+- The manifest's produced-dataset entries gain a `lineage_summary` section
+  counting, per column, how many values actually took each lineage. Today it
+  covers the pricing-currency backfill pair (`PricingCurrency` /
+  `PricingCurrencyEffectiveCost`): the headline column lineage stays the
+  conservative `DERIVED`, and the summary shows the real observed/backfilled
+  mix (e.g. `{"OBSERVED": 99800, "DERIVED": 200}`). Identical in the eager and
+  streaming paths; bounded memory (columns × lineage categories).
+
+### Added — official FOCUS JSON schemas
+
+- The four official FOCUS 1.4 JSON object schemas (`ContractApplied`,
+  `AllocatedMethodDetails`, `CommitmentProgramEligibilityDetails`,
+  `ContractCommitmentApplicability`) are vendored verbatim from the
+  specification repository (tag `v1.4`) under
+  `focus_data_toolkit/model/json_schemas/`, with a provenance manifest
+  (source paths, sha256, CC-BY-4.0 attribution). The linter now evaluates
+  every JSON-object column against its official schema — conditional scope
+  rules, metric exclusivity, ranges, PascalCase `x_` custom keys — via a
+  small dependency-free interpreter of the schema subset; violations surface
+  as `official_schema_violation`. Previously only `ContractApplied` was
+  deep-validated and `ContractCommitmentApplicability` was only checked to
+  be a JSON object.
+
+### Fixed — FOCUS conformance (may change output bytes)
+
+- **Synthetic `ContractCommitmentApplicability`**: the object now declares
+  `{"IsComplexScope": true, ...}` — the official object schema requires a scope
+  representation (`Inclusions` + `InclusionOperator` become required when no
+  scope flag is set), so the previous `x_Source`-only object was normatively
+  invalid. The value remains `ASSUMED` and still never passes strict mode.
+- **`ContractCommitmentDurationType`**: an unparseable or inverted commitment
+  period no longer yields a fabricated `"12 Months"`. The value stays empty
+  (not derivable) and the affected rows are reported as an aggregated
+  `FDT-CC-001` WARNING; the mandatory-column lint then flags the dataset
+  instead of silently publishing an arbitrary duration.
+
+- **1.2 participant-entity migration**: `HostProviderName` is no longer derived
+  from the deprecated `PublisherName` (the entity that *produced* the service —
+  not the infrastructure host). Per the official FOCUS 1.4 `HostProviderName`
+  rules, when the source does not expose the underlying host the value MUST
+  match `ServiceProviderName`; a 1.2 source never exposes it, so both columns
+  now derive from `ProviderName` and carry `DERIVED` lineage (previously
+  `RENAMED`) with the spec rule recorded in the manifest. The per-row provider
+  context applies the same rule (`host == service` when the host is not
+  exposed; the publisher is never used as a fallback host).
+
 ### Added — release pipeline
 
 - Secure release workflows (`.github/workflows/`): a reusable **build-once**
