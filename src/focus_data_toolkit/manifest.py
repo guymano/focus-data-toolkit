@@ -39,6 +39,7 @@ def dataset_entry(
     blocking_columns: list[str] | None = None,
     output_file: str | None = None,
     partitioned_by: list[str] | None = None,
+    lineage_summary: dict[str, dict[str, int]] | None = None,
 ) -> dict:
     entry: dict = {
         "status": status,
@@ -47,6 +48,10 @@ def dataset_entry(
     }
     if row_count is not None:
         entry["row_count"] = row_count
+    if lineage_summary:
+        # Per-value lineage counts for columns whose rule varies by row: the headline
+        # column lineage above stays the weakest category, this shows the actual mix.
+        entry["lineage_summary"] = lineage_summary
     if reason:
         entry["reason"] = reason
     if blocking_columns:

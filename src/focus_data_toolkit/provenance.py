@@ -1,14 +1,21 @@
 """Value provenance (lineage) for converted FOCUS 1.4 columns.
 
-Every produced column is classified by *how* its value was obtained. Lineage is a
-property of the conversion **rule** for a column (uniform across rows), so it is
+Every produced column is classified by *how* its value was obtained. The headline
+classification is a property of the conversion **rule** for a column, so it is
 deterministic and drives both the manifest and the strict-mode gating: in ``STRICT``
 mode a dataset is produced only when every Mandatory non-nullable column has a
 **factual** lineage (not assumed / unavailable).
+
+Some rules act differently per row (e.g. a backfill only touches null source
+values). For those columns the headline rule stays the *weakest* lineage the rule
+can produce (conservative for gating), and a :class:`LineageCounters` accumulator
+records how many values actually took each lineage — surfaced in the manifest as
+``lineage_summary`` so a column-level label never hides the per-value mix.
 """
 
 from __future__ import annotations
 
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -73,3 +80,27 @@ def strict_blockers(provenance: dict[str, ColumnRule], columns: dict[str, dict])
 
 def has_assumptions(provenance: dict[str, ColumnRule]) -> bool:
     return any(rule.is_assumed for rule in provenance.values())
+
+
+class LineageCounters:
+    """Per-column counts of the lineage each emitted value actually took.
+
+    Bounded (columns x lineage categories) and deterministic, so the eager and
+    streaming pipelines produce identical summaries for the same input.
+    """
+
+    def __init__(self) -> None:
+        self._counts: defaultdict[str, Counter[str]] = defaultdict(Counter)
+
+    def record(self, column: str, lineage: Lineage, n: int = 1) -> None:
+        self._counts[column][lineage.value] += n
+
+    def summary(self) -> dict[str, dict[str, int]]:
+        """Sorted ``{column: {lineage: count}}`` (deterministic manifest payload)."""
+        return {
+            column: {lineage: count for lineage, count in sorted(counts.items())}
+            for column, counts in sorted(self._counts.items())
+        }
+
+    def __bool__(self) -> bool:
+        return bool(self._counts)

@@ -9,6 +9,16 @@ policy.
 
 ## [Unreleased]
 
+### Added — per-value lineage counters
+
+- The manifest's produced-dataset entries gain a `lineage_summary` section
+  counting, per column, how many values actually took each lineage. Today it
+  covers the pricing-currency backfill pair (`PricingCurrency` /
+  `PricingCurrencyEffectiveCost`): the headline column lineage stays the
+  conservative `DERIVED`, and the summary shows the real observed/backfilled
+  mix (e.g. `{"OBSERVED": 99800, "DERIVED": 200}`). Identical in the eager and
+  streaming paths; bounded memory (columns × lineage categories).
+
 ### Added — official FOCUS JSON schemas
 
 - The four official FOCUS 1.4 JSON object schemas (`ContractApplied`,

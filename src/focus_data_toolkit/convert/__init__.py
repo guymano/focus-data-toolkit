@@ -53,7 +53,12 @@ from focus_data_toolkit.io.atomic_writer import (
 from focus_data_toolkit.model import FOCUS_1_4_DATASETS, load_model
 from focus_data_toolkit.model.validator import LintReport, lint_focus_1_4_structure
 from focus_data_toolkit.modes import Mode
-from focus_data_toolkit.provenance import ColumnRule, has_assumptions, strict_blockers
+from focus_data_toolkit.provenance import (
+    ColumnRule,
+    LineageCounters,
+    has_assumptions,
+    strict_blockers,
+)
 from focus_data_toolkit.schema import registry
 from focus_data_toolkit.schema.detection import SchemaDetectionResult, detect_focus_schema
 
@@ -200,17 +205,20 @@ def assemble_manifest(
     row_counts: dict[str, int],
     output_format: str = "csv",
     partitioned_by: dict[str, list[str]] | None = None,
+    lineage_counts: dict[str, LineageCounters] | None = None,
 ) -> tuple[dict, dict, dict[str, str]]:
     """Build the manifest entries + manifest from per-dataset provenance and row counts.
 
     Shared by the eager (:func:`convert_to_focus_1_4`) and streaming (``convert_files``) paths
     so both emit an identical manifest for the same input. ``output_format`` selects the output
     filename extension (``csv`` default, or ``parquet``); ``partitioned_by`` maps a dataset to
-    the Parquet partition columns, making its output a directory. Returns
-    ``(entries, manifest, produced_output_files)`` where the last maps each produced dataset to
-    its output filename.
+    the Parquet partition columns, making its output a directory. ``lineage_counts`` maps a
+    dataset to its per-value :class:`LineageCounters` (surfaced as ``lineage_summary``).
+    Returns ``(entries, manifest, produced_output_files)`` where the last maps each produced
+    dataset to its output filename.
     """
     partitioned_by = partitioned_by or {}
+    lineage_counts = lineage_counts or {}
     from focus_data_toolkit import __version__
 
     model = load_model()
@@ -258,6 +266,7 @@ def assemble_manifest(
             name, synthetic_prefix=assumed, output_format=output_format, partitioned=bool(parts)
         )
         produced_output_files[name] = output_file
+        counters = lineage_counts.get(name)
         entries[name] = manifest_mod.dataset_entry(
             status=status,
             conformance=conformance,
@@ -265,6 +274,7 @@ def assemble_manifest(
             row_count=count,
             output_file=output_file,
             partitioned_by=parts,
+            lineage_summary=counters.summary() if counters else None,
         )
 
     manifest = manifest_mod.build_manifest(
@@ -356,7 +366,10 @@ def convert_to_focus_1_4(
     else:
         invoice_rows, id_mapping, billing_rows, commitment_rows = None, {}, None, None
 
-    cu_rows = convert_cost_and_usage(cau_rows, version, invoice_detail_ids=id_mapping)
+    cu_counters = LineageCounters()
+    cu_rows = convert_cost_and_usage(
+        cau_rows, version, invoice_detail_ids=id_mapping, counters=cu_counters
+    )
     cu_prov = cost_and_usage_provenance(source_cols, version, invoice_detail_linked=synthetic)
 
     provenance: dict[str, dict[str, ColumnRule]] = {
@@ -389,6 +402,7 @@ def convert_to_focus_1_4(
         provenance=provenance,
         source_available=source_available,
         row_counts=row_counts,
+        lineage_counts={"Cost and Usage": cu_counters},
     )
     produced: dict[str, list[dict[str, str]]] = {
         name: built_rows[name] or [] for name in produced_output_files

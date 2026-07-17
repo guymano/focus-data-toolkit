@@ -64,7 +64,7 @@ from focus_data_toolkit.io.csv_io import CsvRowReader, open_csv_writer
 from focus_data_toolkit.io.records import DatasetSchema
 from focus_data_toolkit.model import dataset_columns, load_model
 from focus_data_toolkit.modes import Mode
-from focus_data_toolkit.provenance import has_assumptions, strict_blockers
+from focus_data_toolkit.provenance import LineageCounters, has_assumptions, strict_blockers
 
 # Rows per chunk when linting a produced file (bounded memory; the linter has no cross-row
 # state, so chunked linting equals whole-file linting for the fixed model column set).
@@ -309,6 +309,7 @@ def convert_files(
 
         provider_seen: dict[tuple[str, str], ProviderContext] = {}
         billing_seen: dict[tuple, BillingContext] = {}
+        cu_counters = LineageCounters()
         cu_count = 0
 
         try:
@@ -322,7 +323,10 @@ def convert_files(
                 grain = invoice_detail_grain_key(row)
                 detail_id = invoice_detail_id(grain) if (synthetic and grain[1]) else ""
                 cu_writer.write(
-                    convert_cost_and_usage_row(row, version, detail_id=detail_id, target=cu_columns)
+                    convert_cost_and_usage_row(
+                        row, version, detail_id=detail_id, target=cu_columns,
+                        counters=cu_counters,
+                    )
                 )
                 cu_count += 1
 
@@ -439,6 +443,7 @@ def convert_files(
             row_counts=row_counts,
             output_format=output_format,
             partitioned_by={k: list(v) for k, v in partition_map.items()},
+            lineage_counts={"Cost and Usage": cu_counters},
         )
 
         # Remove any staged file whose dataset turned out NOT produced (e.g. zero derivable rows).

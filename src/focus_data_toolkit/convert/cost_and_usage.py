@@ -23,7 +23,7 @@ from collections.abc import Iterable
 from focus_data_toolkit.convert.contract_applied import migrate_1_3_to_1_4
 from focus_data_toolkit.convert.invoice_detail import GrainKey, invoice_detail_grain_key
 from focus_data_toolkit.model import dataset_columns
-from focus_data_toolkit.provenance import ColumnRule, Lineage
+from focus_data_toolkit.provenance import ColumnRule, Lineage, LineageCounters
 
 DATASET = "Cost and Usage"
 
@@ -114,12 +114,14 @@ def convert_cost_and_usage_row(
     *,
     detail_id: str = "",
     target: tuple[str, ...] | None = None,
+    counters: LineageCounters | None = None,
 ) -> dict[str, str]:
     """Convert one source row to the FOCUS 1.4 Cost and Usage shape (pure function).
 
     ``detail_id`` is the already-resolved ``InvoiceDetailId`` back-link (empty in strict mode
     or for rows with no invoice). Shared by the eager and streaming pipelines so both produce
-    identical output.
+    identical output. ``counters`` (optional) records the per-value lineage of columns whose
+    rule varies by row (the pricing-currency backfill pair).
     """
     columns = target if target is not None else dataset_columns(DATASET)
     converted: dict[str, str] = {}
@@ -137,10 +139,16 @@ def convert_cost_and_usage_row(
             converted[col] = ""
     # FOCUS 1.4 makes the pricing-currency pair non-nullable. When a 1.x source leaves it
     # null (e.g. tax or credit rows), pricing happened in the billing currency, so backfill.
-    if not converted.get("PricingCurrency"):
-        converted["PricingCurrency"] = converted.get("BillingCurrency", "")
-    if not converted.get("PricingCurrencyEffectiveCost"):
-        converted["PricingCurrencyEffectiveCost"] = converted.get("EffectiveCost", "")
+    for col, fallback in (
+        ("PricingCurrency", "BillingCurrency"),
+        ("PricingCurrencyEffectiveCost", "EffectiveCost"),
+    ):
+        if not converted.get(col):
+            converted[col] = converted.get(fallback, "")
+            if counters is not None:
+                counters.record(col, Lineage.DERIVED)
+        elif counters is not None:
+            counters.record(col, Lineage.OBSERVED)
     return converted
 
 
@@ -149,6 +157,7 @@ def convert_cost_and_usage(
     source_version: str,
     *,
     invoice_detail_ids: dict[GrainKey, str] | None = None,
+    counters: LineageCounters | None = None,
 ) -> list[dict[str, str]]:
     """Return ``rows`` reshaped to the FOCUS 1.4 Cost and Usage column set.
 
@@ -164,6 +173,7 @@ def convert_cost_and_usage(
             source_version,
             detail_id=ids.get(invoice_detail_grain_key(row), ""),
             target=target,
+            counters=counters,
         )
         for row in rows
     ]
