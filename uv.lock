@@ -434,6 +434,7 @@ source = { editable = "." }
 all = [
     { name = "focus-validator", marker = "python_full_version >= '3.12'" },
     { name = "pyarrow" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
 dev = [
     { name = "build" },
@@ -443,9 +444,11 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "twine" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
 parquet = [
     { name = "pyarrow" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
 release = [
     { name = "build" },
@@ -453,6 +456,7 @@ release = [
 ]
 scale = [
     { name = "pyarrow" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
 validator = [
     { name = "focus-validator", marker = "python_full_version >= '3.12'" },
@@ -462,16 +466,16 @@ validator = [
 requires-dist = [
     { name = "build", marker = "extra == 'release'", specifier = ">=1,<2" },
     { name = "focus-data-toolkit", extras = ["parquet"], marker = "extra == 'scale'" },
+    { name = "focus-data-toolkit", extras = ["parquet", "release"], marker = "extra == 'dev'" },
     { name = "focus-data-toolkit", extras = ["parquet", "validator"], marker = "extra == 'all'" },
-    { name = "focus-data-toolkit", extras = ["release"], marker = "extra == 'dev'" },
     { name = "focus-validator", marker = "python_full_version >= '3.12' and extra == 'validator'", specifier = ">=2.1,<3" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11,<2.4" },
-    { name = "pyarrow", marker = "extra == 'dev'", specifier = ">=15,<21" },
     { name = "pyarrow", marker = "extra == 'parquet'", specifier = ">=15,<21" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5,<7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "twine", marker = "extra == 'release'", specifier = ">=5,<7" },
+    { name = "tzdata", marker = "sys_platform == 'win32' and extra == 'parquet'", specifier = ">=2024.1" },
 ]
 provides-extras = ["parquet", "scale", "validator", "all", "release", "dev"]
 

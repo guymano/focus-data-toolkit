@@ -32,7 +32,13 @@ dynamic = ["version"]
 [project.optional-dependencies]
 # Parquet read/write (P1.6). PyArrow is the only new runtime dependency and is used solely for
 # columnar I/O with exact decimal128 — the core stays standard-library only.
-parquet = ["pyarrow>=15,<21"]
+parquet = [
+    "pyarrow>=15,<21",
+    # pyarrow resolves timestamp timezones ("UTC") via Python's tzdata, which is absent on
+    # Windows (no system tz database) — without it, Parquet Date/Time output raises
+    # ZoneInfoNotFoundError. No-op on Linux/macOS.
+    "tzdata>=2024.1 ; sys_platform == 'win32'",
+]
 # The "scale" extra is intentionally an alias of "parquet": external state for large inputs
 # (dedup / aggregation / joins) is handled by the stdlib sqlite3, so no extra engine is added.
 scale = ["focus-data-toolkit[parquet]"]
@@ -46,12 +52,11 @@ release = ["build>=1,<2", "twine>=5,<7"]
 # the release tooling so the packaging tests can build/inspect the wheel and sdist, and the
 # type-checker + coverage plugin used by CI.
 dev = [
-    "focus-data-toolkit[release]",
+    "focus-data-toolkit[release,parquet]",  # parquet pulls pyarrow + tzdata (Windows)
     "pytest>=8",
     "pytest-cov>=5,<7",
     "ruff>=0.6",
     "mypy>=1.11,<2.4",
-    "pyarrow>=15,<21",
 ]
 
 [project.scripts]
