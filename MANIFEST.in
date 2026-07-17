@@ -14,7 +14,7 @@ recursive-include src/focus_data_toolkit py.typed *.json
 # embedded model are reproducible/verifiable from the sdist (the extractor is the source-of-record
 # process for src/focus_data_toolkit/model/*.json; the verifier + schema gate its provenance).
 include tools/extract_focus_1_4_model.py
-include scripts/verify_model_provenance.py
+recursive-include scripts *.py
 recursive-include schema *.json
 recursive-include docs *.md
 recursive-include tests *.py *.csv *.json *.md

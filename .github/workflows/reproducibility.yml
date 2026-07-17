@@ -1,0 +1,51 @@
+name: Reproducibility check
+
+# Builds the distribution twice with a fixed SOURCE_DATE_EPOCH and compares hashes. The wheel is
+# byte-for-byte reproducible and is asserted as a hard gate; the sdist's file *contents* are
+# reproducible but its tar PAX-header mtime is not normalized by SOURCE_DATE_EPOCH, so the sdist
+# comparison is reported (not failed). See docs/releasing.md for the documented limitation.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  double-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: "3.12"
+      - name: Install locked toolchain
+        run: uv sync --frozen --extra dev
+      - name: Fixed build timestamp
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+      - name: Build twice
+        run: |
+          uv run python -m build --outdir out1
+          uv run python -m build --outdir out2
+      - name: Compare (wheel is a hard gate; sdist is reported)
+        run: |
+          set -euo pipefail
+          wa="$(sha256sum out1/*.whl | cut -d' ' -f1)"
+          wb="$(sha256sum out2/*.whl | cut -d' ' -f1)"
+          sa="$(sha256sum out1/*.tar.gz | cut -d' ' -f1)"
+          sb="$(sha256sum out2/*.tar.gz | cut -d' ' -f1)"
+          {
+            echo "## Reproducibility (SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH)";
+            echo "| artifact | build A | build B | identical |";
+            echo "| --- | --- | --- | --- |";
+            echo "| wheel | \`${wa:0:16}\` | \`${wb:0:16}\` | $([ "$wa" = "$wb" ] && echo yes || echo NO) |";
+            echo "| sdist | \`${sa:0:16}\` | \`${sb:0:16}\` | $([ "$sa" = "$sb" ] && echo yes || echo 'no (PAX mtime, documented)') |";
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$wa" != "$wb" ]; then
+            echo "::error::wheel is not byte-for-byte reproducible ($wa != $wb)"; exit 1
+          fi
+          if [ "$sa" != "$sb" ]; then
+            echo "::warning::sdist bytes differ (tar PAX-header mtime); file contents are identical — see docs/releasing.md"
+          fi

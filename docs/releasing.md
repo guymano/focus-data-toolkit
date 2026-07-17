@@ -3,9 +3,19 @@
 This describes how a `focus-data-toolkit` release is cut, and — importantly —
 separates what the code/CI can guarantee ("Code Ready") from the **operational,
 owner-only actions** that must happen on GitHub and PyPI ("Operationally Ready").
-The release **pipeline** itself (reusable build workflow, SBOM, attestations,
-dry-run vs real publish) is delivered separately; this document is the process
-and the checklist it plugs into.
+
+The release **pipeline** lives in `.github/workflows/`:
+
+| Workflow | Trigger | What it does |
+| --- | --- | --- |
+| `release-build.yml` | `workflow_call` (reusable) | Build wheel+sdist **once** (locked toolchain, `SOURCE_DATE_EPOCH` = commit date), test them, generate the CycloneDX SBOM + `SHA256SUMS` + a build manifest, run `verify_release.py`, upload the artifacts. No publish scopes. |
+| `release-dry-run.yml` | `workflow_dispatch` | Calls `release-build` and re-verifies — **no** id-token, **no** environment, publishes nothing. Rehearse on any branch. |
+| `release.yml` | push tag `v*` | Calls `release-build`, then **attests** wheel/sdist/SBOM/checksums (GitHub Artifact Attestations, keyless OIDC) and **publishes** to PyPI via Trusted Publishing in the `pypi` environment. The same artifacts flow by digest — nothing is rebuilt to publish. |
+| `reproducibility.yml` | `workflow_dispatch` | Double-builds and compares (see Reproducibility below). |
+
+Dry-run vs real release is a **structural** separation (distinct workflows,
+scopes granted only where needed), not a boolean flag — a dry-run cannot become
+a publish.
 
 ## Definition of Done — two levels
 
@@ -66,20 +76,36 @@ Once the repository is public with code scanning / Dependency Graph enabled
    `provenance_status = "complete"` (see
    [docs/model-provenance.md](model-provenance.md)); otherwise it is a
    pre-release with `partial` provenance and must be described as such.
-5. Run the **release dry-run** (build + test + SBOM + checksums + attestation
-   rehearsal) — no publish, no PyPI environment.
+5. Run the **`release-dry-run.yml`** workflow (build + test + SBOM + checksums +
+   `verify_release.py`) — no publish, no PyPI environment.
 6. Open the release PR, get code-owner review, merge.
-7. Create the protected, signed `vX.Y.Z` tag. The release workflow builds the
+7. Create the protected, signed `vX.Y.Z` tag. **`release.yml`** builds the
    artifacts **once**, tests them, generates the SBOM, attests
    wheel/sdist/SBOM/checksums, and publishes to PyPI via Trusted Publishing
    after environment approval. Artifacts pass between jobs **by digest**; the
-   publish job never rebuilds.
-8. Verify the published artifacts (e.g. `gh attestation verify`) and that the
-   PyPI page shows the attestations.
+   publish job never rebuilds. (The `release.yml` publish job also checks the tag
+   matches the built version.)
+8. Verify the published artifacts and that the PyPI page shows the attestations:
+
+   ```bash
+   python scripts/verify_release.py --dist dist          # offline: checksums, SBOM, versions
+   gh attestation verify focus_data_toolkit-X.Y.Z-py3-none-any.whl \
+     --repo guymano/focus-data-toolkit                    # GitHub Artifact Attestation
+   ```
 
 ## Reproducibility of releases
 
-The release pipeline documents its runner, Python, build backend, lock, and
-`SOURCE_DATE_EPOCH` so a build can be reproduced. We claim byte reproducibility
-only where a double-build check demonstrates it, and we document any limitation
-rather than asserting a blanket guarantee.
+The pipeline records its runner, Python, build tooling, lock and
+`SOURCE_DATE_EPOCH` (commit date) in `dist/release-manifest.json`, so a build can
+be reproduced. `reproducibility.yml` double-builds and compares:
+
+- **The wheel is byte-for-byte reproducible** with a fixed `SOURCE_DATE_EPOCH` and
+  the same toolchain — asserted as a hard gate.
+- **The sdist's file contents are reproducible**, but its `.tar.gz` carries a
+  high-precision `mtime` in the tar **PAX extended header** that
+  `SOURCE_DATE_EPOCH` does not normalize, so the raw sdist bytes can differ
+  between builds. This is a known setuptools/tar limitation; the extracted
+  contents are identical. The check reports (does not fail) on the sdist.
+
+We claim byte reproducibility only where the double-build demonstrates it, and
+document the limitation rather than asserting a blanket guarantee.

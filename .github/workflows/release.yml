@@ -1,0 +1,75 @@
+name: Release
+
+# Real release, triggered only by a protected, signed `v*` tag. It reuses the build-once workflow,
+# then attests and publishes the SAME artifacts (passed by digest — never rebuilt):
+#
+#   build (no privileges) -> attest (GitHub Artifact Attestations) -> publish (PyPI Trusted Publishing)
+#
+# id-token / attestations / publish scopes are granted ONLY to the jobs that need them, and the
+# publish job runs in the `pypi` environment (add required reviewers there — see docs/releasing.md).
+# Operational prerequisites (PyPI Trusted Publisher, environment, tag protection) are owner-only and
+# documented in docs/releasing.md; until they exist a tag push will fail at publish rather than leak.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/release-build.yml
+
+  attest:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write        # keyless signing (OIDC)
+      attestations: write    # record the attestation
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: dist
+      - name: Attest build provenance for every artifact
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/sbom.cdx.json
+            dist/SHA256SUMS
+
+  publish:
+    needs: [build, attest]
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/focus-data-toolkit
+    permissions:
+      id-token: write        # PyPI Trusted Publishing (OIDC) — no long-lived token
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: dist
+      - name: Tag matches built version
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "tag '$TAG' does not match built version 'v$VERSION'"; exit 1
+          fi
+      - name: Stage only the distributable files for PyPI
+        run: |
+          mkdir -p dist-pypi
+          cp dist/*.whl dist/*.tar.gz dist-pypi/
+          ls -1 dist-pypi
+      - name: Publish to PyPI (Trusted Publishing + PEP 740 attestations)
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          packages-dir: dist-pypi

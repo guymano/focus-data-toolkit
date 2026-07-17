@@ -9,6 +9,21 @@ policy.
 
 ## [Unreleased]
 
+### Added — release pipeline
+
+- Secure release workflows (`.github/workflows/`): a reusable **build-once**
+  workflow (`release-build.yml`), a **`release-dry-run.yml`** (no publish, no
+  privileged scopes), a tag-triggered **`release.yml`** that attests
+  wheel/sdist/SBOM/checksums (GitHub Artifact Attestations, keyless OIDC) and
+  publishes via **PyPI Trusted Publishing** in a gated environment, and a
+  **`reproducibility.yml`** double-build check. Artifacts flow between jobs by
+  digest — the publish job never rebuilds.
+- A deterministic **CycloneDX 1.5 SBOM** generator (`scripts/generate_sbom.py`)
+  that records the embedded FOCUS 1.4 model as a first-class `data` component
+  (CC-BY-4.0 + provenance hash), and an offline **release verifier**
+  (`scripts/verify_release.py`) checking `SHA256SUMS`, the SBOM, and version
+  consistency. Both are covered by `tests/test_release_tooling.py`.
+
 ## [0.9.0] — 2026-07-17
 
 **First public release.** `0.9.0` is the first version prepared for publication
