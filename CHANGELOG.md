@@ -9,6 +9,21 @@ policy.
 
 ## [Unreleased]
 
+### Added — official FOCUS JSON schemas
+
+- The four official FOCUS 1.4 JSON object schemas (`ContractApplied`,
+  `AllocatedMethodDetails`, `CommitmentProgramEligibilityDetails`,
+  `ContractCommitmentApplicability`) are vendored verbatim from the
+  specification repository (tag `v1.4`) under
+  `focus_data_toolkit/model/json_schemas/`, with a provenance manifest
+  (source paths, sha256, CC-BY-4.0 attribution). The linter now evaluates
+  every JSON-object column against its official schema — conditional scope
+  rules, metric exclusivity, ranges, PascalCase `x_` custom keys — via a
+  small dependency-free interpreter of the schema subset; violations surface
+  as `official_schema_violation`. Previously only `ContractApplied` was
+  deep-validated and `ContractCommitmentApplicability` was only checked to
+  be a JSON object.
+
 ### Fixed — FOCUS conformance (may change output bytes)
 
 - **Synthetic `ContractCommitmentApplicability`**: the object now declares

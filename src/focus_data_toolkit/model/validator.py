@@ -10,7 +10,10 @@ presented as a FOCUS 1.4 dataset is well-formed against the committed 1.4 data m
   JSON/Key-Value well-formedness with the ``x_`` custom-key rule).
 * ``SEMANTIC_VALID`` — single-row cross-field rules (Tax nulls, consumption gating,
   ``LastUpdated >= Created``, ServiceSubcategory↔ServiceCategory, upfront-percentage vs
-  payment model, condition-aware required columns, ContractApplied deep structure).
+  payment model, condition-aware required columns, ContractApplied deep structure), and
+  the official FOCUS JSON object schemas (vendored verbatim in ``model/json_schemas/``)
+  for ``ContractApplied``, ``AllocatedMethodDetails``,
+  ``CommitmentProgramEligibilityDetails`` and ``ContractCommitmentApplicability``.
 
 It does **not** assert ``CROSS_DATASET_VALID`` (referential integrity across the four
 datasets) or ``OFFICIALLY_VALIDATED`` (the FinOps ``focus_validator``, which does not yet
@@ -36,6 +39,10 @@ from pathlib import Path
 from focus_data_toolkit.model.focus_json_keys import (
     XPREFIX_ENFORCED_ELEMENTS_COLUMNS,
     XPREFIX_ENFORCED_KEYVALUE_COLUMNS,
+)
+from focus_data_toolkit.model.json_schema_check import (
+    OFFICIAL_SCHEMA_COLUMNS,
+    check_against_official_schema,
 )
 
 _HERE = Path(__file__).resolve().parent
@@ -211,7 +218,9 @@ def _validate_json_column(column: str, value: str, value_format: str) -> str | N
         return None
     # JSON Object columns.
     if column == "ContractApplied":
-        return _validate_contract_applied(value)
+        err = _validate_contract_applied(value)
+        if err:
+            return err
     entry = XPREFIX_ENFORCED_ELEMENTS_COLUMNS.get(column)
     if entry is not None:
         array_key, focus_keys = entry
@@ -226,6 +235,10 @@ def _validate_json_column(column: str, value: str, value_format: str) -> str | N
                 return "element_not_object"
             if not _keys_are_focus_or_prefixed(element, focus_keys):
                 return "custom_key_not_prefixed"
+    # Normative depth: the official FOCUS JSON Schemas (vendored verbatim, see
+    # model/json_schemas/) — conditional scope rules, metric exclusivity, ranges.
+    if column in OFFICIAL_SCHEMA_COLUMNS and check_against_official_schema(column, obj):
+        return "official_schema_violation"
     return None
 
 

@@ -1,0 +1,38 @@
+{
+  "description": "Provenance of the vendored official FOCUS JSON object schemas.",
+  "source_repository": "https://github.com/FinOps-Open-Cost-and-Usage-Spec/FOCUS_Spec",
+  "source_ref": "v1.4",
+  "license": "CC-BY-4.0",
+  "attribution": "FinOps Open Cost and Usage Specification (FOCUS), (c) FinOps Foundation. Schemas vendored verbatim from the specification repository.",
+  "retrieved": "2026-07-17",
+  "files": [
+    {
+      "file": "contractappliedobjectschema.json",
+      "source_path": "specification/schemas/datasets/cost_and_usage/contractappliedobjectschema.json",
+      "column": "ContractApplied",
+      "sha256": "26ad380f89c12b414f36822fb4f12786e4eacfb0d00ac4781a84752483a5d73e",
+      "bytes": 4352
+    },
+    {
+      "file": "allocatedmethoddetailsobjectschema.json",
+      "source_path": "specification/schemas/datasets/cost_and_usage/allocatedmethoddetailsobjectschema.json",
+      "column": "AllocatedMethodDetails",
+      "sha256": "0f552469954433c04a51ad18561e4b85e13787570cda4a4cc5a733a39214d8fd",
+      "bytes": 3250
+    },
+    {
+      "file": "commitmentprogrameligibilitydetailsobjectschema.json",
+      "source_path": "specification/schemas/datasets/cost_and_usage/commitmentprogrameligibilitydetailsobjectschema.json",
+      "column": "CommitmentProgramEligibilityDetails",
+      "sha256": "0cc2fc4bfc3a720754591c017a5899d214f78d630167a16e99c2875cb91de576",
+      "bytes": 1647
+    },
+    {
+      "file": "contractcommitmentapplicabilityobjectschema.json",
+      "source_path": "specification/schemas/datasets/contract_commitment/contractcommitmentapplicabilityobjectschema.json",
+      "column": "ContractCommitmentApplicability",
+      "sha256": "6c396aa5ac0ccfed1bfb1c464d6698684520554aca50dca3258307ff779a565b",
+      "bytes": 7143
+    }
+  ]
+}

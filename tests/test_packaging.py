@@ -50,9 +50,14 @@ def test_version_is_single_sourced(dists):
 def test_wheel_contents(dists):
     names = zipfile.ZipFile(dists["wheel"]).namelist()
     assert any(n.endswith("focus_data_toolkit/py.typed") for n in names), "py.typed missing"
-    # The embedded FOCUS model/reference JSON: 4 model files + model_provenance.json.
-    assert sum(1 for n in names if "/model/" in n and n.endswith(".json")) == 5, "model JSON missing"
+    # The embedded FOCUS model/reference JSON: 4 model files + model_provenance.json
+    # + the 4 vendored official JSON schemas + json_schemas_provenance.json.
+    assert sum(1 for n in names if "/model/" in n and n.endswith(".json")) == 10, "model JSON missing"
     assert any(n.endswith("focus_data_toolkit/model/model_provenance.json") for n in names)
+    assert sum(1 for n in names if "/model/json_schemas/" in n and n.endswith(".json")) == 5
+    assert any(
+        n.endswith("model/json_schemas/json_schemas_provenance.json") for n in names
+    )
     assert any(n.endswith("cli.py") for n in names)
     # No tests, no scratch, no golden fixtures leak into the wheel.
     assert not any("/tests/" in n or n.startswith("tests/") for n in names)
