@@ -9,6 +9,17 @@ policy.
 
 ## [Unreleased]
 
+### Added — capability profiles
+
+- New `CapabilityProfile` (`focus_data_toolkit.model.capabilities`): an
+  explicit, validated declaration of the FOCUS applicability conditions a
+  source supports (`SupportsUnitPricing`,
+  `SupportsMultiplePricingCategories`). The linter enforces
+  conditionally-required columns only for declared conditions; the conversion
+  pipeline records the active profile in the manifest (`capability_profile`),
+  so an unevaluated condition set is visible instead of silent. CLI:
+  repeatable `--supports CONDITION` on `convert` and `validate`.
+
 ### Added — per-value lineage counters
 
 - The manifest's produced-dataset entries gain a `lineage_summary` section

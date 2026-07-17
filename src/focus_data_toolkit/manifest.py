@@ -74,6 +74,7 @@ def build_manifest(
     detection: dict | None = None,
     contexts: dict | None = None,
     diagnostics: list[dict] | None = None,
+    capability_profile: dict | None = None,
 ) -> dict:
     assumptions_present = any(
         entry["status"] in (PRODUCED, PRODUCED_SYNTHETIC)
@@ -96,6 +97,10 @@ def build_manifest(
         manifest["contexts"] = contexts
     if diagnostics is not None:
         manifest["diagnostics"] = diagnostics
+    if capability_profile is not None:
+        # The applicability conditions the lint actually enforced. Recorded even when
+        # empty ("none-declared"), so an unevaluated condition set is never silent.
+        manifest["capability_profile"] = capability_profile
     return manifest
 
 

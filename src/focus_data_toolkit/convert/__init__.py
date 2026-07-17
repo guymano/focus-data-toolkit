@@ -51,6 +51,7 @@ from focus_data_toolkit.io.atomic_writer import (
     sha256sums_text,
 )
 from focus_data_toolkit.model import FOCUS_1_4_DATASETS, load_model
+from focus_data_toolkit.model.capabilities import CapabilityProfile
 from focus_data_toolkit.model.validator import LintReport, lint_focus_1_4_structure
 from focus_data_toolkit.modes import Mode
 from focus_data_toolkit.provenance import (
@@ -206,6 +207,7 @@ def assemble_manifest(
     output_format: str = "csv",
     partitioned_by: dict[str, list[str]] | None = None,
     lineage_counts: dict[str, LineageCounters] | None = None,
+    capabilities: CapabilityProfile | None = None,
 ) -> tuple[dict, dict, dict[str, str]]:
     """Build the manifest entries + manifest from per-dataset provenance and row counts.
 
@@ -285,6 +287,7 @@ def assemble_manifest(
         detection=detection.as_dict(),
         contexts=contexts,
         diagnostics=[d.as_dict() for d in diagnostics],
+        capability_profile=(capabilities or CapabilityProfile.none()).as_dict(),
     )
     return entries, manifest, produced_output_files
 
@@ -297,6 +300,7 @@ def convert_to_focus_1_4(
     source_dataset: str | None = None,
     mode: Mode | str = Mode.STRICT,
     validate: bool = True,
+    capabilities: CapabilityProfile | None = None,
 ) -> ConversionResult:
     """Convert FOCUS 1.2/1.3 rows into the FOCUS 1.4 datasets for the given ``mode``.
 
@@ -403,6 +407,7 @@ def convert_to_focus_1_4(
         source_available=source_available,
         row_counts=row_counts,
         lineage_counts={"Cost and Usage": cu_counters},
+        capabilities=capabilities,
     )
     produced: dict[str, list[dict[str, str]]] = {
         name: built_rows[name] or [] for name in produced_output_files
@@ -420,7 +425,7 @@ def convert_to_focus_1_4(
     )
     if validate:
         for name, rows in produced.items():
-            report = lint_focus_1_4_structure(name, rows)
+            report = lint_focus_1_4_structure(name, rows, profile=capabilities)
             result.reports[name] = report
             entry = result.manifest["datasets"][name]
             # Only a factual dataset advertises a lint conclusion; set it now that the

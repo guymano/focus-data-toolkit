@@ -35,6 +35,10 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # import cycle: capabilities re-uses the COND_* constants below
+    from focus_data_toolkit.model.capabilities import CapabilityProfile
 
 from focus_data_toolkit.model.focus_json_keys import (
     XPREFIX_ENFORCED_ELEMENTS_COLUMNS,
@@ -386,6 +390,7 @@ def lint_focus_1_4_structure(
     *,
     model: dict | None = None,
     supported_conditions: Iterable[str] | None = None,
+    profile: CapabilityProfile | None = None,
 ) -> LintReport:
     """Structurally + semantically lint ``rows`` against the FOCUS 1.4 model.
 
@@ -393,13 +398,17 @@ def lint_focus_1_4_structure(
     ``STRUCTURAL_VALID`` and ``SEMANTIC_VALID`` only (see :data:`LEVEL_CROSS_DATASET`
     / :data:`LEVEL_OFFICIAL`, which are never asserted here).
 
-    ``supported_conditions`` declares the FOCUS applicability conditions the provider
-    supports; conditionally-required columns are enforced only for those conditions
-    (default: none enforced, so sparse-but-valid rows pass).
+    ``supported_conditions`` (raw strings) and/or ``profile`` (a validated
+    :class:`~focus_data_toolkit.model.capabilities.CapabilityProfile`) declare the
+    FOCUS applicability conditions the provider supports; conditionally-required
+    columns are enforced only for those conditions (default: none enforced, so
+    sparse-but-valid rows pass — an undeclared condition is *not evaluated*).
     """
     name = resolve_dataset(dataset)
     model = model or load_model()
     supported = frozenset(supported_conditions or ())
+    if profile is not None:
+        supported |= profile.supported_conditions
     columns: dict = model["datasets"][name]["columns"]
     violations: list[Violation] = []
 

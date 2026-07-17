@@ -30,6 +30,7 @@ from focus_data_toolkit.generators import FOCUS_VERSIONS, PROVIDERS, get_generat
 from focus_data_toolkit.io.parquet_io import COMPRESSIONS
 from focus_data_toolkit.io.records import MalformedRecordError
 from focus_data_toolkit.manifest import render as render_manifest
+from focus_data_toolkit.model.capabilities import KNOWN_CONDITIONS, CapabilityProfile
 from focus_data_toolkit.model.validator import lint_focus_1_4_structure, resolve_dataset
 from focus_data_toolkit.modes import Mode
 
@@ -67,6 +68,12 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _capabilities(args: argparse.Namespace) -> CapabilityProfile:
+    """Build the capability profile from repeated ``--supports`` flags."""
+    return CapabilityProfile(frozenset(args.supports), source="cli") if args.supports \
+        else CapabilityProfile.none()
+
+
 def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
     """Bounded-memory streaming conversion (required for Parquet output / large inputs)."""
     partition_by = [c.strip() for c in (args.partition_by or "").split(",") if c.strip()]
@@ -86,6 +93,7 @@ def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
             partition_by=partition_by,
             compression=args.compression,
             target_file_size=target_file_size,
+            capabilities=_capabilities(args),
         )
     except (ConversionError, DestinationExistsError, MalformedRecordError) as exc:
         # MalformedRecordError covers a malformed CSV record and a missing PyArrow (the clear
@@ -141,6 +149,7 @@ def _cmd_convert(args: argparse.Namespace) -> int:
             source_dataset=args.source_dataset,
             mode=mode,
             validate=not args.no_validate,
+            capabilities=_capabilities(args),
         )
     except ConversionError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -209,7 +218,9 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         return run_official_validator(args.file, args.focus_version)
 
     rows = read_csv_rows(args.file)
-    report = lint_focus_1_4_structure(resolve_dataset(args.dataset.replace("-", " ")), rows)
+    report = lint_focus_1_4_structure(
+        resolve_dataset(args.dataset.replace("-", " ")), rows, profile=_capabilities(args)
+    )
     status = (
         f"structural+semantic lint OK ({', '.join(report.levels_passed)})"
         if report.ok
@@ -266,6 +277,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-validate", action="store_true", help="skip the built-in FOCUS 1.4 structural lint"
     )
     conv.add_argument(
+        "--supports",
+        action="append",
+        default=[],
+        choices=sorted(KNOWN_CONDITIONS),
+        metavar="CONDITION",
+        help="declare a FOCUS applicability condition the source supports (repeatable); "
+        "conditionally-required columns are enforced only for declared conditions "
+        f"(known: {', '.join(sorted(KNOWN_CONDITIONS))})",
+    )
+    conv.add_argument(
         "--on-exists",
         choices=[e.value for e in OnExists],
         default=OnExists.REFUSE.value,
@@ -315,6 +336,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="Cost and Usage",
         help="FOCUS 1.4 dataset name for the built-in validator "
         "(cost-and-usage, contract-commitment, billing-period, invoice-detail)",
+    )
+    val.add_argument(
+        "--supports",
+        action="append",
+        default=[],
+        choices=sorted(KNOWN_CONDITIONS),
+        metavar="CONDITION",
+        help="declare a FOCUS applicability condition the source supports (repeatable)",
     )
     val.add_argument(
         "--official", action="store_true", help="run the official FinOps focus-validator instead"
