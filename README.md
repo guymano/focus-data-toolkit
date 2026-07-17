@@ -211,13 +211,15 @@ out = convert_files("huge_cost_and_usage.csv.gz", "./focus-1.4",
 ### Synthetic scenarios (SCA, corrections, billing lifecycle)
 
 Deterministic, provider-agnostic scenario builders produce self-consistent data for tests and
-demos, and typed lifecycle checks validate status transitions:
+demos, and typed lifecycle checks validate the full snapshot chains — status transitions plus
+chain structure (id/order uniqueness, `previous_instance_id` resolution, cycle detection,
+`last_updated` monotonicity, closed-instance immutability; `FDT-LIFE-001..006`):
 
 ```python
 from focus_data_toolkit.generators.scenarios import (
     split_allocation_group, correction_set, billing_lifecycle_instances,
 )
-from focus_data_toolkit import check_status_transitions, validate_bundle
+from focus_data_toolkit import check_dataset_instances, validate_bundle
 
 alloc = split_allocation_group("origin-1", "100.00", weights=[3, 2, 1])   # ratios sum to 1,
 validate_bundle({"Cost and Usage": alloc}).ok                             # costs sum to origin
@@ -225,7 +227,7 @@ validate_bundle({"Cost and Usage": alloc}).ok                             # cost
 corr = correction_set("chg-1", "100.00", ["-30.00"])   # original + signed Correction line,
 validate_bundle({"Cost and Usage": corr}).ok           # running net recorded in x_NetCharge
 
-check_status_transitions(billing_lifecycle_instances())  # [] — only allowed transitions
+check_dataset_instances(billing_lifecycle_instances())  # [] — chains + transitions all valid
 ```
 
 ### Python API

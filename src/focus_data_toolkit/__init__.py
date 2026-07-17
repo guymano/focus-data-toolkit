@@ -20,7 +20,12 @@ Public API:
 
 from focus_data_toolkit._version import __version__
 from focus_data_toolkit.convert import ConversionResult, convert_files, convert_to_focus_1_4
-from focus_data_toolkit.lifecycle import DatasetInstance, check_status_transitions
+from focus_data_toolkit.lifecycle import (
+    DatasetInstance,
+    check_dataset_instances,
+    check_instance_chains,
+    check_status_transitions,
+)
 from focus_data_toolkit.model.validator import (
     LintReport,
     ValidationReport,
@@ -43,6 +48,8 @@ __all__ = [
     "ValidationReport",
     "Violation",
     "__version__",
+    "check_dataset_instances",
+    "check_instance_chains",
     "check_status_transitions",
     "convert_files",
     "convert_to_focus_1_4",
