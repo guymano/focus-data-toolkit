@@ -37,8 +37,21 @@ class DestinationExistsError(AtomicWriteError):
 
 
 def _fsync_file(path: Path) -> None:
-    with open(path, "rb") as handle:
-        os.fsync(handle.fileno())
+    # Durability hardening, best-effort. On POSIX, fsync of a read-only fd works and is
+    # honoured. On Windows, os.fsync requires a writable descriptor — a read-only handle
+    # raises EBADF — and there is no portable read-only file-flush, so a refused fsync must
+    # not fail an otherwise-complete publish (the atomic directory rename remains the
+    # correctness guarantee). This mirrors the best-effort handling in ``_fsync_dir``.
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
 
 
 def _fsync_dir(path: Path) -> None:
