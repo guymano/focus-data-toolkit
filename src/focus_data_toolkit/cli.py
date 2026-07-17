@@ -154,6 +154,21 @@ def _cmd_supplements_validate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_supplements_adapters(args: argparse.Namespace) -> int:
+    from focus_data_toolkit.supplement.adapters import load_adapters
+
+    adapters = load_adapters()
+    if not adapters:
+        print("no provider adapters available")
+        return 0
+    for name in sorted(adapters):
+        a = adapters[name]
+        print(f"{name} (v{a.version}) -> {a.target_kind}")
+        print(f"    source: {a.provenance.get('source', '?')}")
+        print(f"    doc:    {a.provenance.get('doc_url', '?')}")
+    return 0
+
+
 def _capabilities(args: argparse.Namespace) -> CapabilityProfile:
     """Build the capability profile from repeated ``--supports`` flags."""
     return CapabilityProfile(frozenset(args.supports), source="cli") if args.supports \
@@ -489,6 +504,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--supplements-dir", help="directory containing a supplements.json bundle manifest"
     )
     supp_val.set_defaults(func=_cmd_supplements_validate)
+    supp_adapters = supp_sub.add_parser(
+        "adapters", help="list the provider-native export adapters (AWS/Azure/GCP)"
+    )
+    supp_adapters.set_defaults(func=_cmd_supplements_adapters)
 
     val = sub.add_parser("validate", help="validate a CSV file")
     val.add_argument("file", help="CSV file to validate")

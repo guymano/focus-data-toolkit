@@ -49,7 +49,8 @@ class AppliedDataset:
 
 
 def _source_label(table: SupplementTable) -> str:
-    return f"supplement:{table.kind.name}:{table.path.name}"
+    # For an adapter-translated file the tag is "<adapter>@<version>"; otherwise the kind.
+    return f"supplement:{table.source_tag}:{table.path.name}"
 
 
 def _allows_nulls(dataset: str, column: str) -> bool:

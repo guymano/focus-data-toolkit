@@ -85,6 +85,8 @@ where = ["src"]
 # vendored official FOCUS JSON object schemas (with their provenance manifest).
 "focus_data_toolkit" = ["py.typed"]
 "focus_data_toolkit.model" = ["*.json", "json_schemas/*.json"]
+# Vendored provider-native supplement adapters (AWS/Azure/GCP mapping tables + provenance).
+"focus_data_toolkit.supplement.adapters" = ["*.json"]
 
 [tool.ruff]
 line-length = 100

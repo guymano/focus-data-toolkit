@@ -1,0 +1,31 @@
+{
+  "adapter": "aws-savings-plans",
+  "version": "1",
+  "target_kind": "contract_commitment",
+  "provenance": {
+    "source": "AWS Savings Plans API — SavingsPlan (DescribeSavingsPlans)",
+    "doc_url": "https://docs.aws.amazon.com/savingsplans/latest/APIReference/API_SavingsPlan.html",
+    "field_names_from": "botocore savingsplans service model, apiVersion 2019-06-28",
+    "retrieved": "2026-07-17",
+    "notes": "Maps only fields genuinely determinable from a Savings Plans inventory. paymentOption uses the same vocabulary as FOCUS ContractCommitmentPaymentModel. The three constants are invariant facts of the Savings Plans product: it is a discount commitment (BenefitCategory=Discount), applies continuously to eligible usage (Model=Continuous), and commits to an hourly spend rate (FulfillmentInterval=Hourly). ContractCommitmentLastUpdated and ContractCommitmentApplicability are NOT emitted (not present in the export) — the client supplies them and coverage reporting shows the residual gap. OfferCategory is left out because a Savings Plan may be public or under a negotiated agreement, which the export does not distinguish."
+  },
+  "detect": {
+    "all_of": ["savingsPlanId", "paymentOption"],
+    "any_of": ["state", "savingsPlanType", "commitment", "start"]
+  },
+  "fields": [
+    {"target": "ContractCommitmentId", "source": "savingsPlanId"},
+    {"target": "ContractCommitmentPaymentModel", "source": "paymentOption",
+     "value_map": {"No Upfront": "No Upfront", "Partial Upfront": "Partial Upfront", "All Upfront": "All Upfront"}},
+    {"target": "ContractCommitmentPaymentInterval", "source": "paymentOption",
+     "value_map": {"All Upfront": "One-Time", "Partial Upfront": "Monthly", "No Upfront": "Monthly"}},
+    {"target": "ContractCommitmentLifecycleStatus", "source": "state",
+     "value_map": {"active": "Active", "payment-pending": "Pending", "payment-failed": "Pending",
+                   "queued": "Proposed", "queued-deleted": "Canceled", "retired": "Expired",
+                   "pending-return": "Active", "returned": "Canceled"}},
+    {"target": "ContractCommitmentCreated", "source": "start", "transform": "date_to_utc"},
+    {"target": "ContractCommitmentBenefitCategory", "const": "Discount"},
+    {"target": "ContractCommitmentModel", "const": "Continuous"},
+    {"target": "ContractCommitmentFulfillmentInterval", "const": "Hourly"}
+  ]
+}

@@ -454,7 +454,7 @@ def convert_to_focus_1_4(
             if id_cov.complete:
                 cu_prov["InvoiceDetailId"] = ColumnRule(
                     Lineage.ENRICHED,
-                    f"supplement:invoice_line:{line_table.path.name}",
+                    f"supplement:{line_table.source_tag}:{line_table.path.name}",
                     note="issuer-assigned back-link to Invoice Detail",
                 )
 

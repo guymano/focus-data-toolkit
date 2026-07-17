@@ -1,0 +1,24 @@
+{
+  "adapter": "aws-invoice-summary",
+  "version": "1",
+  "target_kind": "invoice",
+  "provenance": {
+    "source": "AWS Invoicing API — InvoiceSummary (ListInvoiceSummaries)",
+    "doc_url": "https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_invoicing_InvoiceSummary.html",
+    "field_names_from": "botocore invoicing service model, apiVersion 2024-12-01",
+    "retrieved": "2026-07-17",
+    "notes": "Invoice-header facts only. AWS does not expose payment terms on the invoice summary, so PaymentTerms is left for the client (coverage reporting shows the residual gap). Rows returned by the API are issued invoices, so InvoiceIssueStatus is the invariant 'Issued'. JSON nested fields are addressed by dot-path (Entity.InvoicingEntity, BillingPeriod.Month)."
+  },
+  "detect": {
+    "all_of": ["InvoiceId", "IssuedDate"],
+    "any_of": ["DueDate", "InvoiceType", "Entity.InvoicingEntity", "PurchaseOrderNumber"]
+  },
+  "fields": [
+    {"target": "InvoiceId", "source": "InvoiceId"},
+    {"target": "InvoiceIssuerName", "source": "Entity.InvoicingEntity"},
+    {"target": "InvoiceIssueDate", "source": "IssuedDate", "transform": "date_to_utc"},
+    {"target": "PaymentDueDate", "source": "DueDate", "transform": "date_to_utc"},
+    {"target": "PurchaseOrderNumber", "source": "PurchaseOrderNumber"},
+    {"target": "InvoiceIssueStatus", "const": "Issued"}
+  ]
+}

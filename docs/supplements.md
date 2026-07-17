@@ -85,7 +85,41 @@ Behavior (identical in the eager and streaming paths — outputs are byte-identi
 - **Synthetic mode**: supplied values win, documented defaults fill the rest, and the
   counters record the enriched/assumed mix per column.
 
-> **Provider-native exports (AWS / Azure / GCP):** adapters that translate documented
-> provider export formats (invoice summaries, reservation/commitment inventories) into
-> these kinds automatically are part of this feature set — see the improvement plan
-> (Lot 2, PR-9a/PR-9b). With an adapter, you do not rename anything by hand.
+## Provider-native exports (AWS / Azure / GCP) — no manual renaming
+
+If your supplemental data is a **native provider export**, an adapter recognizes its format
+by its own field names and translates it into the canonical kinds above — you do not rename
+anything by hand. List the available adapters:
+
+```console
+$ focus-toolkit supplements adapters
+aws-invoice-summary (v1) -> invoice
+    source: AWS Invoicing API — InvoiceSummary (ListInvoiceSummaries)
+    doc:    https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_invoicing_InvoiceSummary.html
+aws-savings-plans (v1) -> contract_commitment
+    ...
+```
+
+Then just pass the export straight to `convert` / `supplements validate`:
+
+```console
+$ focus-toolkit convert --cost-and-usage my_focus_1_2.csv \
+      --supplement aws_invoices.json --supplement aws_savings_plans.csv \
+      --supplement payment_terms.csv --out focus-1.4 --mode strict
+```
+
+The adapter is auto-detected from the header; force one with `FILE:<adapter-name>` (e.g.
+`aws_export.json:aws-invoice-summary`). Each adapter is a **vendored, versioned mapping
+table** carrying its official-doc provenance (see
+`focus_data_toolkit/supplement/adapters/adapters_provenance.json`); translated values keep
+`ENRICHED` lineage with the attribution `supplement:<adapter>@<version>:<file>`, so every
+value is auditable back to the native export. Honesty rules:
+
+- An adapter only maps fields its table describes. Facts the export does not contain (e.g.
+  AWS does not expose payment terms on the invoice summary, or a savings-plan's
+  applicability scope) are **not** emitted — the coverage report shows the residual gap and
+  you supply those separately.
+- An export that matches no adapter falls back to the generic FOCUS-named path with a clear
+  message. Nothing is ever guessed.
+- Account-type / format variants are distinct versioned tables; an unrecognized variant
+  falls back rather than half-matching.

@@ -9,6 +9,24 @@ policy.
 
 ## [Unreleased]
 
+### Added — provider-native supplement adapters
+
+- **Adapters** translate documented cloud-provider export formats into the
+  canonical supplement kinds automatically, so a client passes native exports
+  straight to `convert` / `supplements validate` without renaming anything.
+  First adapters (AWS): `aws-invoice-summary` (Invoicing API `InvoiceSummary`,
+  incl. nested `Entity.InvoicingEntity`, `DueDate`, `PurchaseOrderNumber`) →
+  `invoice`; `aws-savings-plans` (Savings Plans inventory: `paymentOption`,
+  `state`, `start`) → `contract_commitment`. Each adapter is a vendored,
+  versioned JSON mapping table with official-doc provenance
+  (`supplement/adapters/adapters_provenance.json`, sha256-verified); the format
+  is auto-detected from the header (force with `FILE:<adapter-name>`).
+  Translated rows flow through the unchanged supplement validation and carry
+  `ENRICHED` lineage attributed as `supplement:<adapter>@<version>:<file>`. An
+  adapter only maps fields its table describes (residual gaps are reported, not
+  guessed); an unrecognized export falls back to the generic FOCUS-named path.
+  New command: `fdt supplements adapters`.
+
 ### Added — supplemental client data (promise #3)
 
 - **Gap analysis** (`fdt gaps`): reports, per FOCUS 1.4 dataset, exactly which

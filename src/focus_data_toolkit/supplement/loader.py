@@ -32,6 +32,26 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _flatten(obj: Mapping[str, object], prefix: str = "") -> dict[str, str]:
+    """Flatten a nested JSON object to dot-pathed scalar string values.
+
+    Provider API exports (e.g. AWS ``Entity.InvoicingEntity``) are nested; adapters address
+    those with dot-paths. Lists are JSON-encoded (rarely needed for supplement facts).
+    """
+    out: dict[str, str] = {}
+    for key, value in obj.items():
+        path_key = f"{prefix}{key}"
+        if isinstance(value, dict):
+            out.update(_flatten(value, f"{path_key}."))
+        elif value is None:
+            out[path_key] = ""
+        elif isinstance(value, list):
+            out[path_key] = json.dumps(value, separators=(",", ":"))
+        else:
+            out[path_key] = str(value)
+    return out
+
+
 def _read_rows(path: Path) -> tuple[tuple[str, ...], list[dict[str, str]]]:
     if path.suffix.lower() == ".json":
         try:
@@ -40,7 +60,7 @@ def _read_rows(path: Path) -> tuple[tuple[str, ...], list[dict[str, str]]]:
             raise SupplementError(f"{path}: invalid JSON: {exc}") from exc
         if not isinstance(data, list) or not all(isinstance(r, dict) for r in data):
             raise SupplementError(f"{path}: JSON supplement must be a list of objects")
-        rows = [{str(k): "" if v is None else str(v) for k, v in r.items()} for r in data]
+        rows = [_flatten(r) for r in data]
         header: dict[str, None] = {}
         for row in rows:
             for key in row:
@@ -88,6 +108,8 @@ class SupplementTable:
     as_of: str | None
     rows: dict[JoinKey, dict[str, str]] = field(default_factory=dict)
     duplicate_keys: tuple[JoinKey, ...] = ()
+    # Set when a provider-native adapter translated this file ("<adapter>@<version>").
+    adapter: str | None = None
 
     def lookup(self, key: JoinKey) -> Mapping[str, str] | None:
         return self.rows.get(key)
@@ -95,6 +117,11 @@ class SupplementTable:
     def value(self, key: JoinKey, column: str) -> str:
         row = self.rows.get(key)
         return (row.get(column) or "").strip() if row else ""
+
+    @property
+    def source_tag(self) -> str:
+        """The provenance tag for ENRICHED values from this table."""
+        return self.adapter if self.adapter is not None else self.kind.name
 
     def manifest_entry(self) -> dict:
         entry: dict = {
@@ -104,6 +131,8 @@ class SupplementTable:
             "row_count": self.row_count,
             "columns": sorted(self.fact_columns),
         }
+        if self.adapter is not None:
+            entry["adapter"] = self.adapter
         if self.provenance:
             entry["provenance"] = self.provenance
         if self.as_of:
@@ -111,26 +140,82 @@ class SupplementTable:
         return entry
 
 
+def _resolve_kind(
+    spec: SupplementFileSpec,
+    header: Sequence[str],
+    raw_rows: list[dict[str, str]],
+) -> tuple[SupplementKind, list[dict[str, str]], str | None]:
+    """Resolve (kind, rows, adapter_tag) for a supplement file.
+
+    A forced ``:kind`` may name a canonical kind or a provider adapter. Without a forced
+    kind, canonical header detection wins; if nothing canonical matches, provider adapters
+    are tried; only then is it an error. An adapter translates the native rows into
+    canonical-kind rows and returns its ``<adapter>@<version>`` tag.
+    """
+    from focus_data_toolkit.supplement.adapters import get_adapter, load_adapters
+    from focus_data_toolkit.supplement.adapters.registry import detect_adapter
+
+    path = spec.path
+    if spec.kind is not None:
+        if spec.kind in load_adapters():
+            adapter = get_adapter(spec.kind)
+            return _apply_adapter(adapter, path, header, raw_rows)
+        kind = SUPPLEMENT_KINDS.get(spec.kind)
+        if kind is None:
+            raise SupplementError(
+                f"{path}: unknown supplement kind/adapter {spec.kind!r}; known kinds: "
+                + ", ".join(sorted(SUPPLEMENT_KINDS))
+                + "; known adapters: "
+                + (", ".join(sorted(load_adapters())) or "(none)")
+            )
+        missing = [k for k in kind.join_keys if k not in header]
+        if missing:
+            raise SupplementError(
+                f"{path}: kind {kind.name!r} requires join key column(s) " + ", ".join(missing)
+            )
+        return kind, raw_rows, None
+
+    # Canonical detection first; a native provider export won't carry FOCUS names, so it
+    # falls through to adapter detection.
+    canonical = [
+        kind
+        for kind in SUPPLEMENT_KINDS.values()
+        if set(kind.join_keys) <= set(header) and (set(header) & kind.columns)
+    ]
+    if len(canonical) == 1:
+        return canonical[0], raw_rows, None
+    if len(canonical) > 1:
+        return detect_kind(header), raw_rows, None  # raises the ambiguity error
+    detected = detect_adapter(header)
+    if detected is not None:
+        return _apply_adapter(detected, path, header, raw_rows)
+    detect_kind(header)  # no canonical + no adapter -> raise the canonical "no kind" error
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _apply_adapter(adapter, path, header, raw_rows):
+    from focus_data_toolkit.supplement.adapters.registry import AdapterError
+
+    kind = SUPPLEMENT_KINDS[adapter.target_kind]
+    translated = adapter.translate(raw_rows)
+    missing = [k for k in kind.join_keys if not any(row.get(k) for row in translated)]
+    if translated and missing:
+        raise AdapterError(
+            f"{path}: adapter {adapter.name!r} produced no {', '.join(missing)} value "
+            "(the native export is missing the field(s) that build the join key)"
+        )
+    return kind, translated, adapter.source_tag
+
+
 def _load_table(spec: SupplementFileSpec) -> SupplementTable:
     path = spec.path
     if not path.is_file():
         raise SupplementError(f"supplement file not found: {path}")
     header, raw_rows = _read_rows(path)
-    if spec.kind is not None:
-        kind = SUPPLEMENT_KINDS.get(spec.kind)
-        if kind is None:
-            raise SupplementError(
-                f"{path}: unknown supplement kind {spec.kind!r}; known: "
-                + ", ".join(sorted(SUPPLEMENT_KINDS))
-            )
-        missing = [k for k in kind.join_keys if k not in header]
-        if missing:
-            raise SupplementError(
-                f"{path}: kind {kind.name!r} requires join key column(s) "
-                + ", ".join(missing)
-            )
-    else:
-        kind = detect_kind(header)
+    kind, rows_source, adapter_tag = _resolve_kind(spec, header, raw_rows)
+    # After an adapter, the effective header is the translated FOCUS columns.
+    header = tuple(dict.fromkeys(c for row in rows_source for c in row)) if adapter_tag else header
+    raw_rows = rows_source
 
     fact_columns = tuple(sorted(set(header) & kind.columns))
     unknown = tuple(
@@ -159,6 +244,7 @@ def _load_table(spec: SupplementFileSpec) -> SupplementTable:
         as_of=spec.as_of,
         rows=rows,
         duplicate_keys=tuple(duplicates),
+        adapter=adapter_tag,
     )
 
 
