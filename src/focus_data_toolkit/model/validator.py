@@ -201,6 +201,7 @@ def _validate_json_column(column: str, value: str, value_format: str) -> str | N
     obj, err = _load_json_object(value)
     if err:
         return err
+    assert obj is not None  # _load_json_object returns a dict whenever err is None
     if value_format == "Key-Value":
         if not all(v is None or isinstance(v, str | int | float | bool) for v in obj.values()):
             return "key_value_value_not_scalar"

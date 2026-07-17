@@ -1,0 +1,24 @@
+version: 2
+updates:
+  # GitHub Actions — keep the SHA pins current (Dependabot updates the pin + the version comment).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    open-pull-requests-limit: 5
+
+  # Python dependencies (pyproject extras + the uv.lock).
+  # A single pattern-based group: Dependabot's uv support cannot split development vs production
+  # (`dependency-type` grouping is unsupported for the uv ecosystem), so grouping by patterns keeps
+  # updates batched into one reviewable PR instead of silently ungrouping.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+    open-pull-requests-limit: 5

@@ -166,7 +166,9 @@ def _column_arrays(pa, dataset: str, columns: Sequence[str], rows: list[Mapping[
         if data_type == "Decimal":
             precision, scale = decimal_precision_scale(col)
             arrow_type = pa.decimal128(precision, scale)
-            values = [_to_decimal(r.get(col, ""), col, base_line + i) for i, r in enumerate(rows)]
+            # `values` is reused by the Date/Time and String branches below; a broad element
+            # type keeps mypy happy across the mutually-exclusive branches (Arrow validates it).
+            values: list = [_to_decimal(r.get(col, ""), col, base_line + i) for i, r in enumerate(rows)]
             try:
                 arrays.append(pa.array(values, type=arrow_type))
             except pa.lib.ArrowInvalid:

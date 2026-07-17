@@ -32,7 +32,13 @@ dynamic = ["version"]
 [project.optional-dependencies]
 # Parquet read/write (P1.6). PyArrow is the only new runtime dependency and is used solely for
 # columnar I/O with exact decimal128 — the core stays standard-library only.
-parquet = ["pyarrow>=15,<21"]
+parquet = [
+    "pyarrow>=15,<21",
+    # pyarrow resolves timestamp timezones ("UTC") via Python's tzdata, which is absent on
+    # Windows (no system tz database) — without it, Parquet Date/Time output raises
+    # ZoneInfoNotFoundError. No-op on Linux/macOS.
+    "tzdata>=2024.1 ; sys_platform == 'win32'",
+]
 # The "scale" extra is intentionally an alias of "parquet": external state for large inputs
 # (dedup / aggregation / joins) is handled by the stdlib sqlite3, so no extra engine is added.
 scale = ["focus-data-toolkit[parquet]"]
@@ -43,8 +49,15 @@ all = ["focus-data-toolkit[parquet,validator]"]
 # Building and checking distributions (used by the packaging tests and the release pipeline).
 release = ["build>=1,<2", "twine>=5,<7"]
 # `dev` includes pyarrow so the Parquet test suite actually runs (not silently importorskip'd),
-# plus the release tooling so the packaging tests can build/inspect the wheel and sdist.
-dev = ["focus-data-toolkit[release]", "pytest>=8", "ruff>=0.6", "pyarrow>=15,<21"]
+# the release tooling so the packaging tests can build/inspect the wheel and sdist, and the
+# type-checker + coverage plugin used by CI.
+dev = [
+    "focus-data-toolkit[release,parquet]",  # parquet pulls pyarrow + tzdata (Windows)
+    "pytest>=8",
+    "pytest-cov>=5,<7",
+    "ruff>=0.6",
+    "mypy>=1.11,<2.4",
+]
 
 [project.scripts]
 focus-toolkit = "focus_data_toolkit.cli:main"
@@ -74,6 +87,31 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]
 ignore = ["E501"]
+
+[tool.mypy]
+files = ["src/focus_data_toolkit"]
+python_version = "3.11"
+ignore_missing_imports = true  # pyarrow / focus_validator ship no stubs we depend on
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+# Known type-annotation gaps, runtime-covered by the test suite + golden snapshots and tracked
+# for a dedicated typing pass: the bounded-memory streaming staging path (Optional narrowing on
+# the SQLite-backed stager) and the composition-based generators (dynamic provider/version
+# profiles). Excluded from the gate so mypy stays green and meaningful over the rest of the core.
+module = ["focus_data_toolkit.convert.streaming", "focus_data_toolkit.generators.*"]
+ignore_errors = true
+
+[tool.coverage.run]
+source = ["focus_data_toolkit"]
+branch = true
+
+[tool.coverage.report]
+# Non-regressive floor (measured at introduction; raise, never lower on failure).
+fail_under = 80
+show_missing = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "@overload"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

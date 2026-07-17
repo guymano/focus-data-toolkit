@@ -1,0 +1,25 @@
+# Normalize text files to LF in the repository and on checkout on every platform.
+#
+# Byte-reproducibility depends on this: the synthetic generators emit LF and the golden snapshots
+# (tests/fixtures/golden/) are compared byte-for-byte. Without this, Windows autocrlf checks .csv
+# files out as CRLF, changing their bytes and breaking the byte-for-byte golden comparison on the
+# new Windows CI matrix. Binary files are auto-detected and left untouched.
+* text=auto eol=lf
+
+# Be explicit for the reproducibility-critical, byte-compared artifacts.
+*.json  text eol=lf
+*.py    text eol=lf
+*.csv   text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.toml  text eol=lf
+*.cfg   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+
+# Known binary types: never apply EOL conversion even if git guesses wrong.
+*.xlsx     binary
+*.parquet  binary
+*.gz       binary
+*.zip       binary
+*.png       binary
