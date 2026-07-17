@@ -16,7 +16,7 @@ Lot 1: PR-1 ─┬─ PR-4
        PR-2 ─┴─ PR-3 ── PR-5
 Lot 2: (Lot 1) ── PR-6 ── PR-7 ─┬─ PR-8 ── PR-9
                                 └─ PR-9a ── PR-9b   (provider-native adapters)
-Lot 3: PR-9 ── PR-10, PR-11        PR-12, PR-13 (independent)
+Lot 3: PR-9 ── PR-11 (do first) ── PR-10     PR-12, PR-13 (independent)
 Lot 4: PR-14, PR-15 ── PR-16
 Lot 5: owner checklist (no code)
 ```
@@ -260,30 +260,72 @@ generic-path fallback, never an inference.
 
 ## Lot 3 — P1 client-data robustness
 
-### PR-10 — Parquet input
-`RowSource` protocol over `CsvRowReader`/`ParquetRowReader` (both already exist); input format
-by extension/sniff (`auto|csv|parquet`), including Hive-partitioned datasets via
-`PartitionedParquetReader`; supplement loader accepts Parquet too. Tests: a Parquet source
-converts byte-identically to its CSV twin. **Depends on:** PR-9.
+> **Revised 2026-07-18 (post-Lot-2).** Lot 2 shipped and changes what Lot 3 builds on:
+> (a) the streaming path now reads the Cost and Usage source **twice** (a supplement
+> key-collection pre-pass, `pre = CsvRowReader(cost_and_usage)`) and the supplement loader's
+> `_read_rows` gained JSON / gzip / envelope / adapter branches — PR-10 must cover both;
+> (b) strict mode can now **produce all four datasets** from supplements, so cross-dataset
+> bundle validation (PR-11) is the guard for that newly-unlocked output and is the
+> highest-value item of the lot; (c) Lot 2 already built the bounded-memory key-set
+> machinery (`SourceKeySets` / `source_key_sets` / `coverage`, with `ExternalIndex` spill)
+> and a `Diagnostic`/`FDT-*` channel — PR-11 reuses these rather than inventing new ones;
+> (d) `_fsync_file` is already best-effort after the Lot-2 Windows fix, which PR-13 assumes.
+> **Recommended order: PR-11 first** (it protects the four-dataset strict output), then
+> PR-10, PR-12, PR-13. No new PRs; scope adjustments only.
 
-### PR-11 — Streaming bundle validation as a publication gate
-Refactor `validate_dataset_bundle` to consume iterables with bounded key sets (spill to
-`ExternalIndex` above a threshold); run it inside `write_result` and `convert_files` in the
+### PR-11 — Streaming bundle validation as a publication gate  *(do first)*
+Run cross-dataset validation as a mandatory gate in `write_result` and `convert_files`, in the
 staging directory **before** `AtomicOutputDir.commit` — ERROR diagnostics block publication
-(escape hatch `--no-validate` recorded in the manifest); distinguish checks applicable to
-synthetic datasets. Tests: dangling `InvoiceDetailId` blocks publication; memory-bound test on
-a large fixture. **Depends on:** PR-9 (supplement-produced bundles are the main customer).
+(escape hatch `--no-validate`, recorded in the manifest), and the bundle result is written into
+the manifest. This is now the main correctness guard for a strict run that produces all four
+datasets from supplements (referential integrity, billing-period coverage, correction net
+sums).
+- **Reuse, don't reinvent:** consume the datasets as iterables with bounded key sets built on
+  Lot 2's `SourceKeySets`/`coverage` pattern, spilling to `ExternalIndex` above a threshold;
+  emit findings through the existing `Diagnostic`/`FDT-*` channel alongside the per-dataset
+  lint gate (not a parallel mechanism).
+- **Reconciliation decision (settled):** Invoice Detail stays **non-authoritative** for cost
+  reconciliation while its `BilledCost` is the derived grain sum — supplements add invoice
+  *metadata* (status/dates/terms/real ids) but never replace `BilledCost` (the `invoice_line`
+  `BilledCost` is only an `FDT-SUPP-006` consistency check), so running
+  `reconcile_invoice_detail` would still be circular. Authoritative cost reconciliation is
+  deferred to a future generic `dataset:invoice_detail` full-supply kind (out of scope here).
+  The valuable cross-dataset checks post-Lot-2 are the **referential** ones (every Cost-and-
+  Usage `InvoiceDetailId` — now a real client id from an `invoice_line` supplement — resolves
+  in Invoice Detail; every source period is covered by a Billing Period row).
+- Distinguish checks applicable to synthetic vs. factual datasets.
+- Tests: a dangling `InvoiceDetailId` blocks publication; a supplement-produced four-dataset
+  strict bundle passes; memory-bound test on a large fixture.
+- **Depends on:** PR-9 (supplement-produced bundles are the customer; reuses its key-set/
+  coverage machinery).
+
+### PR-10 — Parquet input
+`RowSource` protocol over `CsvRowReader`/`ParquetRowReader` (both already exist); source format
+by extension/sniff (`auto|csv|parquet`), including Hive-partitioned datasets via
+`PartitionedParquetReader`.
+- Scope broadened by Lot 2: the streaming **supplement pre-pass** and `_lint_file`'s output
+  re-read must go through the same `RowSource`, and the supplement loader's `_read_rows` (now
+  CSV/JSON/gzip/adapter) grows a Parquet branch.
+- Priority: the **Cost-and-Usage source** in Parquet is the high-value case. Parquet
+  *supplements* are low value (provider exports — invoice summaries, savings-plans — are
+  JSON/CSV), so support them only if it falls out of the `RowSource` refactor for free.
+- Tests: a Parquet source converts byte-identically to its CSV twin, with and without
+  supplements. **Depends on:** PR-9 (streaming pre-pass), PR-11 (bundle gate runs on the
+  produced datasets regardless of input format).
 
 ### PR-12 — Complete lifecycle-chain validation
 `lifecycle.py`: `instance_id` and per-subject `order` uniqueness, `previous_instance_id`
 resolution, cycle detection, `last_updated` monotonicity, closed-instance immutability — all as
-diagnostics. **Depends on:** —
+diagnostics. Synergy (not scope change): Billing Period / Invoice Detail now carry real
+supplement-supplied `Created`/`LastUpdated`/`Status`, so these chains are worth validating on a
+supplement-produced bundle. **Depends on:** —
 
 ### PR-13 — Transactional replace + crash recovery
 `AtomicOutputDir`: journal the replace sequence; on entry, detect leftover `.trash-*` /
 `.output.tmp-*` and roll forward or clean with a WARNING; optional `fdt clean --out DIR`.
-Remove/qualify "crash-safe swap" wording until then. Fault-injection tests between the two
-renames. **Depends on:** —
+Remove/qualify "crash-safe swap" wording until then (note: `_fsync_file` is already best-effort
+after the Lot-2 Windows fix — this PR is about the multi-rename transaction, not fsync).
+Fault-injection tests between the two renames. **Depends on:** —
 
 ---
 
