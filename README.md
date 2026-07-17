@@ -168,11 +168,28 @@ Gzip input is auto-detected. Exactness contract: **CSV is byte-exact** (the lite
 scale)` (never binary float; a value needing more scale than the column allows raises with its
 line number instead of rounding silently), dates as UTC timestamps, JSON/strings verbatim.
 
+**Partitioning & compression** (Parquet): `--partition-by` writes the Cost and Usage dataset as
+a Hive-partitioned tree on low-cardinality String / Date-Time columns; `--compression`
+(snappy default / zstd / gzip / none) and `--target-file-size` (roll to a new part file per
+partition) tune the layout:
+
+```bash
+focus-toolkit convert --cost-and-usage huge_cost_and_usage.csv --out ./focus-1.4 \
+  --mode synthetic --output-format parquet \
+  --partition-by BillingCurrency,BillingPeriodStart --compression zstd --target-file-size 128MB
+# -> synthetic_focus_1_4_cost_and_usage/BillingCurrency=USD/BillingPeriodStart=.../part-0.parquet
+```
+
+The partition columns are stored in the paths (standard Hive), so any `pyarrow.dataset` reader
+reconstructs full rows; a too-high-cardinality key is warned about and, past a hard cap,
+refused (nothing partial is published).
+
 ```python
 from focus_data_toolkit import convert_files
 
 out = convert_files("huge_cost_and_usage.csv.gz", "./focus-1.4",
-                    mode="synthetic", output_format="parquet")  # -> published Path
+                    mode="synthetic", output_format="parquet",
+                    partition_by=["BillingCurrency"])  # -> published Path
 ```
 
 `pip install "focus-data-toolkit[parquet]"` for Parquet; streaming CSV needs no extra

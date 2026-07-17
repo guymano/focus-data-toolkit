@@ -70,11 +70,17 @@ DATASET_FILENAMES = {
 OUTPUT_FORMATS = ("csv", "parquet")
 
 
-def output_filename_for(dataset: str, *, synthetic_prefix: bool, output_format: str = "csv") -> str:
-    """The output filename of ``dataset`` for a format (extension follows the format)."""
+def output_filename_for(
+    dataset: str, *, synthetic_prefix: bool, output_format: str = "csv", partitioned: bool = False
+) -> str:
+    """The output name of ``dataset`` for a format.
+
+    CSV/single-file Parquet get a ``.csv``/``.parquet`` file; a partitioned Parquet dataset is a
+    *directory* (no extension) holding the Hive partition tree.
+    """
     base = DATASET_FILENAMES[dataset]
     if output_format == "parquet" and base.endswith(".csv"):
-        base = base[:-4] + ".parquet"
+        base = base[:-4] + ("" if partitioned else ".parquet")
     return f"synthetic_{base}" if synthetic_prefix else base
 
 
@@ -193,15 +199,18 @@ def assemble_manifest(
     source_available: dict[str, bool],
     row_counts: dict[str, int],
     output_format: str = "csv",
+    partitioned_by: dict[str, list[str]] | None = None,
 ) -> tuple[dict, dict, dict[str, str]]:
     """Build the manifest entries + manifest from per-dataset provenance and row counts.
 
     Shared by the eager (:func:`convert_to_focus_1_4`) and streaming (``convert_files``) paths
     so both emit an identical manifest for the same input. ``output_format`` selects the output
-    filename extension (``csv`` default, or ``parquet``). Returns
+    filename extension (``csv`` default, or ``parquet``); ``partitioned_by`` maps a dataset to
+    the Parquet partition columns, making its output a directory. Returns
     ``(entries, manifest, produced_output_files)`` where the last maps each produced dataset to
     its output filename.
     """
+    partitioned_by = partitioned_by or {}
     from focus_data_toolkit import __version__
 
     model = load_model()
@@ -244,8 +253,9 @@ def assemble_manifest(
         assumed = has_assumptions(prov) if synthetic else bool(blockers)
         status = manifest_mod.PRODUCED_SYNTHETIC if assumed else manifest_mod.PRODUCED
         conformance = manifest_mod.CONF_SYNTHETIC if assumed else manifest_mod.CONF_NOT_VALIDATED
+        parts = partitioned_by.get(name)
         output_file = output_filename_for(
-            name, synthetic_prefix=assumed, output_format=output_format
+            name, synthetic_prefix=assumed, output_format=output_format, partitioned=bool(parts)
         )
         produced_output_files[name] = output_file
         entries[name] = manifest_mod.dataset_entry(
@@ -254,6 +264,7 @@ def assemble_manifest(
             provenance=prov,
             row_count=count,
             output_file=output_file,
+            partitioned_by=parts,
         )
 
     manifest = manifest_mod.build_manifest(

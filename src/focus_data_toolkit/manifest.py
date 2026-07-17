@@ -38,6 +38,7 @@ def dataset_entry(
     reason: str | None = None,
     blocking_columns: list[str] | None = None,
     output_file: str | None = None,
+    partitioned_by: list[str] | None = None,
 ) -> dict:
     entry: dict = {
         "status": status,
@@ -52,6 +53,10 @@ def dataset_entry(
         entry["blocking_columns"] = blocking_columns
     if output_file:
         entry["output_file"] = output_file
+    if partitioned_by:
+        # Present only for a Hive-partitioned Parquet dataset: output_file is the dataset
+        # directory, partitioned on these columns (a reader reconstructs them from the paths).
+        entry["partitioned_by"] = partitioned_by
     return entry
 
 

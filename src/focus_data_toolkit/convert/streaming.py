@@ -17,6 +17,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
+from collections.abc import Sequence
 from dataclasses import astuple, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -77,38 +79,69 @@ def _dataset_is_assumed(name: str, provenance: dict, synthetic: bool) -> bool:
     return has_assumptions(prov) if synthetic else bool(strict_blockers(prov, cols))
 
 
-def _output_filename(name: str, provenance: dict, synthetic: bool, output_format: str) -> str:
+def _output_filename(
+    name: str, provenance: dict, synthetic: bool, output_format: str, partitioned: bool = False
+) -> str:
     assumed = _dataset_is_assumed(name, provenance, synthetic)
-    return output_filename_for(name, synthetic_prefix=assumed, output_format=output_format)
+    return output_filename_for(
+        name, synthetic_prefix=assumed, output_format=output_format, partitioned=partitioned
+    )
 
 
-def _open_writer(path: Path, schema: DatasetSchema, output_format: str, metadata=None):
-    """Open a format-appropriate row writer, returning ``(handle, writer)``."""
+def _open_writer(
+    path: Path,
+    schema: DatasetSchema,
+    output_format: str,
+    metadata=None,
+    *,
+    compression: str = "snappy",
+    partition_by: tuple[str, ...] | None = None,
+    target_file_size: int | None = None,
+):
+    """Open a format-appropriate row writer, returning ``(handle, writer)``.
+
+    ``partition_by`` (Parquet only) writes a Hive-partitioned dataset directory instead of a
+    single file; ``handle`` then equals the writer (it owns its own files).
+    """
     if output_format == "parquet":
-        from focus_data_toolkit.io.parquet_io import open_parquet_writer
+        from focus_data_toolkit.io.parquet_io import PartitionedParquetWriter, open_parquet_writer
 
-        return open_parquet_writer(path, schema, metadata=metadata)
+        if partition_by:
+            w = PartitionedParquetWriter(
+                path,
+                schema,
+                partition_by,
+                metadata=metadata,
+                compression=compression,
+                target_file_size=target_file_size,
+            )
+            return w, w
+        return open_parquet_writer(path, schema, metadata=metadata, compression=compression)
     return open_csv_writer(path, schema)
 
 
-def _open_reader(path: Path, output_format: str, *, dataset: str | None = None):
+def _open_reader(
+    path: Path, output_format: str, *, dataset: str | None = None, partition_by=None
+):
     """Open a format-appropriate row reader."""
     if output_format == "parquet":
-        from focus_data_toolkit.io.parquet_io import ParquetRowReader
+        from focus_data_toolkit.io.parquet_io import ParquetRowReader, PartitionedParquetReader
 
+        if partition_by:
+            return PartitionedParquetReader(path, dataset, partition_by)
         return ParquetRowReader(path, dataset=dataset)
     return CsvRowReader(path)
 
 
-def _lint_file(dataset: str, path: Path, output_format: str = "csv"):
-    """Lint a produced file in bounded chunks, returning a merged LintReport."""
+def _lint_file(dataset: str, path: Path, output_format: str = "csv", *, partition_by=None):
+    """Lint a produced file (or partition tree) in bounded chunks, returning a merged LintReport."""
     from focus_data_toolkit.model.validator import (
         _CHECKED_LEVELS,
         LintReport,
         lint_focus_1_4_structure,
     )
 
-    reader = _open_reader(path, output_format, dataset=dataset)
+    reader = _open_reader(path, output_format, dataset=dataset, partition_by=partition_by)
     violations: list = []
     total = 0
     levels = _CHECKED_LEVELS
@@ -138,6 +171,38 @@ def _lint_file(dataset: str, path: Path, output_format: str = "csv"):
     return LintReport(dataset=dataset, row_count=total, violations=violations, levels_checked=levels)
 
 
+def _validate_parquet_options(
+    output_format: str,
+    partition_by: tuple[str, ...],
+    compression: str,
+    target_file_size: int | None,
+) -> None:
+    """Reject partitioning/compression options that don't apply or aren't valid FOCUS keys."""
+    if output_format != "parquet":
+        if partition_by:
+            raise ConversionError("--partition-by requires --output-format parquet")
+        return
+    from focus_data_toolkit.io.parquet_io import COMPRESSIONS, partitionable_columns
+
+    if compression not in COMPRESSIONS:
+        raise ConversionError(
+            f"unsupported compression {compression!r}; choose one of {', '.join(COMPRESSIONS)}"
+        )
+    if target_file_size is not None and target_file_size <= 0:
+        raise ConversionError(
+            f"--target-file-size must be positive, got {target_file_size} bytes"
+        )
+    if partition_by:
+        bad = partitionable_columns("Cost and Usage", partition_by)
+        if bad:
+            raise ConversionError(
+                "cannot partition on "
+                + ", ".join(bad)
+                + ": partition columns must be Cost and Usage String or Date/Time columns "
+                "(not measures, JSON, or unknown columns)"
+            )
+
+
 def convert_files(
     cost_and_usage: str | os.PathLike[str],
     out_dir: str | os.PathLike[str],
@@ -150,6 +215,9 @@ def convert_files(
     on_exists: OnExists | str = OnExists.REFUSE,
     keep_temp: bool = False,
     output_format: str = "csv",
+    partition_by: Sequence[str] | None = None,
+    compression: str = "snappy",
+    target_file_size: int | None = None,
 ) -> Path:
     """Stream-convert a Cost and Usage file to the FOCUS 1.4 datasets in ``out_dir``.
 
@@ -157,6 +225,10 @@ def convert_files(
     on disk (SQLite) so memory stays bounded. Output is published atomically (nothing appears
     until validation passes and checksums + manifest are written). ``output_format`` is ``csv``
     (byte-exact) or ``parquet`` (value-exact decimal128; requires the ``[parquet]`` extra).
+
+    Parquet only: ``partition_by`` writes the Cost and Usage dataset as a Hive-partitioned tree
+    on the given low-cardinality String/Date-Time columns; ``compression`` selects the codec; and
+    ``target_file_size`` (approximate uncompressed bytes) rolls each partition to a new part file.
     Returns the published path.
     """
     from focus_data_toolkit import __version__
@@ -166,6 +238,13 @@ def convert_files(
         raise ConversionError(
             f"unsupported output format {output_format!r}; choose one of {', '.join(OUTPUT_FORMATS)}"
         )
+    partition_by = tuple(partition_by or ())
+    _validate_parquet_options(output_format, partition_by, compression, target_file_size)
+    # Partitioning applies to the (large) Cost and Usage dataset only; the small derived datasets
+    # stay single files.
+    partition_map: dict[str, tuple[str, ...]] = (
+        {"Cost and Usage": partition_by} if partition_by else {}
+    )
     mode = Mode(mode)
     synthetic = mode is Mode.SYNTHETIC
     generated_at = datetime.now(UTC).isoformat()
@@ -213,12 +292,18 @@ def convert_files(
 
     with AtomicOutputDir(out_dir, on_exists=on_exists, keep_temp=keep_temp) as out:
         cu_columns = dataset_columns("Cost and Usage")
-        cu_file = _output_filename("Cost and Usage", provenance, synthetic, output_format)
+        cu_partition = partition_map.get("Cost and Usage")
+        cu_file = _output_filename(
+            "Cost and Usage", provenance, synthetic, output_format, partitioned=bool(cu_partition)
+        )
         cu_handle, cu_writer = _open_writer(
             out.path_for(cu_file),
             DatasetSchema("Cost and Usage", cu_columns),
             output_format,
             metadata=_meta("Cost and Usage"),
+            compression=compression,
+            partition_by=cu_partition,
+            target_file_size=target_file_size,
         )
         index = ExternalIndexOpener(out.path_for(_INDEX_DB)) if synthetic else None
 
@@ -257,6 +342,8 @@ def convert_files(
             # directory. Raising inside the context removes the staging dir (nothing published).
             raise ConversionError("no Cost and Usage rows to convert")
         row_counts["Cost and Usage"] = cu_count
+        if cu_partition is not None:
+            diagnostics.extend(_partition_diagnostics(cu_partition, cu_writer.partition_count()))
 
         staged = {"Cost and Usage": cu_file}
 
@@ -268,6 +355,7 @@ def convert_files(
                 DatasetSchema("Invoice Detail", tuple(emitted)),
                 output_format,
                 metadata=_meta("Invoice Detail"),
+                compression=compression,
             )
             id_count = 0
             for grain, total in index.finalize_invoice_groups():
@@ -284,6 +372,7 @@ def convert_files(
                 DatasetSchema("Billing Period", bp_columns),
                 output_format,
                 metadata=_meta("Billing Period"),
+                compression=compression,
             )
             bp_count = 0
             for start, end, issuer in index.finalize_billing_periods():
@@ -314,6 +403,7 @@ def convert_files(
                     DatasetSchema("Contract Commitment", cc_columns),
                     output_format,
                     metadata=_meta("Contract Commitment"),
+                    compression=compression,
                 )
                 for r in cc_out:
                     cc_writer.write(r)
@@ -347,17 +437,24 @@ def convert_files(
             source_available=source_available,
             row_counts=row_counts,
             output_format=output_format,
+            partitioned_by={k: list(v) for k, v in partition_map.items()},
         )
 
         # Remove any staged file whose dataset turned out NOT produced (e.g. zero derivable rows).
         for name, fname in staged.items():
             if name not in produced_output_files:
-                out.path_for(fname).unlink(missing_ok=True)
+                target = out.path_for(fname)
+                if name in partition_map and target.is_dir():
+                    shutil.rmtree(target, ignore_errors=True)
+                else:
+                    target.unlink(missing_ok=True)
 
         # Mandatory validation gate (chunked, bounded memory): never publish a lint failure.
         if validate:
             for name, fname in produced_output_files.items():
-                report = _lint_file(name, out.path_for(fname), output_format)
+                report = _lint_file(
+                    name, out.path_for(fname), output_format, partition_by=partition_map.get(name)
+                )
                 entry = manifest["datasets"][name]
                 if entry["conformance"] == manifest_mod.CONF_NOT_VALIDATED:
                     entry["conformance"] = (
@@ -369,9 +466,12 @@ def convert_files(
                         f"lint failed for {name}; final output not written to {out_dir}"
                     )
 
-        # Enroll each produced file (written via direct handles) for fsync + checksums.
-        for fname in produced_output_files.values():
-            out.add_data_file(fname)
+        # Enroll produced files for fsync + checksums: a partitioned dataset is a tree of parts.
+        for name, fname in produced_output_files.items():
+            if name in partition_map:
+                out.add_data_tree(fname)
+            else:
+                out.add_data_file(fname)
 
         checksums = out.checksums()
         manifest_bytes = manifest_mod.render(manifest).encode("utf-8")
@@ -395,6 +495,23 @@ def convert_files(
             SHA256SUMS_FILENAME: sha256sums_text(all_sums).encode("utf-8"),
         }
         return out.commit(final_files=final_files)
+
+
+def _partition_diagnostics(partition_by: Sequence[str], count: int) -> list[Diagnostic]:
+    from focus_data_toolkit.io.parquet_io import PARTITION_WARN_THRESHOLD
+
+    if count <= PARTITION_WARN_THRESHOLD:
+        return []
+    return [
+        Diagnostic(
+            code="FDT-IO-004",
+            severity=Severity.WARNING,
+            message=f"--partition-by {list(partition_by)} produced {count} partitions; a "
+            "high-cardinality key creates many small files — prefer a lower-cardinality key",
+            datasets=("Cost and Usage",),
+            context={"partitions": str(count)},
+        )
+    ]
 
 
 def _context_diagnostics(

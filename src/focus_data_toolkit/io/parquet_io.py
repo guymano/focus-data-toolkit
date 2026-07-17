@@ -27,6 +27,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from functools import cache
 from pathlib import Path
+from urllib.parse import quote
 
 from focus_data_toolkit.io.records import DatasetSchema, MalformedRecordError, Record
 from focus_data_toolkit.model import column_spec, load_model, resolve_dataset
@@ -56,6 +57,46 @@ def _require_pyarrow():
 _BATCH = 10_000
 # Timestamps are stored at microsecond precision (covers FOCUS millisecond timestamps exactly).
 _DECIMAL_SCALE_FILE = "focus_1_4_decimal_scale.json"
+
+# Parquet compression codecs the CLI/API accept ("none" -> uncompressed).
+COMPRESSIONS = ("snappy", "zstd", "gzip", "none")
+# Partition columns must be low-cardinality identifiers, not measures/JSON. String and Date/Time
+# both round-trip losslessly through Hive directory names (reconstructed as strings on read).
+_PARTITIONABLE_TYPES = frozenset({"String", "Date/Time"})
+# Empty partition values are written as an empty segment (``COL=``), which reads back as "".
+# The reader disables Hive's null convention with a sentinel that percent-encoding can never
+# produce, so a *real* value equal to Hive's ``__HIVE_DEFAULT_PARTITION__`` token is not
+# silently turned into null. (Percent-encoded values only ever contain [A-Za-z0-9_.~%-].)
+_NO_HIVE_NULL = "\x00__fdt_never_null__"
+# High-cardinality guards: warn past the soft threshold, refuse past the hard cap (each distinct
+# partition holds an open writer, so an unbounded key would exhaust file handles / memory).
+PARTITION_WARN_THRESHOLD = 100
+MAX_PARTITIONS = 1000
+
+
+def partitionable_columns(dataset: str, columns: Sequence[str]) -> list[str]:
+    """Return the requested partition columns that are NOT valid partition keys (for an error).
+
+    A valid key exists in ``dataset`` and is String or Date/Time typed; Decimal/JSON measures and
+    unknown columns are rejected so partitioning stays on low-cardinality identifiers.
+    """
+    dataset = resolve_dataset(dataset)
+    model_cols = load_model()["datasets"][dataset]["columns"]
+    bad = []
+    for col in columns:
+        spec = model_cols.get(col)
+        if spec is None or spec.get("data_type") not in _PARTITIONABLE_TYPES:
+            bad.append(col)
+    return bad
+
+
+def _hive_segment(column: str, value: str) -> str:
+    """Render one ``column=value`` Hive path segment (percent-encoded; empty -> ``COL=``).
+
+    An empty value becomes an empty segment rather than Hive's ``__HIVE_DEFAULT_PARTITION__``
+    sentinel, so a real value that happens to equal that sentinel can never collide with it.
+    """
+    return f"{column}={quote(value, safe='')}"
 
 
 @cache
@@ -192,7 +233,14 @@ def dataset_metadata(
 class ParquetRowWriter:
     """Write rows to a Parquet file in ``schema.columns`` order, flushing bounded row groups."""
 
-    def __init__(self, path: str | Path, schema: DatasetSchema, *, metadata: Mapping[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        schema: DatasetSchema,
+        *,
+        metadata: Mapping[str, str] | None = None,
+        compression: str = "snappy",
+    ) -> None:
         self._pa, self._pq = _require_pyarrow()
         self._dataset = resolve_dataset(schema.dataset)
         self._columns = tuple(schema.columns)
@@ -200,14 +248,23 @@ class ParquetRowWriter:
         if metadata:
             arrow = arrow.with_metadata({k: str(v) for k, v in metadata.items()})
         self._arrow_schema = arrow
-        self._writer = self._pq.ParquetWriter(str(path), arrow)
+        self._writer = self._pq.ParquetWriter(str(path), arrow, compression=compression)
         self._buffer: list[Mapping[str, str]] = []
         self._written = 0
+
+    @property
+    def buffered(self) -> int:
+        """Rows currently buffered (not yet flushed to a row group)."""
+        return len(self._buffer)
 
     def write(self, values: Mapping[str, str]) -> None:
         self._buffer.append(values)
         if len(self._buffer) >= _BATCH:
             self._flush()
+
+    def flush(self) -> None:
+        """Flush buffered rows to a row group (public; used to bound memory across writers)."""
+        self._flush()
 
     def _flush(self) -> None:
         if not self._buffer:
@@ -280,21 +337,170 @@ class ParquetRowReader:
         self.close()
 
 
-def open_parquet_writer(path: str | Path, schema: DatasetSchema, *, metadata: Mapping[str, str] | None = None):
+class PartitionTooWideError(MalformedRecordError):
+    """Raised when a ``--partition-by`` key produces more partitions than :data:`MAX_PARTITIONS`."""
+
+
+class PartitionedParquetWriter:
+    """Write a dataset as a Hive-partitioned Parquet tree under ``base_dir``.
+
+    Rows are routed to ``base_dir/COL=value/.../part-N.parquet`` by their partition-column values;
+    the partition columns are **omitted** from the part files (standard Hive — a reader
+    reconstructs them from the path). Open file handles scale with the *number of partitions*
+    (hence the hard :data:`MAX_PARTITIONS` cap), but **buffered rows are bounded globally**: once
+    the total unflushed rows across all partitions reaches :data:`_BATCH`, every partition writer
+    is flushed — so memory stays bounded no matter how the rows interleave across partition keys.
+    When ``target_file_size`` is set, a partition rolls to a new part file once its (approximate,
+    uncompressed) running size crosses the threshold.
+    """
+
+    def __init__(
+        self,
+        base_dir: str | Path,
+        schema: DatasetSchema,
+        partition_by: Sequence[str],
+        *,
+        metadata: Mapping[str, str] | None = None,
+        compression: str = "snappy",
+        target_file_size: int | None = None,
+    ) -> None:
+        if target_file_size is not None and target_file_size <= 0:
+            raise ValueError(f"target_file_size must be positive, got {target_file_size}")
+        self._base = Path(base_dir)
+        self._dataset = resolve_dataset(schema.dataset)
+        self._partition_by = tuple(partition_by)
+        # Part files carry every column except the partition columns (Hive stores those in path).
+        self._file_columns = tuple(c for c in schema.columns if c not in set(self._partition_by))
+        self._metadata = metadata
+        self._compression = compression
+        self._target = target_file_size
+        # Per partition: (writer, part_index, running_byte_estimate).
+        self._writers: dict[tuple[str, ...], list] = {}
+        self._buffered = 0  # total rows buffered across all partition writers
+
+    def _partition_dir(self, values: Mapping[str, str]) -> tuple[tuple[str, ...], Path]:
+        key = tuple((values.get(c) or "") for c in self._partition_by)
+        rel = Path(*[_hive_segment(c, v) for c, v in zip(self._partition_by, key, strict=True)])
+        return key, self._base / rel
+
+    def _open_part(self, directory: Path, index: int):
+        directory.mkdir(parents=True, exist_ok=True)
+        return ParquetRowWriter(
+            directory / f"part-{index}.parquet",
+            DatasetSchema(self._dataset, self._file_columns),
+            metadata=self._metadata,
+            compression=self._compression,
+        )
+
+    def write(self, values: Mapping[str, str]) -> None:
+        key, directory = self._partition_dir(values)
+        state = self._writers.get(key)
+        if state is None:
+            if len(self._writers) >= MAX_PARTITIONS:
+                raise PartitionTooWideError(
+                    f"--partition-by produced more than {MAX_PARTITIONS} partitions; choose a "
+                    "lower-cardinality key"
+                )
+            state = [self._open_part(directory, 0), 0, 0]
+            self._writers[key] = state
+        if self._target is not None and state[2] >= self._target:
+            state[0].close()
+            state[1] += 1
+            state[2] = 0
+            state[0] = self._open_part(directory, state[1])
+        state[0].write(values)
+        self._buffered += 1
+        if self._target is not None:
+            state[2] += sum(len(values.get(c) or "") for c in self._file_columns) + len(
+                self._file_columns
+            )
+        # Bound total buffered rows across ALL partitions (not per-partition): flush everything
+        # once the global buffer fills, so memory can't grow with the number of partition keys.
+        if self._buffered >= _BATCH:
+            for st in self._writers.values():
+                st[0].flush()
+            self._buffered = 0
+
+    def partition_count(self) -> int:
+        return len(self._writers)
+
+    def close(self) -> None:
+        for state in self._writers.values():
+            state[0].close()
+
+
+class PartitionedParquetReader:
+    """Read a Hive-partitioned Parquet dataset back as ``Record``s (partition columns rebuilt).
+
+    Used by the lint gate: the partition columns (omitted from the part files) are reconstructed
+    from the directory names via an explicit **string** Hive schema, so a Date/Time or numeric-
+    looking partition value is never re-typed and reads back exactly as written.
+    """
+
+    def __init__(self, base_dir: str | Path, dataset: str, partition_by: Sequence[str]) -> None:
+        self._pa, _ = _require_pyarrow()
+        import pyarrow.dataset as pds  # noqa: PLC0415
+
+        self._dataset = resolve_dataset(dataset)
+        self._partition_cols = set(partition_by)
+        schema = self._pa.schema([(c, self._pa.string()) for c in partition_by])
+        partitioning = pds.HivePartitioning(
+            schema, null_fallback=_NO_HIVE_NULL, segment_encoding="uri"
+        )
+        self._ds = pds.dataset(str(base_dir), format="parquet", partitioning=partitioning)
+        self.source_columns: tuple[str, ...] = tuple(self._ds.schema.names)
+
+    def __iter__(self) -> Iterator[Record]:
+        model_cols = set(load_model()["datasets"][self._dataset]["columns"])
+        line = 0
+        for batch in self._ds.to_batches(batch_size=_BATCH):
+            columns = batch.schema.names
+            pydata = {name: batch.column(i).to_pylist() for i, name in enumerate(columns)}
+            for r in range(batch.num_rows):
+                line += 1
+                values = {}
+                for name in columns:
+                    raw = pydata[name][r]
+                    if name in self._partition_cols:
+                        # Reconstructed from the path as a string already — pass it through.
+                        values[name] = "" if raw is None else str(raw)
+                    elif name in model_cols:
+                        values[name] = _stringify(self._dataset, name, raw)
+                    else:
+                        values[name] = "" if raw is None else str(raw)
+                yield Record(values, line)
+
+    def close(self) -> None:
+        pass
+
+
+def open_parquet_writer(
+    path: str | Path,
+    schema: DatasetSchema,
+    *,
+    metadata: Mapping[str, str] | None = None,
+    compression: str = "snappy",
+):
     """Open ``path`` for Parquet writing and return ``(writer, writer)`` (handle == writer).
 
     The tuple shape mirrors :func:`focus_data_toolkit.io.csv_io.open_csv_writer` so callers can
     treat both formats uniformly; the Parquet writer owns its own file handle.
     """
-    writer = ParquetRowWriter(path, schema, metadata=metadata)
+    writer = ParquetRowWriter(path, schema, metadata=metadata, compression=compression)
     return writer, writer
 
 
 __all__ = [
+    "COMPRESSIONS",
+    "MAX_PARTITIONS",
+    "PartitionedParquetReader",
+    "PartitionedParquetWriter",
+    "PartitionTooWideError",
     "ParquetRowReader",
     "ParquetRowWriter",
     "arrow_schema",
     "dataset_metadata",
     "decimal_precision_scale",
     "open_parquet_writer",
+    "partitionable_columns",
 ]
