@@ -1,54 +1,70 @@
 [build-system]
-requires = ["setuptools>=68"]
+# setuptools >= 77 for PEP 639 (SPDX `license` expression + `license-files`).
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "focus-data-toolkit"
-version = "0.3.0"
 description = "Generate provider-realistic FOCUS 1.2/1.3 sample data (AWS, Azure, GCP) and convert it to the four FOCUS 1.4 datasets, with schema detection, cross-dataset validation and atomic writes."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+# PEP 639: SPDX expression + explicit license files (replaces the legacy license table and the
+# `License ::` classifier, which setuptools >= 77 deprecates when an SPDX expression is used).
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Guy-Hermann Adiko" }]
 keywords = ["finops", "focus", "billing", "cost", "sample-data"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Office/Business :: Financial",
+    "Typing :: Typed",
 ]
 # The core toolkit is standard-library only.
 dependencies = []
+# Single source of truth: focus_data_toolkit._version.__version__ (a tiny import-free module,
+# so the build backend never imports the package to read the version).
+dynamic = ["version"]
 
 [project.optional-dependencies]
-# Parquet read/write (P1.6, Phase B). PyArrow is the only new runtime dependency and is
-# used solely for columnar I/O with exact decimal128 — the core stays standard-library only.
+# Parquet read/write (P1.6). PyArrow is the only new runtime dependency and is used solely for
+# columnar I/O with exact decimal128 — the core stays standard-library only.
 parquet = ["pyarrow>=15,<21"]
 # The "scale" extra is intentionally an alias of "parquet": external state for large inputs
 # (dedup / aggregation / joins) is handled by the stdlib sqlite3, so no extra engine is added.
 scale = ["focus-data-toolkit[parquet]"]
-# The official FinOps FOCUS validator (not published on PyPI in a recent
-# version; installed from GitHub). Requires Python >= 3.12.
-validator = [
-    "focus_validator @ git+https://github.com/finopsfoundation/focus_validator",
-]
+# The official FinOps FOCUS validator, from PyPI. It requires Python >= 3.12, so the marker keeps
+# `pip install focus-data-toolkit[validator]` a no-op (rather than an error) on Python 3.11.
+validator = ["focus-validator>=2.1,<3 ; python_version >= '3.12'"]
 all = ["focus-data-toolkit[parquet,validator]"]
-# `dev` includes pyarrow so the Parquet test suite actually runs in CI (otherwise it would
-# silently skip via importorskip). The runtime core stays dependency-free.
-dev = ["pytest>=8", "ruff>=0.6", "pyarrow>=15,<21"]
+# Building and checking distributions (used by the packaging tests and the release pipeline).
+release = ["build>=1,<2", "twine>=5,<7"]
+# `dev` includes pyarrow so the Parquet test suite actually runs (not silently importorskip'd),
+# plus the release tooling so the packaging tests can build/inspect the wheel and sdist.
+dev = ["focus-data-toolkit[release]", "pytest>=8", "ruff>=0.6", "pyarrow>=15,<21"]
 
 [project.scripts]
 focus-toolkit = "focus_data_toolkit.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/guymano/focus-data-toolkit"
+Source = "https://github.com/guymano/focus-data-toolkit"
 Issues = "https://github.com/guymano/focus-data-toolkit/issues"
+Changelog = "https://github.com/guymano/focus-data-toolkit/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/guymano/focus-data-toolkit#readme"
+
+[tool.setuptools.dynamic]
+version = { attr = "focus_data_toolkit._version.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
+# PEP 561 typing marker + the embedded FOCUS 1.4 model/reference JSON.
+"focus_data_toolkit" = ["py.typed"]
 "focus_data_toolkit.model" = ["*.json"]
 
 [tool.ruff]
@@ -61,9 +77,10 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# Heavy scale/performance tests are marked `slow` and excluded from the default run;
-# run them explicitly with `pytest -m slow`.
-addopts = "-m 'not slow'"
+# Heavy scale/performance and build/install tests are excluded from the default run;
+# run them explicitly with `pytest -m slow` / `pytest -m packaging`.
+addopts = "-m 'not slow and not packaging'"
 markers = [
     "slow: large-scale / performance tests (excluded from the default run)",
+    "packaging: build/install a distribution (slower; needs the [release] extra)",
 ]

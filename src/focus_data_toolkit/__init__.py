@@ -18,6 +18,7 @@ Public API:
   source generators for AWS, Azure and GCP.
 """
 
+from focus_data_toolkit._version import __version__
 from focus_data_toolkit.convert import ConversionResult, convert_files, convert_to_focus_1_4
 from focus_data_toolkit.lifecycle import DatasetInstance, check_status_transitions
 from focus_data_toolkit.model.validator import (
@@ -32,8 +33,6 @@ from focus_data_toolkit.validate import BundleReport, validate_dataset_bundle
 
 # Alias matching the API name used in the P1 plan / docs.
 validate_bundle = validate_dataset_bundle
-
-__version__ = "0.3.0"
 
 __all__ = [
     "BundleReport",
