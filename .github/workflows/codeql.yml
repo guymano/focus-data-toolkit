@@ -1,12 +1,17 @@
 name: CodeQL
 
+# CodeQL uploads results to GitHub code scanning, which requires the repository to be public (or
+# GitHub Advanced Security on a private repo). Until that Ops step is done, the auto-run triggers
+# are commented out so this workflow does not fail CI; run it manually to test. Restore the
+# triggers below once the repo is public with code scanning enabled (see docs/releasing.md).
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  schedule:
-    - cron: "27 4 * * 1"  # weekly, Monday 04:27 UTC
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+  # pull_request:
+  #   branches: [main]
+  # schedule:
+  #   - cron: "27 4 * * 1"  # weekly, Monday 04:27 UTC
 
 permissions:
   contents: read
