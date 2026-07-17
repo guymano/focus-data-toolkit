@@ -1,0 +1,3 @@
+x_SplitOriginId,x_SplitOriginCost,AllocatedMethodId,AllocatedResourceId,AllocatedMethodDetails,BilledCost,ChargeCategory
+origin-3,-50.00,split-proportional,res-0,"{""Elements"":[{""AllocatedRatio"":0.400000,""UsageUnit"":""Hours"",""UsageQuantity"":1}]}",-20.000000,Usage
+origin-3,-50.00,split-proportional,res-1,"{""Elements"":[{""AllocatedRatio"":0.600000,""UsageUnit"":""Hours"",""UsageQuantity"":1}]}",-30.000000,Usage
