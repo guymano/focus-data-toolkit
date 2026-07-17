@@ -1,0 +1,110 @@
+name: Release build (reusable)
+
+# Reusable build-once workflow: build the wheel + sdist, test them, generate a CycloneDX SBOM and
+# SHA256SUMS, record a build manifest, and run the offline release verifier. The SAME artifacts are
+# then consumed (by digest) by the dry-run and the real release — nothing downstream rebuilds.
+#
+# It performs NO publishing and requests NO write/id-token scopes; attest + publish live in the
+# caller (release.yml) so the build stage can never accidentally publish.
+
+on:
+  workflow_call:
+    outputs:
+      version:
+        description: The built package version.
+        value: ${{ jobs.build.outputs.version }}
+      artifact:
+        description: The name of the uploaded release artifact.
+        value: release-dist
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: "3.12"
+      - name: Install locked toolchain
+        run: uv sync --frozen --extra dev
+
+      - name: Pin build timestamp to the commit (reproducible builds)
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+
+      - name: Build wheel + sdist (isolated backend, per pyproject requires)
+        run: uv run python -m build
+
+      - name: Validate distribution metadata
+        run: uv run twine check dist/*
+
+      - name: Test the built distribution
+        run: uv run pytest -m packaging -q
+
+      - name: Read version
+        id: version
+        run: |
+          v="$(uv run python -c 'import focus_data_toolkit as f; print(f.__version__)')"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Generate CycloneDX SBOM (incl. FOCUS model component)
+        run: |
+          for whl in dist/*.whl; do
+            uv run python scripts/generate_sbom.py "$whl" -o dist/sbom.cdx.json
+          done
+
+      - name: Record build manifest (toolchain + commit + ref)
+        env:
+          COMMIT: ${{ github.sha }}
+          REF: ${{ github.ref }}
+        run: |
+          uv run python - <<'PY'
+          import importlib.metadata as md
+          import json
+          import os
+          import platform
+
+          def ver(pkg):
+              try:
+                  return md.version(pkg)
+              except md.PackageNotFoundError:
+                  return None
+
+          manifest = {
+              "commit": os.environ.get("COMMIT"),
+              "ref": os.environ.get("REF"),
+              "source_date_epoch": os.environ.get("SOURCE_DATE_EPOCH"),
+              "python": platform.python_version(),
+              "platform": platform.platform(),
+              "runner": "ubuntu-24.04",
+              "build_backend_requirement": "setuptools>=77 (isolated; resolved per pyproject)",
+              "tool_versions": {p: ver(p) for p in ("build", "twine")},
+          }
+          with open("dist/release-manifest.json", "w", encoding="utf-8") as fh:
+              json.dump(manifest, fh, indent=2, sort_keys=True)
+              fh.write("\n")
+          print(json.dumps(manifest, indent=2, sort_keys=True))
+          PY
+
+      - name: Generate SHA256SUMS over all artifacts
+        run: |
+          cd dist
+          sha256sum ./*.whl ./*.tar.gz sbom.cdx.json release-manifest.json > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Verify release (offline gate)
+        run: uv run python scripts/verify_release.py --dist dist --no-hints
+
+      - name: Upload release artifacts (passed downstream by digest)
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: release-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
