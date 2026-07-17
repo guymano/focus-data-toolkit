@@ -24,6 +24,16 @@ policy.
   (`scripts/verify_release.py`) checking `SHA256SUMS`, the SBOM, and version
   consistency. Both are covered by `tests/test_release_tooling.py`.
 
+### Changed — dependencies
+
+- Widened the `parquet` extra to `pyarrow>=15,<26` (the lock resolves to 25.x)
+  and `pytest-cov` to `>=5,<8` (dev). The Parquet suite passes unchanged.
+
+### Security
+
+- Resolved **PYSEC-2026-113** by moving the resolved `pyarrow` to `>= 23.0.1`
+  (25.x); the `pip-audit` gate now runs with **no `--ignore-vuln` exception**.
+
 ## [0.9.0] — 2026-07-17
 
 **First public release.** `0.9.0` is the first version prepared for publication

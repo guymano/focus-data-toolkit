@@ -59,14 +59,16 @@ Runtime dependencies are minimized:
 - **Optional**: PyArrow (`parquet`), `focus-validator` (`validator`, 3.12+),
   `tzdata` (Windows, for Parquet timezone resolution).
 
-Dependency vulnerabilities are addressed **or documented**:
+Dependency vulnerabilities are addressed (and documented if any exception is
+needed). Currently the `pip-audit` gate (`.github/workflows/security.yml`) runs
+with **no exceptions**:
 
-- **PYSEC-2026-113 (pyarrow < 23.0.1)** is currently accepted as a documented
-  exception in the `pip-audit` gate (`.github/workflows/security.yml`). PyArrow
-  is an *optional* extra used only for local `decimal128` columnar output — the
-  toolkit does not perform untrusted Arrow-IPC/Parquet deserialization of remote
-  data, and the fix is outside our tested `>=15,<21` range. It is tracked for a
-  pyarrow-cap bump.
+- **PYSEC-2026-113 (pyarrow < 23.0.1)** was previously accepted as a documented
+  exception. It is now **resolved**: the `parquet` extra allows `pyarrow<26` and
+  the lock resolves to a fixed version (`>= 23.0.1`, currently 25.x), so the
+  `--ignore-vuln` was removed. PyArrow remains an *optional* extra used only for
+  local `decimal128` columnar output — the toolkit does not perform untrusted
+  Arrow-IPC/Parquet deserialization of remote data.
 
 ## Supply-chain controls
 

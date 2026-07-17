@@ -27,14 +27,11 @@ jobs:
           python-version: "3.12"
       - run: uv sync --frozen --extra dev
       - name: Audit installed dependencies
-        # Documented exception (P2 supply-chain policy — vulnerabilities are addressed OR
-        # documented): PYSEC-2026-113 affects pyarrow < 23.0.1. pyarrow is an optional `parquet`
-        # extra used only for local decimal128 columnar *output* (no untrusted Arrow-IPC/Parquet
-        # deserialization of remote data), and the fix is outside our tested `>=15,<21` range.
-        # Tracked for a pyarrow-cap bump; see docs/security-model.md (P2-D).
+        # No documented exceptions: the lock resolves pyarrow >= 23.0.1 (currently 25.x), which
+        # fixes PYSEC-2026-113, so the previous `--ignore-vuln PYSEC-2026-113` is no longer needed.
         # pip-audit is pinned so the vulnerability gate is reproducible (a new pip-audit release
         # cannot silently change or break the scan); bump deliberately alongside the other pins.
-        run: uv run --with pip-audit==2.10.1 pip-audit --ignore-vuln PYSEC-2026-113
+        run: uv run --with pip-audit==2.10.1 pip-audit
 
   secret-scan:
     name: Secret scan (gitleaks)
