@@ -108,10 +108,10 @@ class AtomicOutputDir:
             raise AtomicWriteError("temporary directory is not on the destination filesystem")
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> bool:
+    def __exit__(self, exc_type, exc, tb) -> None:
+        # Return None (falsy) — never suppress the exception.
         if not self._committed and not self.keep_temp:
             shutil.rmtree(self._tmp, ignore_errors=True)
-        return False
 
     # -- writing ---------------------------------------------------------------
     def path_for(self, name: str) -> Path:

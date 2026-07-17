@@ -1,0 +1,82 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "41 6 * * 1"  # weekly, Monday 06:41 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pip-audit:
+    name: Dependency vulnerability scan (pip-audit)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen --extra dev
+      - name: Audit installed dependencies
+        # Documented exception (P2 supply-chain policy — vulnerabilities are addressed OR
+        # documented): PYSEC-2026-113 affects pyarrow < 23.0.1. pyarrow is an optional `parquet`
+        # extra used only for local decimal128 columnar *output* (no untrusted Arrow-IPC/Parquet
+        # deserialization of remote data), and the fix is outside our tested `>=15,<21` range.
+        # Tracked for a pyarrow-cap bump; see docs/security-model.md (P2-D).
+        run: uv run --with pip-audit pip-audit --ignore-vuln PYSEC-2026-113
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0  # scan the full history
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  workflow-lint:
+    name: Lint workflows (actionlint + zizmor + pinning)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: "3.12"
+      - name: actionlint (pinned download script + release)
+        env:
+          ACTIONLINT_SHA: 03d0035246f3e81f36aed592ffb4bebf33a03106  # v1.7.7
+          ACTIONLINT_VERSION: 1.7.7
+        run: |
+          curl -sSfL "https://raw.githubusercontent.com/rhysd/actionlint/${ACTIONLINT_SHA}/scripts/download-actionlint.bash" -o download-actionlint.bash
+          bash download-actionlint.bash "${ACTIONLINT_VERSION}"
+          ./actionlint -color
+      - name: zizmor (workflow security audit)
+        run: uvx zizmor@1.27.0 --offline .github/workflows
+      - name: All actions pinned to a full SHA (project policy)
+        run: python3 scripts/check_pinned_actions.py
+
+  dependency-review:
+    name: Dependency review (PR)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@3b139cfc5fae8b618d3eae3675e383bb1769c019 # v4.5.0
+        with:
+          fail-on-severity: high
