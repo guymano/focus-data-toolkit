@@ -11,8 +11,9 @@ Generate realistic **FOCUS 1.2 / 1.3** cost & usage data (AWS, Azure, GCP), conv
 [FOCUS](https://focus.finops.org) is the open standard for cloud cost & usage data. FOCUS 1.4 defines
 four datasets: **Cost and Usage**, **Contract Commitment**, **Billing Period** and **Invoice Detail**.
 This toolkit migrates real data, synthesizes sample data, and checks structure — honestly: a
-structurally valid file is not automatically FOCUS-conformant, and the toolkit never invents facts it
-cannot derive from the source.
+structurally valid file is not automatically FOCUS-conformant, and any value it cannot derive from
+the source is either left empty (**strict** mode) or filled only as a clearly-labelled assumption
+(**synthetic** mode).
 
 ## Three ways to use it
 
@@ -62,10 +63,11 @@ focus-toolkit generate --provider aws --focus-version 1.3 --rows 1000 --out ./ou
 
 # 2. Convert a 1.2/1.3 Cost & Usage file to FOCUS 1.4 (source version auto-detected)
 focus-toolkit convert --cost-and-usage out/focus_1_3_cost_and_usage_aws.csv --out ./focus-1.4
-#    add --mode synthetic  to also emit the other three datasets (clearly labelled synthetic)
-#    add --stream --output-format parquet  for large files
+#    strict conversion of this sample exits 3 (three datasets NOT_PRODUCED, by design) —
+#    add --exit-policy pipeline in `set -e` / CI scripts. Use --mode synthetic to also emit
+#    the other three datasets (clearly labelled), or --stream --output-format parquet for large files.
 
-# 3. Open the Studio web app
+# 3. Open the Studio web app (needs the studio extra: pip install "focus-data-toolkit[studio]")
 focus-toolkit ui
 ```
 
@@ -103,15 +105,18 @@ See [docs/compatibility.md](docs/compatibility.md) for the Python / OS / FOCUS s
 | `2` | invalid input or arguments |
 | `3` | strict result intentionally incomplete |
 | `4` | synthetic result contains assumptions |
-| `5` | disk space / budget exhausted |
+| `5` | disk space / budget exhausted (streaming / Runner) |
 | `130` | cancelled (Ctrl-C / SIGTERM) — nothing partial is published |
 
-Add `--exit-policy pipeline` to treat the functional-but-incomplete outcomes (`3`, `4`) as `0`.
+Code `5` is raised on the bounded-memory path (`--stream`, Parquet, partitioning, or the Runner); the
+eager default CSV conversion reports a disk-full as a write failure (`1`). Add `--exit-policy pipeline`
+to treat the functional-but-incomplete outcomes (`3`, `4`) as `0`.
 
 ## Trust & provenance
 
-- **Deterministic:** the same input always produces the same output bytes (no clock, no RNG); every
-  artifact is listed in `SHA256SUMS`.
+- **Deterministic:** the same input always produces the same output bytes (no clock, no RNG); the
+  datasets and manifest are listed in `SHA256SUMS` (the non-deterministic `_run.json` run sidecar is
+  intentionally excluded).
 - **Verifiable model:** the embedded FOCUS 1.4 model is extracted from the FinOps source workbook and
   its provenance is **complete** — hash-pinned and reproduced byte-for-byte.
   See [docs/model-provenance.md](docs/model-provenance.md).
