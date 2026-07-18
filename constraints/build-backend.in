@@ -1,0 +1,3 @@
+# Input for the hash-locked release build backend (see constraints/build-backend.txt).
+# Regenerate: uv pip compile --generate-hashes constraints/build-backend.in -o constraints/build-backend.txt
+setuptools>=77,<81

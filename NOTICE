@@ -11,28 +11,37 @@ Copyright (c) 2026 focus-data-toolkit contributors.
 Licensed under the MIT License. See the LICENSE file for the full text.
 
 
-2. Embedded FOCUS data model
-----------------------------
+2. Embedded FOCUS data model and official JSON object schemas
+-------------------------------------------------------------
 This package embeds a machine-readable representation of the FinOps Open Cost
-and Usage Specification (FOCUS(TM)) 1.4 data model, in:
+and Usage Specification (FOCUS(TM)) 1.4 data model, and vendors the official
+FOCUS 1.4 JSON object schemas verbatim, in:
 
     src/focus_data_toolkit/model/focus_1_4_model.json
     src/focus_data_toolkit/model/focus_1_4_servicesubcategory.json
+    src/focus_data_toolkit/model/json_schemas/*.json
 
-These files are a derivative work of the FOCUS(TM) specification and its
-"FOCUS 1.4 Data Model" workbook, which are (c) the FinOps Foundation and are
-published under the Creative Commons Attribution 4.0 International license
-(CC-BY-4.0):
+These files are a derivative work (the model) and verbatim copies (the JSON
+schemas) of the FOCUS(TM) specification and its "FOCUS 1.4 Data Model"
+workbook, which are (c) the FinOps Foundation and are published under the
+Creative Commons Attribution 4.0 International license (CC-BY-4.0):
 
     https://github.com/FinOps-Open-Cost-and-Usage-Spec/FOCUS_Spec/blob/main/license.md
     https://creativecommons.org/licenses/by/4.0/
 
 They are redistributed here under CC-BY-4.0 with attribution to the FinOps
-Foundation. The provenance of the embedded model — its source, license, the
-extraction process, and the reproducible output hash — is recorded in
-src/focus_data_toolkit/model/model_provenance.json and documented in
-docs/model-provenance.md. The source workbook itself is NOT redistributed in
-this repository; download it from https://focus.finops.org.
+Foundation; the full CC-BY-4.0 text ships in LICENSES/CC-BY-4.0.txt. Their
+provenance — source, license, extraction process, and reproducible output
+hashes — is recorded in src/focus_data_toolkit/model/model_provenance.json and
+src/focus_data_toolkit/model/json_schemas/json_schemas_provenance.json, and
+documented in docs/model-provenance.md. The source workbook itself is NOT
+redistributed in this repository; download it from https://focus.finops.org.
+
+The provider-native supplement adapters
+(src/focus_data_toolkit/supplement/adapters/*.json) are original mapping
+tables written for this project (MIT, like the toolkit code); each records in
+adapters_provenance.json the public AWS / Microsoft Azure / Google Cloud
+documentation page it was authored against.
 
 
 3. Optional dependency: the official FinOps FOCUS validator

@@ -79,25 +79,45 @@ def _verify_checksums(dist: Path, errors: list[str]) -> set[str]:
 
 
 def _verify_sbom(dist: Path, version: str, errors: list[str]) -> None:
-    sbom = dist / "sbom.cdx.json"
+    for name, checks in (
+        ("sbom.cdx.json", "declared"),
+        ("sbom.resolved.cdx.json", "resolved"),
+    ):
+        _verify_one_sbom(dist / name, version, checks, errors)
+
+
+def _verify_one_sbom(sbom: Path, version: str, profile: str, errors: list[str]) -> None:
+    label = sbom.name
     if not sbom.is_file():
-        errors.append("SBOM (sbom.cdx.json) is missing")
+        errors.append(f"SBOM ({label}) is missing")
         return
     try:
         doc = json.loads(sbom.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        errors.append(f"SBOM is not valid JSON: {exc}")
+        errors.append(f"{label} is not valid JSON: {exc}")
         return
     if doc.get("bomFormat") != "CycloneDX":
-        errors.append("SBOM bomFormat is not 'CycloneDX'")
+        errors.append(f"{label}: bomFormat is not 'CycloneDX'")
     if not str(doc.get("specVersion", "")).startswith("1."):
-        errors.append(f"SBOM specVersion unexpected: {doc.get('specVersion')!r}")
+        errors.append(f"{label}: specVersion unexpected: {doc.get('specVersion')!r}")
     comp = doc.get("metadata", {}).get("component", {})
     if comp.get("version") != version:
-        errors.append(f"SBOM component version {comp.get('version')!r} != release {version!r}")
-    refs = {c.get("bom-ref") for c in doc.get("components", [])}
-    if "focus-1.4-data-model" not in refs:
-        errors.append("SBOM does not include the FOCUS model data component")
+        errors.append(f"{label}: component version {comp.get('version')!r} != release {version!r}")
+    if profile == "declared":
+        refs = {c.get("bom-ref") for c in doc.get("components", [])}
+        if "focus-1.4-data-model" not in refs:
+            errors.append(f"{label}: missing the FOCUS model data component")
+    else:  # resolved profile: pinned versions from uv.lock, declared as such
+        props = {p.get("name"): p.get("value") for p in doc.get("metadata", {}).get("properties", [])}
+        if props.get("focus:profile") != "resolved":
+            errors.append(f"{label}: metadata property focus:profile is not 'resolved'")
+        loose = [
+            c.get("name")
+            for c in doc.get("components", [])
+            if any(ch in str(c.get("version", "")) for ch in "<>=~,")
+        ]
+        if loose:
+            errors.append(f"{label}: non-exact component versions: {loose}")
 
 
 def verify_release(dist: Path) -> list[str]:
@@ -126,7 +146,19 @@ def verify_release(dist: Path) -> list[str]:
         errors.append(f"CHANGELOG.md has no dated '[{committed}]' entry (still Unreleased?)")
 
     covered = _verify_checksums(dist, errors)
-    for artifact in (wheels[0].name, sdists[0].name, "sbom.cdx.json"):
+    required = (
+        wheels[0].name,
+        sdists[0].name,
+        "sbom.cdx.json",
+        "sbom.resolved.cdx.json",
+        "release-manifest.json",
+        # The three provenance manifests ship as release assets so every attestation subject
+        # (model, official JSON schemas, provider adapters) is downloadable next to the dists.
+        "model_provenance.json",
+        "json_schemas_provenance.json",
+        "adapters_provenance.json",
+    )
+    for artifact in required:
         if artifact not in covered:
             errors.append(f"{artifact} is not listed in SHA256SUMS")
 
@@ -137,7 +169,7 @@ def verify_release(dist: Path) -> list[str]:
 def _print_attestation_hints(dist: Path) -> None:
     print("\nTo verify the *published* artifacts' build provenance (needs network + gh):")
     print("  gh attestation verify <artifact> --repo guymano/focus-data-toolkit")
-    for pattern in ("*.whl", "*.tar.gz", "sbom.cdx.json"):
+    for pattern in ("*.whl", "*.tar.gz", "sbom.cdx.json", "sbom.resolved.cdx.json"):
         for p in sorted(dist.glob(pattern)):
             print(f"  gh attestation verify {p.name} --repo guymano/focus-data-toolkit")
 

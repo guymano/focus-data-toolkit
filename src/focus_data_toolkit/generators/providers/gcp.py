@@ -6,11 +6,12 @@ import json
 import random
 from decimal import Decimal
 
-from focus_data_toolkit.generators.engine.context import ResourceRef, RowContext
 from focus_data_toolkit.generators.engine.determinism import HEX_UPPER, hexid
 from focus_data_toolkit.generators.providers.profile import (
     CommitmentModel,
     ProviderProfile,
+    ResourceRef,
+    RowContext,
     ServiceSpec,
 )
 

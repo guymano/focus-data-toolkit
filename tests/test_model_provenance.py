@@ -94,3 +94,64 @@ def test_gate_partial_rejects_stray_source_hash(tmp_path):
     forged.write_text(json.dumps(manifest), encoding="utf-8")
     errors = verify(forged)
     assert any("partial" in e for e in errors), errors
+
+
+def test_complete_flips_status_after_byte_identical_reextraction(tmp_path):
+    from verify_model_provenance import complete
+
+    staged_manifest = tmp_path / "model_provenance.json"
+    staged_manifest.write_text(_MANIFEST.read_text(encoding="utf-8"), encoding="utf-8")
+    workbook = tmp_path / "focus_1_4_data_model.xlsx"
+    workbook.write_bytes(b"pretend workbook bytes")
+    committed_model = (
+        _ROOT / "src" / "focus_data_toolkit" / "model" / "focus_1_4_model.json"
+    ).read_bytes()
+
+    errors = complete(
+        workbook,
+        retrieved="2026-07-18",
+        manifest_path=staged_manifest,
+        reextract=lambda _wb: committed_model,  # byte-identical re-extraction
+    )
+    assert errors == []
+    updated = json.loads(staged_manifest.read_text(encoding="utf-8"))
+    assert updated["provenance_status"] == "complete"
+    assert updated["source"]["artifact_retrieved"] == "2026-07-18"
+    import hashlib
+
+    assert updated["source"]["artifact_sha256"] == hashlib.sha256(
+        workbook.read_bytes()
+    ).hexdigest()
+    from verify_model_provenance import verify as _verify
+
+    assert _verify(staged_manifest) == []
+
+
+def test_complete_refuses_a_divergent_workbook_and_touches_nothing(tmp_path):
+    from verify_model_provenance import complete
+
+    staged_manifest = tmp_path / "model_provenance.json"
+    original = _MANIFEST.read_text(encoding="utf-8")
+    staged_manifest.write_text(original, encoding="utf-8")
+    workbook = tmp_path / "wb.xlsx"
+    workbook.write_bytes(b"different revision")
+
+    errors = complete(
+        workbook,
+        manifest_path=staged_manifest,
+        reextract=lambda _wb: b"NOT the committed model",
+    )
+    assert errors and "byte-for-byte" in errors[0]
+    assert staged_manifest.read_text(encoding="utf-8") == original  # untouched
+    assert not list(tmp_path.glob("*.completing"))
+
+
+def test_complete_rejects_bad_date_and_missing_workbook(tmp_path):
+    from verify_model_provenance import complete
+
+    missing = tmp_path / "nope.xlsx"
+    assert complete(missing, manifest_path=_MANIFEST) == [f"workbook not found: {missing}"]
+    workbook = tmp_path / "wb.xlsx"
+    workbook.write_bytes(b"x")
+    errors = complete(workbook, retrieved="18/07/2026", manifest_path=_MANIFEST)
+    assert errors and "ISO date" in errors[0]

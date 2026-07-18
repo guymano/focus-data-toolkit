@@ -18,7 +18,7 @@ that produced the service") is dropped: it does not identify the host. The
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from focus_data_toolkit.convert.contract_applied import migrate_1_3_to_1_4
 from focus_data_toolkit.convert.invoice_detail import GrainKey, invoice_detail_grain_key
@@ -109,7 +109,7 @@ def _convert_contract_applied(raw: str | None, source_version: str) -> str:
 
 
 def convert_cost_and_usage_row(
-    row: dict[str, str],
+    row: Mapping[str, str],
     source_version: str,
     *,
     detail_id: str = "",

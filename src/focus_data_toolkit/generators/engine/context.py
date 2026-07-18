@@ -1,32 +1,12 @@
-"""Small value objects threaded through the engine row builders."""
+"""Small value objects threaded through the engine row builders.
+
+``ResourceRef`` / ``RowContext`` live in :mod:`focus_data_toolkit.generators.providers.profile`
+next to the :class:`ServiceSpec` they reference, so the import graph stays a one-way street
+(engine -> providers) with no cycle. Re-exported here for the engine-side importers.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from focus_data_toolkit.generators.providers.profile import ResourceRef, RowContext
 
-
-@dataclass(frozen=True)
-class RowContext:
-    """Identity carried from ``base_row`` into a scenario (the group's billing account)."""
-
-    billing_id: str
-    sub_id: str
-    sub_name: str
-
-
-@dataclass(frozen=True)
-class ResourceRef:
-    """Everything a provider's ``resource_id`` callable might need.
-
-    Each provider reads only the fields it uses (AWS: region + billing account; Azure:
-    subscription id + name; GCP: project id), so the callable signature stays uniform and
-    the callables never draw from the RNG.
-    """
-
-    spec: object  # ServiceSpec (avoids a circular import with providers.profile)
-    region_id: str
-    region_name: str
-    billing_id: str
-    sub_id: str
-    sub_name: str
-    resource_name: str
+__all__ = ["ResourceRef", "RowContext"]

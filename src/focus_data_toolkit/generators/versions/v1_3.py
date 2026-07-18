@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from focus_data_toolkit.generators.engine.json_focus import contract_applied
+from focus_data_toolkit.generators.providers.profile import ProviderProfile
 from focus_data_toolkit.generators.versions.adapter import LadderBranch, VersionAdapter
 
 COLUMNS: tuple[str, ...] = (
@@ -111,7 +112,7 @@ _COMMITMENT_IDENTITY_KEYS: tuple[str, ...] = (
 )
 
 
-def _fill_identity(row: dict, profile: object) -> None:
+def _fill_identity(row: dict, profile: ProviderProfile) -> None:
     row["ServiceProviderName"] = profile.service_provider_name
     row["HostProviderName"] = profile.host_provider_name
     # Multi-currency generator: PricingCurrency is never null (_set_currency overrides it for

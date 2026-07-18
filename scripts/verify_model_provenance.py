@@ -15,10 +15,20 @@ If the optional ``jsonschema`` package is importable it *also* validates the man
 a note (the structural checks above still run).
 
     python scripts/verify_model_provenance.py        # exit 0 on success, 1 on any problem
+
+**Completing the provenance** (owner action, needs the source workbook + ``openpyxl``): the
+``--complete`` mode hashes the supplied workbook, re-runs the pinned extractor against it in an
+isolated temporary tree, and only if the committed model is reproduced **byte-for-byte** flips
+``provenance_status`` to ``complete`` (recording ``source.artifact_sha256`` /
+``source.artifact_retrieved``) — then re-verifies the whole manifest. A workbook that does not
+reproduce the committed model aborts without touching anything.
+
+    python scripts/verify_model_provenance.py --complete /path/to/focus_1_4_data_model.xlsx
 """
 
 from __future__ import annotations
 
+import argparse
 import datetime as _dt
 import hashlib
 import json
@@ -140,7 +150,132 @@ def _schema_validate(manifest: dict) -> list[str]:
     return [f"schema: {e.json_path}: {e.message}" for e in errors]
 
 
-def main() -> int:
+def _reextract(workbook: Path) -> bytes:
+    """Run the pinned extractor against ``workbook`` in an isolated temp tree; return the bytes.
+
+    The extractor writes repo-relative to its own location, so it is copied (together with the
+    ServiceSubcategory supplement it reads) into a temporary tree mirroring the repo layout —
+    the committed model is never touched by a completion attempt.
+    """
+    import shutil
+    import subprocess
+    import sys
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        (tmp / "tools").mkdir()
+        model_dir = tmp / "src" / "focus_data_toolkit" / "model"
+        model_dir.mkdir(parents=True)
+        shutil.copy2(_REPO / "tools" / "extract_focus_1_4_model.py", tmp / "tools")
+        shutil.copy2(
+            _REPO / "src" / "focus_data_toolkit" / "model" / "focus_1_4_servicesubcategory.json",
+            model_dir,
+        )
+        proc = subprocess.run(
+            [sys.executable, str(tmp / "tools" / "extract_focus_1_4_model.py"), str(workbook)],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            detail = proc.stderr.strip() or proc.stdout.strip()
+            raise RuntimeError(f"extractor failed (is openpyxl installed?): {detail}")
+        return (model_dir / "focus_1_4_model.json").read_bytes()
+
+
+def complete(
+    workbook: Path,
+    *,
+    retrieved: str | None = None,
+    manifest_path: Path = _MANIFEST,
+    reextract=_reextract,
+) -> list[str]:
+    """Flip the manifest to ``provenance_status = 'complete'`` after full verification.
+
+    Returns a list of problems; empty means the manifest was updated and re-verified. Nothing
+    is written unless the supplied workbook reproduces the committed model byte-for-byte.
+    """
+    if not workbook.is_file():
+        return [f"workbook not found: {workbook}"]
+    retrieved = retrieved or _dt.date.today().isoformat()
+    if not _is_iso_date(retrieved):
+        return [f"--retrieved must be an ISO date (YYYY-MM-DD), got {retrieved!r}"]
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"cannot read/parse {manifest_path}: {exc}"]
+
+    try:
+        produced = reextract(workbook)
+    except RuntimeError as exc:
+        return [str(exc)]
+    committed = (_REPO / manifest["output"]["path"]).read_bytes()
+    if produced != committed:
+        return [
+            "re-extraction from the supplied workbook does NOT reproduce the committed model "
+            "byte-for-byte — the workbook revision differs from the one the model was built "
+            "from. Do not complete provenance with this artifact; re-run "
+            "tools/extract_focus_1_4_model.py and review the model diff instead."
+        ]
+
+    manifest["provenance_status"] = "complete"
+    manifest["source"]["artifact_sha256"] = _sha256(workbook)
+    manifest["source"]["artifact_retrieved"] = retrieved
+    manifest["reproducibility"]["limitation"] = (
+        "None for the model chain: the source workbook is hashed (source.artifact_sha256) and "
+        "the committed output was reproduced byte-for-byte from it by the pinned extractor at "
+        "completion time. The workbook itself is still not redistributed; obtain it from the "
+        "FinOps Foundation and verify it against source.artifact_sha256."
+    )
+    manifest["notes"] = [
+        "provenance_status was set to 'complete' by scripts/verify_model_provenance.py "
+        "--complete: the source workbook was hashed and the committed model was reproduced "
+        "byte-for-byte from it with the pinned extractor."
+    ]
+    # Verify the updated manifest fully before it replaces the committed one, so a completion
+    # can never leave a manifest that fails its own gate.
+    import os
+
+    staged = manifest_path.with_suffix(".json.completing")
+    staged.write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    errors = verify(staged)
+    if errors:
+        staged.unlink(missing_ok=True)
+        return errors
+    os.replace(staged, manifest_path)
+    return []
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--complete",
+        metavar="WORKBOOK",
+        help="hash WORKBOOK, verify byte-for-byte re-extraction, and set "
+        "provenance_status=complete in the manifest",
+    )
+    parser.add_argument(
+        "--retrieved",
+        metavar="YYYY-MM-DD",
+        help="retrieval date recorded with --complete (defaults to today)",
+    )
+    args = parser.parse_args(argv)
+
+    if args.complete:
+        errors = complete(Path(args.complete), retrieved=args.retrieved)
+        if errors:
+            print("FOCUS model provenance completion FAILED (manifest untouched unless noted):")
+            for err in errors:
+                print(f"  - {err}")
+            return 1
+        print(
+            f"FOCUS model provenance COMPLETED and re-verified OK "
+            f"({_MANIFEST.relative_to(_REPO)})."
+        )
+        return 0
+
     errors = verify()
     if errors:
         print("FOCUS model provenance verification FAILED:")

@@ -175,7 +175,7 @@ def _open_reader(
         from focus_data_toolkit.io.parquet_io import ParquetRowReader, PartitionedParquetReader
 
         if partition_by:
-            return PartitionedParquetReader(path, dataset, partition_by)
+            return PartitionedParquetReader(path, dataset or "Cost and Usage", partition_by)
         return ParquetRowReader(path, dataset=dataset)
     return CsvRowReader(path)
 
@@ -222,7 +222,9 @@ def _lint_file(
             flush(chunk)
     finally:
         reader.close()
-    return LintReport(dataset=dataset, row_count=total, violations=violations, levels_checked=levels)
+    return LintReport(
+        dataset=dataset, row_count=total, violations=tuple(violations), levels_checked=levels
+    )
 
 
 def _validate_parquet_options(

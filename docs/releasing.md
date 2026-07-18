@@ -50,20 +50,16 @@ these are in place:
       and dependency-review can run (see below).
 - [ ] **CODEOWNERS** confirmed and "require review from Code Owners" turned on.
 
-## Enabling the gated security workflows
+## The security workflows
 
-`.github/workflows/codeql.yml` and `scorecard.yml` are currently gated behind
-`workflow_dispatch` only. They upload results to GitHub **code scanning**, which
-requires the repository to be public (or to have GitHub Advanced Security).
-`actions/dependency-review-action` similarly needs the **Dependency Graph**.
-
-Once the repository is public with code scanning / Dependency Graph enabled
-(Operationally Ready checklist above):
-
-1. In `codeql.yml` and `scorecard.yml`, restore the real triggers (`push` /
-   `pull_request` / `schedule` / `branch_protection_rule`) that are commented out.
-2. Optionally re-add a `dependency-review` job to `security.yml` (dependency CVEs
-   are already covered by `pip-audit` + Dependabot in the meantime).
+`.github/workflows/codeql.yml` and `scorecard.yml` run on `push` / `pull_request`
+/ `schedule` (plus `branch_protection_rule` for Scorecard). They upload results
+to GitHub **code scanning**, which must be enabled in the repository settings
+(Operationally Ready checklist above) for the uploads to land.
+`actions/dependency-review-action` similarly needs the **Dependency Graph**; a
+`dependency-review` job can be added to `security.yml` once it is enabled
+(dependency CVEs are already covered by `pip-audit` + Dependabot in the
+meantime).
 
 ## Cutting a release
 
@@ -76,15 +72,31 @@ Once the repository is public with code scanning / Dependency Graph enabled
    `provenance_status = "complete"` (see
    [docs/model-provenance.md](model-provenance.md)); otherwise it is a
    pre-release with `partial` provenance and must be described as such.
+   To complete it, run `python scripts/verify_model_provenance.py --complete
+   /path/to/focus_1_4_data_model.xlsx` with the source workbook (needs
+   `openpyxl`): it archives the workbook hash and flips the status only after
+   reproducing the committed model byte-for-byte.
 5. Run the **`release-dry-run.yml`** workflow (build + test + SBOM + checksums +
    `verify_release.py`) — no publish, no PyPI environment.
 6. Open the release PR, get code-owner review, merge.
 7. Create the protected, signed `vX.Y.Z` tag. **`release.yml`** builds the
-   artifacts **once**, tests them, generates the SBOM, attests
-   wheel/sdist/SBOM/checksums, and publishes to PyPI via Trusted Publishing
-   after environment approval. Artifacts pass between jobs **by digest**; the
-   publish job never rebuilds. (The `release.yml` publish job also checks the tag
-   matches the built version.)
+   artifacts **once** with the hash-locked backend
+   (`constraints/build-backend.txt`, `--no-isolation` so the pinned setuptools
+   is the one that builds), tests them, generates **both SBOM profiles**
+   (`sbom.cdx.json` declared ranges; `sbom.resolved.cdx.json` exact versions,
+   hashed distributions and the transitive tree from `uv.lock`), attests every
+   asset (dists, both SBOMs, checksums, build manifest, and the three
+   provenance manifests — model / official JSON schemas / provider adapters),
+   publishes to PyPI via Trusted Publishing after environment approval, and —
+   **only after publish succeeds** — creates the **GitHub Release** on the tag
+   carrying the full attested asset set permanently (workflow artifacts expire
+   after 7 days) with notes taken from the `CHANGELOG.md` section. Two honesty
+   gates enforce the provenance policy mechanically: the publish job **refuses
+   a final (non-PEP-440-pre-release) version while model provenance is
+   `partial`**, and the GitHub Release is marked **pre-release** with the
+   limitation stated in the notes whenever provenance is not `complete`.
+   Artifacts pass between jobs **by digest**; nothing downstream rebuilds.
+   (The publish job also checks the tag matches the built version.)
 8. Verify the published artifacts and that the PyPI page shows the attestations:
 
    ```bash
