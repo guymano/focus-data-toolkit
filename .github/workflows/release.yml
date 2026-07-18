@@ -162,16 +162,25 @@ jobs:
           TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
-          args=(
-            --repo "$GITHUB_REPOSITORY"
-            --verify-tag
-            --title "focus-data-toolkit $VERSION"
-            --notes-file release-notes.md
-          )
-          if [ "$PROVENANCE_STATUS" != "complete" ]; then
-            args+=( --prerelease )
-          fi
-          gh release create "$TAG" "${args[@]}" \
-            dist/*.whl dist/*.tar.gz dist/sbom.cdx.json dist/sbom.resolved.cdx.json \
-            dist/SHA256SUMS dist/release-manifest.json dist/model_provenance.json \
+          assets=(
+            dist/*.whl dist/*.tar.gz dist/sbom.cdx.json dist/sbom.resolved.cdx.json
+            dist/SHA256SUMS dist/release-manifest.json dist/model_provenance.json
             dist/json_schemas_provenance.json dist/adapters_provenance.json
+          )
+          prerelease=()
+          if [ "$PROVENANCE_STATUS" != "complete" ]; then
+            prerelease=( --prerelease )
+          fi
+          # Idempotent: if a release for this tag already exists — e.g. the tag was created from the
+          # GitHub "Draft a new release" UI, which also creates the release — update it in place and
+          # attach the attested assets instead of failing; otherwise create it fresh (verifying the
+          # tag exists, for the plain `git push` tag path).
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "focus-data-toolkit $VERSION" --notes-file release-notes.md "${prerelease[@]}"
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "focus-data-toolkit $VERSION" --notes-file release-notes.md \
+              "${prerelease[@]}" "${assets[@]}"
+          fi
