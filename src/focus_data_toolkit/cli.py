@@ -2,12 +2,17 @@
 
 Subcommands:
 
-* ``generate`` — emit provider-realistic FOCUS 1.2/1.3 sample CSVs.
-* ``convert``  — convert a FOCUS 1.2/1.3 source into the four FOCUS 1.4 datasets.
-* ``gaps``     — report exactly which facts a client must supply for the four
+* ``generate``    — emit provider-realistic FOCUS 1.2/1.3 sample CSVs.
+* ``convert``     — convert a FOCUS 1.2/1.3 source (CSV or Parquet) into the four
+  FOCUS 1.4 datasets, optionally completed by ``--supplement`` client facts.
+* ``gaps``        — report exactly which facts a client must supply for the four
   FOCUS 1.4 datasets to be produced factually from a given source.
-* ``validate`` — validate a CSV against the built-in FOCUS 1.4 model, or run
-  the official FinOps validator (``--official``).
+* ``supplements`` — pre-flight ``validate`` supplement files against a source, and
+  list the provider-native export ``adapters`` (AWS / Azure / GCP).
+* ``validate``    — validate a produced file against the built-in FOCUS 1.4 model,
+  or run the official FinOps validator (``--official``).
+* ``clean``       — recover interrupted publishes and remove leftover staging
+  directories.
 """
 
 from __future__ import annotations

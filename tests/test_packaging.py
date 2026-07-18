@@ -63,6 +63,9 @@ def test_wheel_contents(dists):
     assert len(adapters) >= 3, "adapter mapping tables missing from wheel"
     assert any(n.endswith("adapters/adapters_provenance.json") for n in names)
     assert any(n.endswith("cli.py") for n in names)
+    # The wheel carries all three license files in its dist-info licenses directory.
+    licenses = {n.rsplit("licenses/", 1)[1] for n in names if ".dist-info/licenses/" in n}
+    assert licenses == {"LICENSE", "NOTICE", "LICENSES/CC-BY-4.0.txt"}
     # No tests, no scratch, no golden fixtures leak into the wheel.
     assert not any("/tests/" in n or n.startswith("tests/") for n in names)
 
@@ -71,6 +74,7 @@ def test_sdist_contents(dists):
     names = tarfile.open(dists["sdist"]).getnames()
     assert any(n.endswith("/LICENSE") for n in names)
     assert any(n.endswith("/NOTICE") for n in names)
+    assert any(n.endswith("/LICENSES/CC-BY-4.0.txt") for n in names)
     assert any(n.endswith("/CHANGELOG.md") for n in names)
     assert any(n.endswith("/SECURITY.md") for n in names)
     # The model extractor ships in the sdist so the embedded model is reproducible from source.
@@ -91,7 +95,12 @@ def test_wheel_metadata(dists):
 
     assert field("Version") == _expected_version()
     assert field("License-Expression") == "MIT"  # PEP 639
-    assert field("License-File") == "LICENSE"
+    # All three license files are declared: MIT code license, the NOTICE attributions, and
+    # the CC-BY-4.0 text covering the embedded FOCUS model + vendored official schemas.
+    license_files = [
+        ln.split(":", 1)[1].strip() for ln in meta.splitlines() if ln.startswith("License-File:")
+    ]
+    assert set(license_files) == {"LICENSE", "NOTICE", "LICENSES/CC-BY-4.0.txt"}
     assert field("Author") == "Guy-Hermann Adiko"
     assert field("Requires-Python") == ">=3.11"
     assert "Typing :: Typed" in meta

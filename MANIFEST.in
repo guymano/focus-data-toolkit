@@ -2,6 +2,7 @@
 # LICENSE is included automatically via PEP 639 license-files; listed here for older tooling.
 include LICENSE
 include NOTICE
+recursive-include LICENSES *.txt
 include CHANGELOG.md
 include SECURITY.md
 include CONTRIBUTING.md

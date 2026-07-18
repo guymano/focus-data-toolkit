@@ -69,6 +69,25 @@ The current status is **`partial`**: the FOCUS workbook is not redistributed in
 this repository, so we cannot commit and hash the exact source artifact without
 overclaiming. This is a deliberate, honest limitation.
 
+### Completing the provenance (one command, owner action)
+
+With the source workbook in hand (downloaded from <https://focus.finops.org>)
+and `openpyxl` installed, the verifier flips the status itself — and only after
+proving the claim it is about to make:
+
+```console
+$ python scripts/verify_model_provenance.py --complete /path/to/focus_1_4_data_model.xlsx
+```
+
+It hashes the workbook, re-runs the **pinned** extractor against it in an
+isolated temporary tree, and only if the committed `focus_1_4_model.json` is
+reproduced **byte-for-byte** writes `provenance_status = "complete"` with
+`source.artifact_sha256` / `source.artifact_retrieved` (default: today; override
+with `--retrieved YYYY-MM-DD`), then re-verifies the whole manifest before the
+update replaces the committed one. A workbook that does not reproduce the model
+aborts with nothing written — complete the model update first, then the
+provenance. Commit the updated `model_provenance.json`.
+
 > **Release gate.** A stable release that presents the model provenance as fully
 > verifiable / end-to-end reproducible **requires `provenance_status = "complete"`.**
 > While it is `partial`, the release must not be presented as having fully

@@ -5,13 +5,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "focus-data-toolkit"
-description = "Generate provider-realistic FOCUS 1.2/1.3 sample data (AWS, Azure, GCP) and convert it to the four FOCUS 1.4 datasets, with schema detection, cross-dataset validation and atomic writes."
+description = "Generate provider-realistic FOCUS 1.2/1.3 sample data (AWS, Azure, GCP) and convert it to the four FOCUS 1.4 datasets — strictly from source facts, completed by client supplements including native AWS/Azure/GCP exports — with schema detection, gap analysis, a cross-dataset validation gate and atomic writes."
 readme = "README.md"
 requires-python = ">=3.11"
 # PEP 639: SPDX expression + explicit license files (replaces the legacy license table and the
 # `License ::` classifier, which setuptools >= 77 deprecates when an SPDX expression is used).
 license = "MIT"
-license-files = ["LICENSE"]
+# LICENSE covers the toolkit code (MIT); NOTICE + LICENSES/CC-BY-4.0.txt cover the embedded
+# FOCUS model / vendored official JSON schemas, which are CC-BY-4.0 derivative works of the
+# FinOps Foundation specification (see NOTICE for the attribution details).
+license-files = ["LICENSE", "NOTICE", "LICENSES/CC-BY-4.0.txt"]
 authors = [{ name = "Guy-Hermann Adiko" }]
 keywords = ["finops", "focus", "billing", "cost", "sample-data"]
 classifiers = [

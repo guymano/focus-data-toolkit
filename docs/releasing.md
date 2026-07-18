@@ -72,6 +72,10 @@ meantime).
    `provenance_status = "complete"` (see
    [docs/model-provenance.md](model-provenance.md)); otherwise it is a
    pre-release with `partial` provenance and must be described as such.
+   To complete it, run `python scripts/verify_model_provenance.py --complete
+   /path/to/focus_1_4_data_model.xlsx` with the source workbook (needs
+   `openpyxl`): it archives the workbook hash and flips the status only after
+   reproducing the committed model byte-for-byte.
 5. Run the **`release-dry-run.yml`** workflow (build + test + SBOM + checksums +
    `verify_release.py`) — no publish, no PyPI environment.
 6. Open the release PR, get code-owner review, merge.
