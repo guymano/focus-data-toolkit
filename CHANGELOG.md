@@ -9,12 +9,27 @@ policy.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-07-18
+
+First **stable** release. Same feature set as `0.11.0rc1`, promoted to a final release now that the
+embedded FOCUS 1.4 model's **provenance is `complete`** — the FinOps Foundation source workbook is
+hashed (`source.artifact_sha256`) and the committed model was reproduced from it **byte-for-byte** by
+the pinned extractor — so it installs with a plain `pip install focus-data-toolkit` (no `--pre`).
+
+Highlights (full details in the `0.11.0rc1` entry below):
+
+- **Studio** — a local web UI (`focus-toolkit ui`, extra `[studio]`) over the same Core.
+- **Runner** — a containerised batch image (GHCR) whose entrypoint is the `focus-toolkit` CLI.
+- **Core (Lot A)** — progress/cancellation, separate work/output disk budgets, `--exit-policy`, and
+  the `detect` / `validate-bundle` / `version` commands.
+
 ### Changed
 
-- **Release workflow (`release.yml`)**: the GitHub Release step is now idempotent — if a release for
-  the tag already exists (e.g. the tag was created via the "Draft a new release" UI, which also
-  creates the release), it updates that release in place and attaches the attested assets instead of
-  failing. A plain `git push` of the tag (no pre-existing release) still creates it fresh.
+- **Model provenance**: `partial` → `complete` (source workbook hashed and end-to-end reproduction
+  verified; see [docs/model-provenance.md](docs/model-provenance.md)).
+- **Release workflow (`release.yml`)**: the GitHub Release step is idempotent — if a release for the
+  tag already exists (e.g. created via the "Draft a new release" UI), it updates that release in
+  place and attaches the attested assets instead of failing.
 
 ## [0.11.0rc1] — 2026-07-18
 
@@ -537,6 +552,7 @@ conformance defects.
 
 <!-- Reference links. 0.2.0/0.3.0 were pre-release development milestones and were never tagged
      or published, so only the first public release (0.9.0) has a tag link. -->
-[Unreleased]: https://github.com/guymano/focus-data-toolkit/compare/v0.11.0rc1...HEAD
+[Unreleased]: https://github.com/guymano/focus-data-toolkit/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.11.0rc1...v0.11.0
 [0.11.0rc1]: https://github.com/guymano/focus-data-toolkit/compare/v0.9.0...v0.11.0rc1
 [0.9.0]: https://github.com/guymano/focus-data-toolkit/releases/tag/v0.9.0

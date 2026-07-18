@@ -85,10 +85,10 @@ small attack surface is part of the security model — see
 This project is pre-1.0. Only the most recent minor line receives security
 fixes; there are no long-term-support branches yet.
 
-| Version   | Supported                                              |
-| --------- | ------------------------------------------------------ |
-| `0.9.x`   | ✅ Current line — security fixes land here.            |
-| `< 0.9.0` | ❌ Pre-release development snapshots, never published. |
+| Version    | Supported                                                   |
+| ---------- | ----------------------------------------------------------- |
+| `0.11.x`   | ✅ Current line — security fixes land here.                 |
+| `< 0.11.0` | ❌ Superseded pre-1.0 releases / snapshots; upgrade to 0.11.x. |
 
 When `1.0.0` is released, this table will be updated with the then-current
 support policy.

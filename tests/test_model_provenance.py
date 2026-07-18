@@ -24,12 +24,14 @@ def test_committed_provenance_verifies():
     assert errors == [], "provenance verification failed:\n" + "\n".join(errors)
 
 
-def test_manifest_status_is_partial_and_honest():
+def test_manifest_status_is_complete_and_honest():
     manifest = json.loads(_MANIFEST.read_text(encoding="utf-8"))
-    # The workbook is not committed/hashed, so the status must be `partial` and the source hash null
-    # (no overclaiming a `complete`, fully-reproducible provenance we cannot demonstrate).
-    assert manifest["provenance_status"] == "partial"
-    assert manifest["source"]["artifact_sha256"] is None
+    # Provenance is completed: the source workbook is hashed and the committed model was reproduced
+    # from it byte-for-byte, so the status is `complete` with a real 64-hex source hash + a date.
+    assert manifest["provenance_status"] == "complete"
+    sha = manifest["source"]["artifact_sha256"]
+    assert isinstance(sha, str) and len(sha) == 64 and all(c in "0123456789abcdef" for c in sha)
+    assert manifest["source"]["artifact_retrieved"]  # ISO date recorded at completion
     assert manifest["source"]["license"] == "CC-BY-4.0"
     assert manifest["source"]["license_verified"] is True
 
@@ -77,10 +79,12 @@ def test_verify_rejects_path_escape(tmp_path):
 
 
 def test_gate_complete_requires_source_hash(tmp_path):
-    # Flip the real (partial) manifest to `complete` without adding a source hash: the gate must
-    # reject it. This proves a stable release cannot claim `complete` provenance for free.
+    # A `complete` status WITHOUT a source hash must be rejected. This proves a stable release
+    # cannot claim `complete` provenance for free.
     manifest = json.loads(_MANIFEST.read_text(encoding="utf-8"))
     manifest["provenance_status"] = "complete"
+    manifest["source"]["artifact_sha256"] = None
+    manifest["source"]["artifact_retrieved"] = None
     forged = tmp_path / "model_provenance.json"
     forged.write_text(json.dumps(manifest), encoding="utf-8")
     errors = verify(forged)
@@ -89,7 +93,9 @@ def test_gate_complete_requires_source_hash(tmp_path):
 
 def test_gate_partial_rejects_stray_source_hash(tmp_path):
     manifest = json.loads(_MANIFEST.read_text(encoding="utf-8"))
-    manifest["source"]["artifact_sha256"] = "0" * 64  # partial should keep this null
+    manifest["provenance_status"] = "partial"  # force partial for this gate check
+    manifest["source"]["artifact_sha256"] = "0" * 64  # partial must keep this null
+    manifest["source"]["artifact_retrieved"] = None
     forged = tmp_path / "model_provenance.json"
     forged.write_text(json.dumps(manifest), encoding="utf-8")
     errors = verify(forged)

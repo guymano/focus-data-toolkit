@@ -65,9 +65,12 @@ python scripts/verify_model_provenance.py
   **hashed** (`source.artifact_sha256`), retrieved-dated, and license-verified,
   so the whole chain is end-to-end verifiable.
 
-The current status is **`partial`**: the FOCUS workbook is not redistributed in
-this repository, so we cannot commit and hash the exact source artifact without
-overclaiming. This is a deliberate, honest limitation.
+The current status is **`complete`** (since 0.11.0): the FinOps Foundation source
+workbook has been hashed (`source.artifact_sha256`) and the committed
+`focus_1_4_model.json` was reproduced from it **byte-for-byte** by the pinned
+extractor, so the whole chain is end-to-end verifiable. The workbook itself is
+still **not redistributed** here (CC-BY-4.0 attribution notwithstanding) — obtain
+it from <https://focus.finops.org> and check it against `source.artifact_sha256`.
 
 ### Completing the provenance (one command, owner action)
 
@@ -109,6 +112,7 @@ mismatch and checks:
   Schema. The standalone stdlib checks above run everywhere, with no extra
   dependency.
 
-What is **not** verifiable from this repository alone: the source workbook hash
-(hence `partial`). Reproducing the model end-to-end requires obtaining the same
-workbook revision from the FinOps Foundation.
+Since 0.11.0 the source workbook hash **is** recorded (`source.artifact_sha256`,
+status `complete`), so the model chain is verifiable end-to-end. The workbook
+itself is still not redistributed here: obtain the same revision from the FinOps
+Foundation and check it against that hash to reproduce the model byte-for-byte.

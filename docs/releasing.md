@@ -105,25 +105,27 @@ meantime).
      --repo guymano/focus-data-toolkit                    # GitHub Artifact Attestation
    ```
 
-## First release (R1): concrete owner runbook
+## Cutting a release: concrete owner runbook
 
-The release **pipeline is fully coded but has never been executed**. R1's goal is to run the whole
-chain end-to-end for the first time — Trusted Publishing, attestations, SBOM, packaging — and, as a
-by-product, make the toolkit installable with `pip`/`pipx`/`uv tool`. The repository work (version
-bump + `CHANGELOG`) is done in a normal PR; everything below is **owner-only** and cannot be done
-from CI or by an automated agent.
+The release pipeline was first executed for **`0.11.0rc1`** (a pre-release), then for the final
+**`0.11.0`**. Model provenance is now **`complete`**, so final (non-pre-release) versions are
+allowed. The repository work (version bump + `CHANGELOG`) is done in a normal PR; everything below is
+**owner-only** and cannot be done from CI or by an automated agent.
 
-Current facts that shape R1:
+Facts that shape a release:
 
-- **Model provenance is `partial`** (the FinOps source workbook is not archived/hashed), so the
-  honesty gate **forbids a final version**. R1 must be a **PEP 440 pre-release** — this repo uses
-  **`0.11.0rc1`** (tag `v0.11.0rc1`). A plain `pip install focus-data-toolkit` does **not** select
-  pre-releases; use `pip install --pre focus-data-toolkit` (or pin `==0.11.0rc1`).
+- The version is single-sourced in `src/focus_data_toolkit/_version.py`, and `release.yml` **aborts
+  if the tag does not equal that version** — the tag must match exactly (`_version.py` = `0.11.0`
+  ⟺ tag `v0.11.0`).
+- The honesty gate publishes a **pre-release only while model provenance is not `complete`**. It is
+  now `complete`, so a final version like `0.11.0` publishes as a normal release and a plain
+  `pip install focus-data-toolkit` selects it. (A PEP 440 pre-release like `0.11.0rc1` is still fine
+  for a release candidate and installs with `pip install --pre`.)
 - A `v*` tag triggers **both** `release.yml` (PyPI, `pypi` environment) **and**
   `release-container.yml` (GHCR image, `ghcr` environment). Each waits for its own environment
   approval, so you can approve/hold them independently.
 
-### One-time setup (before the first tag)
+### One-time setup (done once; already configured for this repo)
 
 - [ ] **PyPI** — create the project and configure a **Trusted Publisher (OIDC)** pointing at
       `guymano/focus-data-toolkit`, workflow `release.yml`, environment `pypi`. No API token.
@@ -142,28 +144,31 @@ Current facts that shape R1:
       environment, publishes nothing**. This is the true "validate the chain in isolation" step.
       Inspect the artifacts; optionally run `scripts/verify_release.py --dist <downloaded>` locally.
 
-### Cut R1
+### Cut the release
 
-- [ ] Merge the release-prep PR (this one: `_version.py` → `0.11.0rc1`, `CHANGELOG` dated — confirm
-      the date matches the tag day).
-- [ ] Create the **signed, protected** tag `v0.11.0rc1` on the merge commit and push it:
-      `git tag -s v0.11.0rc1 -m "focus-data-toolkit 0.11.0rc1" && git push origin v0.11.0rc1`.
-- [ ] In **Actions**, approve the **`pypi`** environment when `release.yml` pauses (this is the point
-      where PyPI actually receives the package — the only step that cannot be delegated). Approve or
-      hold **`ghcr`** for the container as you wish.
+- [ ] In a PR: bump `src/focus_data_toolkit/_version.py` to the release version and move the
+      `CHANGELOG` `[Unreleased]` entries under the dated version heading (date = tag day). For a
+      final release, confirm `python scripts/verify_model_provenance.py` reports `complete`.
+- [ ] After merge, create the **signed, protected** tag **matching the version** and push it, e.g.
+      `git tag -s v0.11.0 -m "focus-data-toolkit 0.11.0" && git push origin v0.11.0`. (Or create it
+      from the GitHub "Draft a new release" UI — the release step is idempotent and attaches the
+      attested assets to it; leave "pre-release" **unchecked** for a final version.)
+- [ ] In **Actions**, approve the **`pypi`** environment when `release.yml` pauses (the point where
+      PyPI actually receives the package — the only step that cannot be delegated). Approve or hold
+      **`ghcr`** for the container as you wish.
 - [ ] Verify:
       `python scripts/verify_release.py --dist dist` and
-      `gh attestation verify focus_data_toolkit-0.11.0rc1-py3-none-any.whl --repo guymano/focus-data-toolkit`;
-      confirm the PyPI page shows the attestations and that the GitHub Release is flagged
-      **pre-release** with the provenance note.
+      `gh attestation verify focus_data_toolkit-<version>-py3-none-any.whl --repo guymano/focus-data-toolkit`;
+      confirm the PyPI page shows the attestations. A final release is **not** flagged pre-release;
+      while provenance is not `complete` it is.
 
-### Later: the first *final* release
+### Completing model provenance (prerequisite for a final release)
 
-To publish a version that `pip install` selects by default, **complete the provenance first**:
+A final (non-pre-release) version requires `provenance_status = complete`. To complete it:
 `python scripts/verify_model_provenance.py --complete /path/to/focus_1_4_data_model.xlsx` (needs the
-exact FinOps workbook + `openpyxl`), commit the flipped `model_provenance.json`, then cut a final
-tag (e.g. `v0.11.0`). The gate then allows a non-pre-release and the GitHub Release is not marked
-pre-release.
+exact FinOps workbook + `openpyxl`); it records the workbook hash + date **only if** the committed
+model reproduces byte-for-byte, then commit the updated `model_provenance.json`. (Already done for
+`0.11.0`.)
 
 ## Reproducibility of releases
 
