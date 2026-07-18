@@ -80,11 +80,21 @@ meantime).
    `verify_release.py`) — no publish, no PyPI environment.
 6. Open the release PR, get code-owner review, merge.
 7. Create the protected, signed `vX.Y.Z` tag. **`release.yml`** builds the
-   artifacts **once**, tests them, generates the SBOM, attests
-   wheel/sdist/SBOM/checksums, and publishes to PyPI via Trusted Publishing
-   after environment approval. Artifacts pass between jobs **by digest**; the
-   publish job never rebuilds. (The `release.yml` publish job also checks the tag
-   matches the built version.)
+   artifacts **once** with the hash-locked backend
+   (`constraints/build-backend.txt`, `--no-isolation` so the pinned setuptools
+   is the one that builds), tests them, generates **both SBOM profiles**
+   (`sbom.cdx.json` declared ranges; `sbom.resolved.cdx.json` exact versions,
+   hashed distributions and the transitive tree from `uv.lock`), attests every
+   asset (dists, both SBOMs, checksums, build manifest, and the three
+   provenance manifests — model / official JSON schemas / provider adapters),
+   publishes to PyPI via Trusted Publishing after environment approval, and
+   creates the **GitHub Release** on the tag carrying the full attested asset
+   set permanently (workflow artifacts expire after 7 days) with notes taken
+   from the `CHANGELOG.md` section. While model provenance is `partial`, the
+   GitHub Release is marked **pre-release** automatically, with the limitation
+   stated in the notes. Artifacts pass between jobs **by digest**; nothing
+   downstream rebuilds. (The publish job also checks the tag matches the built
+   version.)
 8. Verify the published artifacts and that the PyPI page shows the attestations:
 
    ```bash

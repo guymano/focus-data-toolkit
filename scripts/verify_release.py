@@ -126,7 +126,19 @@ def verify_release(dist: Path) -> list[str]:
         errors.append(f"CHANGELOG.md has no dated '[{committed}]' entry (still Unreleased?)")
 
     covered = _verify_checksums(dist, errors)
-    for artifact in (wheels[0].name, sdists[0].name, "sbom.cdx.json"):
+    required = (
+        wheels[0].name,
+        sdists[0].name,
+        "sbom.cdx.json",
+        "sbom.resolved.cdx.json",
+        "release-manifest.json",
+        # The three provenance manifests ship as release assets so every attestation subject
+        # (model, official JSON schemas, provider adapters) is downloadable next to the dists.
+        "model_provenance.json",
+        "json_schemas_provenance.json",
+        "adapters_provenance.json",
+    )
+    for artifact in required:
         if artifact not in covered:
             errors.append(f"{artifact} is not listed in SHA256SUMS")
 
@@ -137,7 +149,7 @@ def verify_release(dist: Path) -> list[str]:
 def _print_attestation_hints(dist: Path) -> None:
     print("\nTo verify the *published* artifacts' build provenance (needs network + gh):")
     print("  gh attestation verify <artifact> --repo guymano/focus-data-toolkit")
-    for pattern in ("*.whl", "*.tar.gz", "sbom.cdx.json"):
+    for pattern in ("*.whl", "*.tar.gz", "sbom.cdx.json", "sbom.resolved.cdx.json"):
         for p in sorted(dist.glob(pattern)):
             print(f"  gh attestation verify {p.name} --repo guymano/focus-data-toolkit")
 

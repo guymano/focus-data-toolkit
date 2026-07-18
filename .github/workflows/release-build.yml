@@ -38,8 +38,13 @@ jobs:
       - name: Pin build timestamp to the commit (reproducible builds)
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
 
-      - name: Build wheel + sdist (isolated backend, per pyproject requires)
-        run: uv run python -m build
+      - name: Install the locked build backend (exact version + hashes)
+        run: uv pip install --require-hashes -r constraints/build-backend.txt
+
+      - name: Build wheel + sdist (locked backend, no isolation)
+        # --no-isolation so the hash-verified backend installed above is the one that builds;
+        # an isolated build would re-resolve setuptools unpinned from the index.
+        run: uv run python -m build --no-isolation
 
       - name: Validate distribution metadata
         run: uv run twine check dist/*
@@ -53,11 +58,20 @@ jobs:
           v="$(uv run python -c 'import focus_data_toolkit as f; print(f.__version__)')"
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
-      - name: Generate CycloneDX SBOM (incl. FOCUS model component)
+      - name: Generate CycloneDX SBOMs (declared ranges + uv.lock-resolved profile)
         run: |
           for whl in dist/*.whl; do
             uv run python scripts/generate_sbom.py "$whl" -o dist/sbom.cdx.json
+            uv run python scripts/generate_resolved_sbom.py "$whl" -o dist/sbom.resolved.cdx.json
           done
+
+      - name: Stage the provenance manifests as release assets
+        # Model, official-JSON-schema and provider-adapter provenance travel with the dists
+        # (they also ship inside the wheel) so each is attested and downloadable per release.
+        run: |
+          cp src/focus_data_toolkit/model/model_provenance.json dist/
+          cp src/focus_data_toolkit/model/json_schemas/json_schemas_provenance.json dist/
+          cp src/focus_data_toolkit/supplement/adapters/adapters_provenance.json dist/
 
       - name: Record build manifest (toolchain + commit + ref)
         env:
@@ -83,7 +97,10 @@ jobs:
               "python": platform.python_version(),
               "platform": platform.platform(),
               "runner": "ubuntu-24.04",
-              "build_backend_requirement": "setuptools>=77 (isolated; resolved per pyproject)",
+              "build_backend": {
+                  "requirement": "constraints/build-backend.txt (hash-locked, --no-isolation)",
+                  "setuptools": ver("setuptools"),
+              },
               "tool_versions": {p: ver(p) for p in ("build", "twine")},
           }
           with open("dist/release-manifest.json", "w", encoding="utf-8") as fh:
@@ -95,7 +112,9 @@ jobs:
       - name: Generate SHA256SUMS over all artifacts
         run: |
           cd dist
-          sha256sum ./*.whl ./*.tar.gz sbom.cdx.json release-manifest.json > SHA256SUMS
+          sha256sum ./*.whl ./*.tar.gz sbom.cdx.json sbom.resolved.cdx.json \
+            release-manifest.json model_provenance.json json_schemas_provenance.json \
+            adapters_provenance.json > SHA256SUMS
           cat SHA256SUMS
 
       - name: Verify release (offline gate)

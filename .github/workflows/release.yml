@@ -41,6 +41,11 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
             dist/sbom.cdx.json
+            dist/sbom.resolved.cdx.json
+            dist/release-manifest.json
+            dist/model_provenance.json
+            dist/json_schemas_provenance.json
+            dist/adapters_provenance.json
             dist/SHA256SUMS
 
   publish:
@@ -73,3 +78,71 @@ jobs:
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
           packages-dir: dist-pypi
+
+  github-release:
+    # Persistent, attested asset set on the tag itself — workflow artifacts expire after 7
+    # days; the GitHub Release keeps the dists, both SBOM profiles, SHA256SUMS, the build
+    # manifest and the three provenance manifests permanently downloadable.
+    needs: [build, attest]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write        # create the release on the tag
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: dist
+      - name: Extract release notes from CHANGELOG
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
+
+          version = os.environ["VERSION"]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          match = re.search(
+              r"^##\s*\[" + re.escape(version) + r"\][^\n]*\n(.*?)(?=^##\s*\[|\Z)",
+              text,
+              re.MULTILINE | re.DOTALL,
+          )
+          if not match:
+              sys.exit(f"CHANGELOG.md has no '[{version}]' section")
+          with open("release-notes.md", "w", encoding="utf-8") as fh:
+              fh.write(match.group(1).strip() + "\n")
+          PY
+      - name: Honesty gate — mark the release as pre-release while provenance is partial
+        run: |
+          status="$(python3 -c 'import json; print(json.load(open("dist/model_provenance.json"))["provenance_status"])')"
+          echo "PROVENANCE_STATUS=$status" >> "$GITHUB_ENV"
+          if [ "$status" != "complete" ]; then
+            echo "PRERELEASE_FLAG=--prerelease" >> "$GITHUB_ENV"
+            {
+              echo "";
+              echo "> **Model provenance: \`$status\`.** Published as a pre-release per";
+              echo "> docs/model-provenance.md: the FOCUS model's source workbook hash is not";
+              echo "> yet archived, so end-to-end model reproducibility is not claimed.";
+            } >> release-notes.md
+          else
+            echo "PRERELEASE_FLAG=" >> "$GITHUB_ENV"
+          fi
+      - name: Create the GitHub Release with the attested assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "focus-data-toolkit $VERSION" \
+            --notes-file release-notes.md \
+            $PRERELEASE_FLAG \
+            dist/*.whl dist/*.tar.gz dist/sbom.cdx.json dist/sbom.resolved.cdx.json \
+            dist/SHA256SUMS dist/release-manifest.json dist/model_provenance.json \
+            dist/json_schemas_provenance.json dist/adapters_provenance.json
