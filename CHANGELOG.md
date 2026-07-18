@@ -9,6 +9,13 @@ policy.
 
 ## [Unreleased]
 
+### Changed
+
+- **Release workflow (`release.yml`)**: the GitHub Release step is now idempotent — if a release for
+  the tag already exists (e.g. the tag was created via the "Draft a new release" UI, which also
+  creates the release), it updates that release in place and attaches the attested assets instead of
+  failing. A plain `git push` of the tag (no pre-existing release) still creates it fresh.
+
 ## [0.11.0rc1] — 2026-07-18
 
 First release candidate published to PyPI — a **pre-release** (marked as such per the honesty gate,
