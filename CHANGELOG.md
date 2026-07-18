@@ -9,6 +9,28 @@ policy.
 
 ## [Unreleased]
 
+### Added — Runner: containerised batch image (deployment Lot B)
+
+- **OCI image** (`Dockerfile`) whose entrypoint **is** the `focus-toolkit` CLI — a container run
+  equals a CLI run (same manifests, diagnostics, checksums, exit codes; no FOCUS logic
+  duplicated). Batch-only (no HTTP server). Multi-stage build on a **digest-pinned**
+  `python:3.12-slim-bookworm`, bundling the `[parquet]` extra; **non-root** (uid 65532),
+  **read-only-rootfs compatible** (only `/work` and `/output` written), `FOCUS_TOOLKIT_WORK_DIR=/work`.
+  Exec-form entrypoint so `docker stop` (SIGTERM) cancels cleanly (exit 130, nothing partial
+  published). Volumes: `/input` (ro), `/output`, `/work`. See [docs/runner.md](docs/runner.md).
+- **Container CI** (`.github/workflows/container.yml`): builds the image on every PR / push to
+  `main` (no publish) and runs `docker run` smoke tests — non-root uid, read-only-rootfs streaming
+  Parquet convert, exit codes, SIGTERM handling — plus a trivy scan (fails on HIGH/CRITICAL). A
+  fast static test (`tests/test_container.py`) enforces the base-image digest pin, non-root user
+  and exec-form entrypoint.
+- **Container release** (`.github/workflows/release-container.yml`): on a `v*` tag, runs the same
+  release gates as the PyPI flow (tag matches `__version__`; provenance-honesty gate), builds a
+  candidate image, **scans it (trivy) before any public tag is assigned**, then publishes to
+  `ghcr.io/guymano/focus-data-toolkit` — **immutable** `<version>` and `sha-<full-commit>` tags
+  plus a **rolling** `<major>.<minor>` alias (PEP 440 tag parsing; no `latest`) — generates a
+  CycloneDX SBOM, attests build provenance and **signs with cosign** (keyless OIDC), in a
+  reviewer-gated `ghcr` environment. All actions pinned by commit SHA.
+
 ### Added — progress, cancellation, disk budgets & pipeline ergonomics (deployment Lot A)
 
 - **Progress reporting**: the streaming engine (`convert_files`) accepts an optional

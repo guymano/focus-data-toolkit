@@ -1,0 +1,7 @@
+# Runtime dependency lock for the Runner image — mirrors uv.lock so a rebuild of the same
+# release tag installs the same bytes (Codex review, PR #24). Only the [parquet] extra adds a
+# runtime dependency on Linux (tzdata is Windows-only via a marker and irrelevant in the image);
+# pyarrow has no runtime dependencies of its own, so pinning it fully pins the extra.
+#
+# Keep in sync with uv.lock when it changes (uv / Dependabot updates).
+pyarrow==25.0.0

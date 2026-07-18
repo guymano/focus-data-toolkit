@@ -336,6 +336,55 @@ rows = result.datasets["Invoice Detail"]
 print(lint_focus_1_4_structure("Invoice Detail", rows).levels_passed)
 ```
 
+## Runner (Docker / OCI)
+
+For production, automation and large volumes, the toolkit ships as a container image whose
+entrypoint **is** the `focus-toolkit` CLI — a container run is exactly a CLI run (same
+manifests, diagnostics, checksums and exit codes; no FOCUS logic is duplicated). It is
+**batch-only** (no HTTP server); status is the exit code, the logs, and the produced files.
+
+```bash
+docker run --rm \
+  --read-only --tmpfs /tmp \
+  -v "$PWD/input:/input:ro" \
+  -v "$PWD/output:/output" \
+  -v fdt-work:/work \
+  ghcr.io/guymano/focus-data-toolkit:0.10.0 \
+  convert --cost-and-usage /input/focus.csv \
+    --stream --output-format parquet --out /output/result \
+    --exit-policy pipeline
+```
+
+- **Non-root** (uid 65532) and **read-only-rootfs compatible** — only `/work` (scratch) and
+  `/output` are written. Because the atomic publish stages next to `--out`, **`/output` must be
+  writable** (mount a writable volume/dir; if you run as the image's non-root uid, ensure the
+  target is writable by it — or use a named volume, which Docker initialises writable for you).
+- `/input` is meant to be mounted **read-only**. `FOCUS_TOOLKIT_WORK_DIR=/work` and `TMPDIR=/work`
+  are preset, so all scratch stays on the `/work` volume — point it at fast local storage for big
+  files, and size it (the SQLite aggregation + bundle spill scale with invoice/period/commitment
+  cardinalities, not with the Cost-and-Usage row count).
+- **Signals**: `docker stop` sends SIGTERM to PID 1 (the CLI), which cancels cleanly — exit code
+  **130**, nothing partial published. Give it a grace period (`--stop-timeout`).
+- **Exit codes** for orchestrators: use `--exit-policy pipeline` so a functional-but-incomplete
+  strict run (3) or a synthetic run (4) reports success (0); genuine failures (1/2/5/130) stay
+  non-zero. Disk budgets: `FOCUS_TOOLKIT_MAX_WORK_BYTES`, `FOCUS_TOOLKIT_MIN_WORK_FREE_BYTES`,
+  `FOCUS_TOOLKIT_MIN_OUTPUT_FREE_BYTES` (a shortfall fails fast with `FDT-IO-005/006`, exit 5).
+
+**Single-node engine — pick the right method by scale:**
+
+| Volume | Recommended method |
+|---|---|
+| Tests / ordinary files | CLI (or the forthcoming Studio) |
+| Large files on one machine | Runner |
+| Hundreds of GB | Runner with fast local `/work` + sized resources; Parquet + partitioning + zstd |
+| Beyond a single node | Partition upstream / orchestrate multiple batches |
+
+The image is not a distributed engine. **Immutable** tags — `<version>` (e.g. `0.10.0`) and
+`sha-<full-commit>` — always identify the same bytes; the `<major>.<minor>` tag (e.g. `0.10`)
+is a **rolling** convenience alias that advances with each patch release. Every release is
+scanned (trivy) **before** its public tags are assigned, carries a CycloneDX SBOM, and is signed
+(cosign) and attested (build provenance). See [docs/runner.md](docs/runner.md) for details.
+
 ## What is really migratable
 
 | 1.4 dataset | Real migration? | Notes |
