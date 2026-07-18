@@ -3,17 +3,16 @@ name: OpenSSF Scorecard
 # Supply-chain posture *indicator* (branch protection, pinned deps, token permissions, ...).
 # A green Scorecard is a signal, not a guarantee of security.
 #
-# Scorecard publishes results to the OpenSSF (public repos only) and uploads SARIF to code
-# scanning (needs GitHub Advanced Security on private repos). Until the repo is public with code
-# scanning enabled (Ops step, see docs/releasing.md), the auto-run triggers are commented out so
-# this workflow does not fail; run it manually to test, and restore the triggers below then.
+# Scorecard publishes results to the OpenSSF (public repositories) and uploads SARIF to code
+# scanning. Requires code scanning to be enabled in the repository settings — see
+# docs/releasing.md.
 on:
   workflow_dispatch:
-  # branch_protection_rule:
-  # schedule:
-  #   - cron: "13 5 * * 1"  # weekly, Monday 05:13 UTC
-  # push:
-  #   branches: [main]
+  branch_protection_rule:
+  schedule:
+    - cron: "13 5 * * 1"  # weekly, Monday 05:13 UTC
+  push:
+    branches: [main]
 
 permissions:
   contents: read

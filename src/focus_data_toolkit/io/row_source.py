@@ -14,6 +14,7 @@ hint as Parquet output does.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -36,7 +37,7 @@ class RowSource(Protocol):
     def close(self) -> None: ...
 
 
-def is_parquet(path: str | Path) -> bool:
+def is_parquet(path: str | os.PathLike[str]) -> bool:
     """Whether ``path`` is a Parquet file (magic bytes; ``.parquet`` suffix as fallback)."""
     p = Path(path)
     try:
@@ -58,7 +59,7 @@ def _hive_partition_columns(base_dir: Path) -> tuple[str, ...]:
         current = subdirs[0]
 
 
-def open_row_source(path: str | Path, *, dataset: str | None = None) -> RowSource:
+def open_row_source(path: str | os.PathLike[str], *, dataset: str | None = None) -> RowSource:
     """Open ``path`` as a :class:`RowSource`, auto-detecting the physical format.
 
     A file is sniffed as CSV (``.gz`` ok) or Parquet; a directory is read as a
@@ -99,7 +100,9 @@ def _parquet_errors(path: Path) -> Iterator[None]:
         raise MalformedRecordError(f"cannot read Parquet source {path}: {exc}") from exc
 
 
-def read_source_rows(path: str | Path, *, dataset: str | None = None) -> list[dict[str, str]]:
+def read_source_rows(
+    path: str | os.PathLike[str], *, dataset: str | None = None
+) -> list[dict[str, str]]:
     """Materialise a CSV/Parquet source into a list of dict rows (eager-path input)."""
     reader = open_row_source(path, dataset=dataset)
     try:

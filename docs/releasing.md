@@ -50,20 +50,16 @@ these are in place:
       and dependency-review can run (see below).
 - [ ] **CODEOWNERS** confirmed and "require review from Code Owners" turned on.
 
-## Enabling the gated security workflows
+## The security workflows
 
-`.github/workflows/codeql.yml` and `scorecard.yml` are currently gated behind
-`workflow_dispatch` only. They upload results to GitHub **code scanning**, which
-requires the repository to be public (or to have GitHub Advanced Security).
-`actions/dependency-review-action` similarly needs the **Dependency Graph**.
-
-Once the repository is public with code scanning / Dependency Graph enabled
-(Operationally Ready checklist above):
-
-1. In `codeql.yml` and `scorecard.yml`, restore the real triggers (`push` /
-   `pull_request` / `schedule` / `branch_protection_rule`) that are commented out.
-2. Optionally re-add a `dependency-review` job to `security.yml` (dependency CVEs
-   are already covered by `pip-audit` + Dependabot in the meantime).
+`.github/workflows/codeql.yml` and `scorecard.yml` run on `push` / `pull_request`
+/ `schedule` (plus `branch_protection_rule` for Scorecard). They upload results
+to GitHub **code scanning**, which must be enabled in the repository settings
+(Operationally Ready checklist above) for the uploads to land.
+`actions/dependency-review-action` similarly needs the **Dependency Graph**; a
+`dependency-review` job can be added to `security.yml` once it is enabled
+(dependency CVEs are already covered by `pip-audit` + Dependabot in the
+meantime).
 
 ## Cutting a release
 

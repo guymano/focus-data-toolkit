@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # type-only: providers.profile imports this module at runtime
+    from focus_data_toolkit.generators.providers.profile import ServiceSpec
 
 
 @dataclass(frozen=True)
@@ -23,7 +27,7 @@ class ResourceRef:
     the callables never draw from the RNG.
     """
 
-    spec: object  # ServiceSpec (avoids a circular import with providers.profile)
+    spec: ServiceSpec  # type-only import above avoids the runtime circular import
     region_id: str
     region_name: str
     billing_id: str

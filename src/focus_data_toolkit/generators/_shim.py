@@ -8,6 +8,7 @@ Each ``generate_<provider>_focus_<version>.py`` module is a ~10-line shim that c
 from __future__ import annotations
 
 from functools import partial
+from typing import Any
 
 from focus_data_toolkit.generators.engine import serialize
 from focus_data_toolkit.generators.engine.ladder import generate_rows
@@ -15,9 +16,13 @@ from focus_data_toolkit.generators.providers.profile import ProviderProfile
 from focus_data_toolkit.generators.versions.adapter import VersionAdapter
 
 
-def build_module_api(profile: ProviderProfile, adapter: VersionAdapter) -> dict[str, object]:
-    """Return the names a generator shim module must expose, bound to (profile, adapter)."""
-    api: dict[str, object] = {
+def build_module_api(profile: ProviderProfile, adapter: VersionAdapter) -> dict[str, Any]:
+    """Return the names a generator shim module must expose, bound to (profile, adapter).
+
+    ``Any``-valued on purpose: the entries are heterogeneous module attributes (tuples,
+    callables, profile objects) that shim modules publish verbatim via ``globals().update``.
+    """
+    api: dict[str, Any] = {
         "COLUMNS": adapter.columns,
         "DEFAULT_ROWS": serialize.DEFAULT_ROWS,
         "DEFAULT_SEED": adapter.default_seed,

@@ -8,12 +8,17 @@ dispatches to a scenario builder via the version adapter's ladder, preserving th
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 
 from focus_data_toolkit.generators.engine import scenarios_core
 
 DEFAULT_ROWS = 1000
 
-_BUILDERS = {
+# A builder returns either one row or a whole group of rows; the branch's ``group`` flag
+# (mirrored in the isinstance checks below) says which, so the union is narrowed per call.
+_Builder = Callable[..., "dict[str, str] | list[dict[str, str]]"]
+
+_BUILDERS: dict[str, _Builder] = {
     "credit": scenarios_core.credit_row,
     "tax": scenarios_core.tax_row,
     "purchase": scenarios_core.standalone_purchase_row,
@@ -55,8 +60,12 @@ def generate_rows(
                 break  # first threshold match wins (elif semantics); guard failure -> Usage
         if chosen is None:
             out.append(scenarios_core.usage_row(rng, i, remaining, profile, adapter))
-        elif chosen.group:
-            out.extend(_BUILDERS[chosen.kind](rng, i, remaining, profile, adapter))
+            continue
+        built = _BUILDERS[chosen.kind](rng, i, remaining, profile, adapter)
+        if chosen.group:
+            assert isinstance(built, list), chosen.kind
+            out.extend(built)
         else:
-            out.append(_BUILDERS[chosen.kind](rng, i, remaining, profile, adapter))
+            assert isinstance(built, dict), chosen.kind
+            out.append(built)
     return out[:rows]

@@ -20,6 +20,7 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Office/Business :: Financial",
     "Typing :: Typed",
 ]
@@ -102,14 +103,6 @@ python_version = "3.11"
 ignore_missing_imports = true  # pyarrow / focus_validator ship no stubs we depend on
 warn_redundant_casts = true
 warn_unused_ignores = true
-
-[[tool.mypy.overrides]]
-# Known type-annotation gaps, runtime-covered by the test suite + golden snapshots and tracked
-# for a dedicated typing pass: the bounded-memory streaming staging path (Optional narrowing on
-# the SQLite-backed stager) and the composition-based generators (dynamic provider/version
-# profiles). Excluded from the gate so mypy stays green and meaningful over the rest of the core.
-module = ["focus_data_toolkit.convert.streaming", "focus_data_toolkit.generators.*"]
-ignore_errors = true
 
 [tool.coverage.run]
 source = ["focus_data_toolkit"]
