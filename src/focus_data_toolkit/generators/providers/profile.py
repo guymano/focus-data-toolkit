@@ -13,8 +13,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from focus_data_toolkit.generators.engine.context import ResourceRef, RowContext
-
 
 @dataclass(frozen=True)
 class ServiceSpec:
@@ -38,6 +36,33 @@ class ServiceSpec:
     commitment_eligible: bool
     id_fields: Mapping[str, object] = field(default_factory=dict)
     sku_details: Mapping[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RowContext:
+    """Identity carried from ``base_row`` into a scenario (the group's billing account)."""
+
+    billing_id: str
+    sub_id: str
+    sub_name: str
+
+
+@dataclass(frozen=True)
+class ResourceRef:
+    """Everything a provider's ``resource_id`` callable might need.
+
+    Each provider reads only the fields it uses (AWS: region + billing account; Azure:
+    subscription id + name; GCP: project id), so the callable signature stays uniform and
+    the callables never draw from the RNG.
+    """
+
+    spec: ServiceSpec
+    region_id: str
+    region_name: str
+    billing_id: str
+    sub_id: str
+    sub_name: str
+    resource_name: str
 
 
 @dataclass(frozen=True)
