@@ -9,6 +9,39 @@ policy.
 
 ## [Unreleased]
 
+### Added — progress, cancellation, disk budgets & pipeline ergonomics (deployment Lot A)
+
+- **Progress reporting**: the streaming engine (`convert_files`) accepts an optional
+  `progress` callback receiving throttled `ProgressEvent`s per phase (`READING`,
+  `TRANSFORMING`, `AGGREGATING`, `WRITING`, `VALIDATING`, `PUBLISHING`) with a completed
+  count, an optional total, a unit (`rows`/`bytes`) and a message — derived without
+  materialising data (CSV byte cursor / Parquet footer row count). `focus-toolkit convert
+  --progress` renders a single throttled status line on stderr. All hooks are opt-in and
+  keyword-only; output is byte-identical with or without them.
+- **Cooperative cancellation**: `convert_files(..., cancel=...)` checks a predicate between
+  rows and validation passes and raises `ConversionCancelled` — the atomic staging directory
+  is removed, so nothing partial is ever published. The CLI maps SIGINT/SIGTERM to a clean
+  cancel (exit code **130**), so `Ctrl-C` and `docker stop` unwind cleanly instead of dying
+  mid-write.
+- **Separate disk budgets** (`focus_data_toolkit.runtime`): the scratch filesystem and the
+  output filesystem are budgeted independently via `FOCUS_TOOLKIT_WORK_DIR`,
+  `FOCUS_TOOLKIT_MAX_WORK_BYTES`, `FOCUS_TOOLKIT_MIN_WORK_FREE_BYTES` and
+  `FOCUS_TOOLKIT_MIN_OUTPUT_FREE_BYTES` (`FOCUS_TOOLKIT_LOG_LEVEL` too). A best-effort
+  pre-flight (estimate with a safety margin) plus periodic in-run checks fail fast with a
+  structured `FDT-IO-005` (output) / `FDT-IO-006` (work / temp budget) diagnostic and CLI
+  exit code **5**, instead of a raw `OSError` mid-run. `WORK_DIR` relocates the SQLite
+  aggregation + bundle-spill scratch off the output disk (business artifacts stay
+  byte-identical; scratch is always cleaned up).
+- **Pipeline-friendly exit codes**: `focus-toolkit convert --exit-policy pipeline` maps the
+  functional-but-complete outcomes (3 = strict incomplete, 4 = synthetic assumptions) to 0,
+  so orchestrators (Kubernetes / Airflow / Jenkins / AWS Batch) don't flag a legitimate run
+  failed. The default `detailed` policy keeps the historic codes; full status stays in the
+  manifest and `_run.json`.
+- **New CLI commands**: `focus-toolkit detect` (dataset/version of a file header, text/JSON),
+  `focus-toolkit validate-bundle` (cross-dataset validation gate over explicit per-dataset
+  files or an auto-detected `--directory`; ambiguous combinations refused), and
+  `focus-toolkit version`. New SDK exports: `ProgressEvent`, `ConversionCancelled`.
+
 ### Added — provider-native supplement adapters
 
 - **Adapters** translate documented cloud-provider export formats into the

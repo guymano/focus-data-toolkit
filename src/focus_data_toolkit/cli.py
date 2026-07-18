@@ -9,22 +9,36 @@ Subcommands:
   FOCUS 1.4 datasets to be produced factually from a given source.
 * ``supplements`` — pre-flight ``validate`` supplement files against a source, and
   list the provider-native export ``adapters`` (AWS / Azure / GCP).
+* ``detect``      — detect the FOCUS dataset / version of a file's header.
 * ``validate``    — validate a produced file against the built-in FOCUS 1.4 model,
   or run the official FinOps validator (``--official``).
+* ``validate-bundle`` — run the cross-dataset validation gate over a bundle of
+  FOCUS 1.4 datasets (explicit per-dataset files or an auto-detected directory).
+* ``version``     — print the toolkit version and optional-extra availability.
 * ``clean``       — recover interrupted publishes and remove leftover staging
   directories.
+
+Exit codes (``convert``): 0 ok; 1 lint/bundle/write failure; 2 invalid input/args;
+3 strict mode left datasets NOT_PRODUCED; 4 synthetic assumptions present; 5 disk
+budget / free-space exhaustion; 130 cancelled (SIGINT/SIGTERM). ``--exit-policy
+pipeline`` maps 3 and 4 to 0 for orchestrators.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import shutil
+import signal
 import sys
+import threading
 from pathlib import Path
 
 from focus_data_toolkit.convert import (
     OUTPUT_FORMATS,
     AtomicWriteError,
+    ConversionCancelled,
     ConversionError,
     DestinationExistsError,
     OnExists,
@@ -40,22 +54,78 @@ from focus_data_toolkit.manifest import render as render_manifest
 from focus_data_toolkit.model.capabilities import KNOWN_CONDITIONS, CapabilityProfile
 from focus_data_toolkit.model.validator import lint_focus_1_4_structure, resolve_dataset
 from focus_data_toolkit.modes import Mode
+from focus_data_toolkit.runtime import ResourceLimitError, parse_size
 
 
 def _parse_size(value: str | None) -> int | None:
     """Parse a byte size for --target-file-size (e.g. ``128MB``, ``512KB``, or a byte count)."""
-    if not value:
-        return None
-    text = value.strip().upper()
     try:
-        for suffix, mult in (("KB", 1000), ("MB", 1000**2), ("GB", 1000**3), ("B", 1)):
-            if text.endswith(suffix):
-                return int(float(text[: -len(suffix)]) * mult)
-        return int(text)
+        return parse_size(value)
     except ValueError as exc:
         raise ConversionError(
             f"invalid --target-file-size {value!r}: use e.g. 128MB, 512KB, or a byte count"
         ) from exc
+
+
+def _apply_exit_policy(code: int, policy: str) -> int:
+    """Map functional exit codes to a pipeline-friendly scheme when requested.
+
+    In ``pipeline`` mode a functional-but-complete outcome — ``3`` (strict mode left some
+    datasets NOT_PRODUCED) or ``4`` (synthetic assumptions present) — is reported as success
+    (``0``), so orchestrators (Kubernetes / Airflow / Jenkins / AWS Batch), which treat any
+    non-zero code as failure, do not mark a legitimate run failed. Genuine failures (``1`` /
+    ``2`` / ``5`` / ``130``) stay non-zero. ``detailed`` (default) keeps the historic codes;
+    the full functional status is always in the manifest and the ``_run.json`` sidecar.
+    """
+    if policy == "pipeline" and code in (3, 4):
+        return 0
+    return code
+
+
+@contextlib.contextmanager
+def _cancel_on_signals():
+    """Yield a threading.Event set by SIGINT/SIGTERM, restoring prior handlers on exit.
+
+    A batch run in a container receives SIGTERM on ``docker stop`` / pod eviction and SIGINT
+    on Ctrl-C; turning both into a cooperative cancel lets the streaming engine unwind cleanly
+    (staging removed, nothing published) instead of dying mid-write. Signal handlers can only
+    be installed on the main thread, so off-main-thread callers (e.g. a server) silently get an
+    event they can set themselves.
+    """
+    event = threading.Event()
+
+    def _handler(_signum, _frame):
+        event.set()
+
+    previous: dict = {}
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            previous[sig] = signal.signal(sig, _handler)
+        except (ValueError, OSError):  # not on the main thread
+            pass
+    try:
+        yield event
+    finally:
+        for sig, prev in previous.items():
+            with contextlib.suppress(ValueError, OSError):
+                signal.signal(sig, prev)
+
+
+def _stderr_progress():
+    """Return a ProgressCallback that renders a single throttled status line on stderr."""
+    state = {"width": 0}
+
+    def render(event) -> None:
+        pct = "" if event.fraction is None else f" {event.fraction * 100:5.1f}%"
+        total = "" if event.total is None else f"/{event.total:,}"
+        message = f" - {event.message}" if event.message else ""
+        line = f"{event.phase} {event.completed:,}{total} {event.unit}{pct}{message}"
+        pad = max(0, state["width"] - len(line))
+        state["width"] = len(line)
+        sys.stderr.write("\r" + line + " " * pad)
+        sys.stderr.flush()
+
+    return render
 
 
 def _cmd_generate(args: argparse.Namespace) -> int:
@@ -195,25 +265,40 @@ def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
     from focus_data_toolkit.supplement import SupplementError
 
     partition_by = [c.strip() for c in (args.partition_by or "").split(",") if c.strip()]
+    progress = _stderr_progress() if getattr(args, "progress", False) else None
     try:
         target_file_size = _parse_size(args.target_file_size)
-        out = convert_files(
-            args.cost_and_usage,
-            args.out,
-            contract_commitment=args.contract_commitment,
-            source_version=args.source_version,
-            source_dataset=args.source_dataset,
-            mode=mode,
-            validate=not args.no_validate,
-            on_exists=OnExists(args.on_exists),
-            keep_temp=args.keep_temp,
-            output_format=args.output_format,
-            partition_by=partition_by,
-            compression=args.compression,
-            target_file_size=target_file_size,
-            capabilities=_capabilities(args),
-            supplements=_load_supplements(args),
-        )
+        with _cancel_on_signals() as cancel_event:
+            out = convert_files(
+                args.cost_and_usage,
+                args.out,
+                contract_commitment=args.contract_commitment,
+                source_version=args.source_version,
+                source_dataset=args.source_dataset,
+                mode=mode,
+                validate=not args.no_validate,
+                on_exists=OnExists(args.on_exists),
+                keep_temp=args.keep_temp,
+                output_format=args.output_format,
+                partition_by=partition_by,
+                compression=args.compression,
+                target_file_size=target_file_size,
+                capabilities=_capabilities(args),
+                supplements=_load_supplements(args),
+                progress=progress,
+                cancel=cancel_event.is_set,
+            )
+    except ConversionCancelled:
+        # Subclass of ConversionError — must be caught first. Nothing was published.
+        if progress:
+            sys.stderr.write("\n")
+        print("cancelled: no output written", file=sys.stderr)
+        return 130
+    except ResourceLimitError as exc:
+        if progress:
+            sys.stderr.write("\n")
+        print(f"error: [{exc.diagnostic.code}] {exc.diagnostic.message}", file=sys.stderr)
+        return 5
     except SupplementError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -225,6 +310,9 @@ def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
     except AtomicWriteError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+
+    if progress:
+        sys.stderr.write("\n")
 
     from focus_data_toolkit.manifest import NOT_PRODUCED
 
@@ -246,11 +334,11 @@ def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
             "values and are NOT fully FOCUS-conformant. See the manifest.",
             file=sys.stderr,
         )
-        return 4
+        return _apply_exit_policy(4, args.exit_policy)
     if mode is Mode.STRICT and any(
         e.get("status") == NOT_PRODUCED for e in manifest["datasets"].values()
     ):
-        return 3
+        return _apply_exit_policy(3, args.exit_policy)
     return 0
 
 
@@ -343,9 +431,9 @@ def _cmd_convert(args: argparse.Namespace) -> int:
             "values and are NOT fully FOCUS-conformant. See the manifest.",
             file=sys.stderr,
         )
-        return 4
+        return _apply_exit_policy(4, args.exit_policy)
     if mode is Mode.STRICT and result.not_produced:
-        return 3
+        return _apply_exit_policy(3, args.exit_policy)
     return 0
 
 
@@ -376,6 +464,182 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     for message in report.messages()[:50]:
         print(f"  {message}")
     return 0 if report.ok else 1
+
+
+def _cmd_detect(args: argparse.Namespace) -> int:
+    from focus_data_toolkit.schema import detect_focus_schema
+
+    try:
+        header = _read_header(args.file)
+    except MalformedRecordError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    try:
+        forced_dataset = resolve_dataset(args.dataset.replace("-", " ")) if args.dataset else None
+        result = detect_focus_schema(header, dataset=forced_dataset, version=args.version)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    if args.format == "json":
+        print(json.dumps(result.as_dict(), indent=2, sort_keys=True))
+        return 0
+    print(
+        f"{args.file}: dataset={result.dataset or '?'} "
+        f"version={result.detected_version or '?'} "
+        f"confidence={result.confidence} (score {result.score:.3f})"
+    )
+    if result.missing_columns:
+        print(f"  missing: {', '.join(result.missing_columns)}")
+    if result.unknown_columns:
+        print(f"  unknown: {', '.join(result.unknown_columns)}")
+    if result.extension_columns:
+        print(f"  x_ extensions: {', '.join(result.extension_columns)}")
+    for note in result.notes:
+        print(f"  note: {note}")
+    return 0
+
+
+class _FileRows:
+    """Re-iterable row source over a bundle input file (CSV/Parquet) for ``validate-bundle``.
+
+    ``validate_dataset_bundle`` makes several independent forward passes, so each ``__iter__``
+    opens a fresh reader — the dataset is never materialised, keeping memory bounded.
+    """
+
+    def __init__(self, path: str, dataset: str) -> None:
+        self._path = path
+        self._dataset = dataset
+
+    def __iter__(self):
+        from focus_data_toolkit.io.row_source import open_row_source
+
+        with contextlib.closing(open_row_source(self._path, dataset=self._dataset)) as reader:
+            for record in reader:
+                yield record.values
+
+
+def _detect_bundle_dir(directory: str) -> dict[str, str]:
+    """Map each FOCUS dataset in ``directory`` to its file path (auto-detected from headers).
+
+    Raises ``ValueError`` when two files look like the same dataset (ambiguous) or none are FOCUS.
+    """
+    from focus_data_toolkit.schema import detect_focus_schema
+
+    base = Path(directory)
+    if not base.is_dir():
+        raise ValueError(f"not a directory: {directory}")
+    found: dict[str, Path] = {}
+    for path in sorted(base.iterdir()):
+        if path.name.startswith(".") or path.name == "SHA256SUMS":
+            continue
+        if path.is_file() and path.suffix.lower() not in (".csv", ".gz", ".parquet"):
+            continue
+        # A directory is a candidate only if it looks like a Hive-partitioned Parquet dataset
+        # (COL=value subdirectories) — which open_row_source reads natively. Without this, a
+        # partitioned Cost and Usage dataset would be skipped and its cross-dataset checks lost.
+        if path.is_dir() and not _looks_partitioned(path):
+            continue
+        try:
+            header = _read_header(str(path))
+        except (MalformedRecordError, OSError):
+            continue
+        result = detect_focus_schema(header)
+        if result.dataset is None or result.confidence == "LOW":
+            continue
+        if result.detected_version != "1.4":
+            continue  # validate-bundle validates a FOCUS 1.4 bundle; skip 1.2/1.3 exports
+        if result.dataset in found:
+            raise ValueError(
+                f"ambiguous bundle: {found[result.dataset].name} and {path.name} both look "
+                f"like {result.dataset}; use the per-dataset file flags instead"
+            )
+        found[result.dataset] = path
+    if not found:
+        raise ValueError(f"no FOCUS 1.4 datasets detected under {directory}")
+    return {name: str(path) for name, path in found.items()}
+
+
+def _looks_partitioned(directory: Path) -> bool:
+    """Whether ``directory`` has ``COL=value`` subdirectories (a Hive-partitioned dataset root)."""
+    try:
+        return any(child.is_dir() and "=" in child.name for child in directory.iterdir())
+    except OSError:
+        return False
+
+
+def _cmd_validate_bundle(args: argparse.Namespace) -> int:
+    import tempfile
+
+    from focus_data_toolkit.storage.spill import SpillableIndexPool
+    from focus_data_toolkit.validate.bundle import validate_dataset_bundle
+
+    explicit = {
+        "Cost and Usage": args.cost_and_usage,
+        "Contract Commitment": args.contract_commitment,
+        "Billing Period": args.billing_period,
+        "Invoice Detail": args.invoice_detail,
+    }
+    given = {name: path for name, path in explicit.items() if path}
+    if args.directory and given:
+        print(
+            "error: use either --directory or the per-dataset file flags, not both",
+            file=sys.stderr,
+        )
+        return 2
+    if not args.directory and not given:
+        print(
+            "error: provide --directory or at least one per-dataset file flag (e.g. "
+            "--cost-and-usage FILE)",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        mapping = _detect_bundle_dir(args.directory) if args.directory else given
+    except (MalformedRecordError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    bundle = {name: _FileRows(path, name) for name, path in mapping.items()}
+    tmpdir = tempfile.mkdtemp(prefix="fdt-bundle-")
+    spill = SpillableIndexPool(Path(tmpdir) / "_bundle.sqlite")
+    try:
+        report = validate_dataset_bundle(bundle, index_factory=spill.make_map)
+    except MalformedRecordError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        spill.close()
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    if args.report:
+        Path(args.report).write_text(
+            json.dumps(report.as_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        # stderr, so `--format json` keeps stdout a single parseable JSON document.
+        print(f"wrote {args.report}", file=sys.stderr)
+    if args.format == "json":
+        print(json.dumps(report.as_dict(), indent=2, sort_keys=True))
+    else:
+        print(f"validated: {', '.join(sorted(mapping))}")
+        print(report.format())
+    return 0 if report.ok else 1
+
+
+def _cmd_version(args: argparse.Namespace) -> int:
+    from focus_data_toolkit import __version__
+
+    try:
+        import pyarrow  # noqa: F401
+
+        parquet = "available"
+    except ModuleNotFoundError:
+        parquet = "not installed (pip install 'focus-data-toolkit[parquet]')"
+    print(f"focus-data-toolkit {__version__}")
+    print(f"  python {sys.version.split()[0]}")
+    print(f"  parquet: {parquet}")
+    return 0
 
 
 def _cmd_clean(args: argparse.Namespace) -> int:
@@ -475,6 +739,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--keep-temp",
         action="store_true",
         help="keep the staging directory on error for diagnosis",
+    )
+    conv.add_argument(
+        "--progress",
+        action="store_true",
+        help="print bounded-memory conversion progress (per phase) to stderr; applies to the "
+        "streaming engine (--stream / --output-format parquet / --partition-by)",
+    )
+    conv.add_argument(
+        "--exit-policy",
+        choices=("detailed", "pipeline"),
+        default="detailed",
+        help="detailed (default): distinct exit codes (3=strict incomplete, 4=synthetic "
+        "assumptions). pipeline: exit 0 for any functional completion, non-zero only on a real "
+        "failure — for orchestrators (Kubernetes/Airflow/Jenkins/AWS Batch) that treat any "
+        "non-zero code as failure",
     )
     conv.add_argument(
         "--output-format",
@@ -582,6 +861,38 @@ def build_parser() -> argparse.ArgumentParser:
         "--focus-version", help="rule-model version for --official (e.g. 1.2.0.1)"
     )
     val.set_defaults(func=_cmd_validate)
+
+    det = sub.add_parser(
+        "detect", help="detect the FOCUS dataset/version of a file's header"
+    )
+    det.add_argument("file", help="CSV (gzip ok) or Parquet file")
+    det.add_argument("--dataset", help="force the dataset instead of auto-detecting it")
+    det.add_argument("--version", help="force the FOCUS version (1.2/1.3/1.4)")
+    det.add_argument("--format", choices=("text", "json"), default="text")
+    det.set_defaults(func=_cmd_detect)
+
+    vb = sub.add_parser(
+        "validate-bundle",
+        help="cross-dataset validation of a FOCUS 1.4 bundle (referential integrity, "
+        "reconciliation, allocation, corrections, lifecycle)",
+    )
+    vb.add_argument(
+        "--directory",
+        help="directory of FOCUS 1.4 dataset files; datasets are auto-detected from headers "
+        "(mutually exclusive with the per-dataset flags below)",
+    )
+    vb.add_argument("--cost-and-usage", help="Cost and Usage file (CSV, gzip ok, or Parquet)")
+    vb.add_argument("--contract-commitment", help="Contract Commitment file")
+    vb.add_argument("--billing-period", help="Billing Period file")
+    vb.add_argument("--invoice-detail", help="Invoice Detail file")
+    vb.add_argument("--report", help="write the bundle report JSON to this path")
+    vb.add_argument("--format", choices=("text", "json"), default="text")
+    vb.set_defaults(func=_cmd_validate_bundle)
+
+    ver = sub.add_parser(
+        "version", help="print the toolkit version and optional-extra availability"
+    )
+    ver.set_defaults(func=_cmd_version)
 
     clean = sub.add_parser(
         "clean",

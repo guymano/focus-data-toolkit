@@ -111,6 +111,15 @@ class ConversionError(ValueError):
     """Raised when the source cannot be converted."""
 
 
+class ConversionCancelled(ConversionError):
+    """Raised cooperatively when a cancel predicate returns True mid-conversion.
+
+    Subclasses :class:`ConversionError` so existing ``except ConversionError`` handlers
+    still clean up (the atomic staging directory is removed on the way out, so nothing is
+    published); the CLI catches it first to report a distinct cancelled exit code.
+    """
+
+
 @dataclass
 class ConversionResult:
     """Outcome of a 1.x -> 1.4 conversion."""
@@ -680,6 +689,7 @@ __all__ = [
     "DATASET_FILENAMES",
     "OUTPUT_FORMATS",
     "AtomicWriteError",
+    "ConversionCancelled",
     "ConversionError",
     "ConversionResult",
     "DestinationExistsError",

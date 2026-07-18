@@ -79,6 +79,8 @@ CATALOG: dict[str, CodeSpec] = dict([
     _s("FDT-IO-002", Severity.ERROR, "decimal value exceeds the target Parquet scale/precision"),
     _s("FDT-IO-003", Severity.ERROR, "destination already exists"),
     _s("FDT-IO-004", Severity.WARNING, "high-cardinality Parquet partition key (many small files)"),
+    _s("FDT-IO-005", Severity.ERROR, "insufficient free space on the output filesystem"),
+    _s("FDT-IO-006", Severity.ERROR, "insufficient work-filesystem space or temp budget exceeded"),
 ])
 
 

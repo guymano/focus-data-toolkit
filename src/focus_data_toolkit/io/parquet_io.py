@@ -304,6 +304,14 @@ class ParquetRowReader:
         self.source_columns: tuple[str, ...] = tuple(self._file.schema_arrow.names)
         self._dataset = self._resolve_dataset(dataset)
 
+    @property
+    def expected_rows(self) -> int | None:
+        """Total rows, read cheaply from the Parquet footer (no data load) — for progress."""
+        try:
+            return int(self._file.metadata.num_rows)
+        except (OSError, ValueError, AttributeError):
+            return None
+
     def _resolve_dataset(self, dataset: str | None) -> str:
         if dataset is not None:
             return resolve_dataset(dataset)
@@ -455,6 +463,14 @@ class PartitionedParquetReader:
         )
         self._ds = pds.dataset(str(base_dir), format="parquet", partitioning=partitioning)
         self.source_columns: tuple[str, ...] = tuple(self._ds.schema.names)
+
+    @property
+    def expected_rows(self) -> int | None:
+        """Total rows across the partition tree, from footer metadata — for progress."""
+        try:
+            return int(self._ds.count_rows())
+        except (OSError, ValueError, AttributeError):
+            return None
 
     def __iter__(self) -> Iterator[Record]:
         model_cols = set(load_model()["datasets"][self._dataset]["columns"])
