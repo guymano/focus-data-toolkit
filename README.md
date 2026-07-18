@@ -90,9 +90,10 @@ the standard library alone (the streaming state uses built-in `sqlite3`). Extras
 ### With uv
 
 ```bash
-uv tool install focus-data-toolkit          # standalone CLI on your PATH
-uv add "focus-data-toolkit[parquet]"        # as a project dependency
-uvx focus-toolkit --help                    # one-off run, nothing installed
+uv tool install focus-data-toolkit                     # standalone CLI on your PATH
+uv add "focus-data-toolkit[parquet]"                   # as a project dependency
+uvx --from focus-data-toolkit focus-toolkit --help     # one-off run, nothing installed
+# (--from is needed because the command name differs from the package name)
 ```
 
 ### From source
@@ -106,15 +107,26 @@ pip install .                                # or: pip install ".[all]"
 For a development install (editable, with the test/lint toolchain), see
 [Development](#development). Release artifacts (wheel, sdist) attached to GitHub Releases
 ship with `SHA256SUMS`, two SBOM profiles and GitHub Artifact Attestations — verify a
-downloaded wheel with `sha256sum -c SHA256SUMS` and
-`gh attestation verify <wheel> --repo guymano/focus-data-toolkit`, then install it directly:
-`pip install ./focus_data_toolkit-X.Y.Z-py3-none-any.whl`.
+downloaded wheel and install it directly:
+
+```bash
+# SHA256SUMS covers every release asset; check just the wheel's line:
+grep "focus_data_toolkit-X.Y.Z-py3-none-any.whl" SHA256SUMS | sha256sum -c -
+gh attestation verify focus_data_toolkit-X.Y.Z-py3-none-any.whl --repo guymano/focus-data-toolkit
+pip install ./focus_data_toolkit-X.Y.Z-py3-none-any.whl
+```
+
+(To verify the whole asset set at once, download all files listed in `SHA256SUMS` into one
+directory and run `sha256sum -c SHA256SUMS` there.)
 
 ### Verify the installation
 
 ```bash
 focus-toolkit --help                                         # CLI is on the PATH
+# venv/project installs only — a `uv tool install` lives in its own isolated
+# environment, so check it via the tool env instead:
 python -c "import focus_data_toolkit as f; print(f.__version__)"
+#   uv tool run --from focus-data-toolkit python -c "import focus_data_toolkit as f; print(f.__version__)"
 # end-to-end smoke test (deterministic, ~1 s):
 focus-toolkit generate --provider aws --focus-version 1.3 --rows 10 --out /tmp/fdt-smoke
 focus-toolkit convert --cost-and-usage /tmp/fdt-smoke/focus_1_3_cost_and_usage_aws.csv \
