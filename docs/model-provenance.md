@@ -112,6 +112,7 @@ mismatch and checks:
   Schema. The standalone stdlib checks above run everywhere, with no extra
   dependency.
 
-What is **not** verifiable from this repository alone: the source workbook hash
-(hence `partial`). Reproducing the model end-to-end requires obtaining the same
-workbook revision from the FinOps Foundation.
+Since 0.11.0 the source workbook hash **is** recorded (`source.artifact_sha256`,
+status `complete`), so the model chain is verifiable end-to-end. The workbook
+itself is still not redistributed here: obtain the same revision from the FinOps
+Foundation and check it against that hash to reproduce the model byte-for-byte.
