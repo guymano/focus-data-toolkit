@@ -605,6 +605,12 @@ def convert_files(
             if (synthetic or supplements)
             else None
         )
+        if index is not None:
+            # Guarantee the SQLite handle is closed before staging / work-dir cleanup on EVERY
+            # exit path (a mid-run cancel or budget abort would otherwise leave it open, and
+            # Windows cannot remove an open file). close() is idempotent, so the explicit close
+            # on the success path is harmless.
+            stack.callback(index.close)
 
         provider_seen: dict[tuple[str, str], ProviderContext] = {}
         billing_seen: dict[tuple, BillingContext] = {}
@@ -877,6 +883,7 @@ def convert_files(
             spill_db_path = _scratch_path(_BUNDLE_DB)
             scratch_paths.append(spill_db_path)  # tracked for the work budget in both configs
             spill = SpillableIndexPool(spill_db_path)
+            stack.callback(spill.close)  # backstop: close before cleanup on any exit (Windows)
             try:
                 bundle_report = validate_dataset_bundle(
                     bundle_rows, index_factory=spill.make_map

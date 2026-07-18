@@ -45,7 +45,7 @@ def test_config_from_env_reads_separate_budgets():
             "FOCUS_TOOLKIT_MIN_OUTPUT_FREE_BYTES": "1GB",
         }
     )
-    assert str(cfg.work_dir) == "/scratch"
+    assert cfg.work_dir == Path("/scratch")  # compare Path, not str (Windows uses backslashes)
     assert cfg.max_work_bytes == 10_000_000
     assert cfg.min_work_free_bytes == 5_000_000
     assert cfg.min_output_free_bytes == 1_000_000_000

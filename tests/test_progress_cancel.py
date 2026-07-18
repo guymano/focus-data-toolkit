@@ -76,6 +76,34 @@ def test_cancel_before_first_row(tmp_path):
     assert not out.exists()
 
 
+def test_cancel_closes_scratch_index(tmp_path, monkeypatch):
+    # Regression (Windows): the SQLite scratch index must be closed on the cancel path before
+    # staging is removed — Windows cannot rmtree a directory containing an open file.
+    import focus_data_toolkit.convert.streaming as streaming
+
+    real_opener = streaming.ExternalIndexOpener
+    state = {"closed": False}
+
+    class _Spy:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+        def close(self):
+            state["closed"] = True
+            self._inner.close()
+
+    monkeypatch.setattr(streaming, "ExternalIndexOpener", lambda p: _Spy(real_opener(p)))
+    with pytest.raises(ConversionCancelled):
+        convert_files(
+            _cau(tmp_path), tmp_path / "out", mode="synthetic",
+            cancel=lambda: True, progress_interval=50,
+        )
+    assert state["closed"], "scratch index must be closed on cancel before staging cleanup"
+
+
 def test_csv_reader_byte_accessors(tmp_path):
     src = _cau(tmp_path, n=400)
     reader = CsvRowReader(src)
