@@ -124,11 +124,22 @@ def test_resolved_sbom_pins_exact_versions_with_hashed_distributions(release_dir
     assert refs and all(
         r["type"] == "distribution" and r["hashes"][0]["alg"] == "SHA-256" for r in refs
     )
-    # ... and the extra each package enters through.
+    # ... and every extra a package is reachable from, over all paths — pyarrow is named by
+    # parquet directly AND pulled transitively by validator, so both are recorded.
     extras_prop = next(p for p in pyarrow["properties"] if p["name"] == "focus:extras")
-    assert "parquet" in extras_prop["value"]
+    assert {"parquet", "validator"} <= set(extras_prop["value"].split(","))
+    # Markers come only from the project's direct extra requirements, labelled per extra —
+    # pyarrow installs unconditionally via parquet, so no bare marker may claim otherwise.
+    marker_values = [p["value"] for p in pyarrow["properties"] if p["name"] == "uv:marker"]
+    assert all(v.startswith("via ") for v in marker_values)
+    assert not any(v.startswith("via parquet:") for v in marker_values)
     # The transitive tree is present: focus-validator's own deps are components too.
     assert "focus-validator" in comps
+    # A transitive-only package inherits the extras of every path that reaches it.
+    ddt_extras = next(
+        p["value"] for p in comps["ddt"]["properties"] if p["name"] == "focus:extras"
+    )
+    assert {"validator", "all"} <= set(ddt_extras.split(","))
     validator_deps = next(
         d for d in doc["dependencies"] if d["ref"] == comps["focus-validator"]["bom-ref"]
     )
@@ -142,6 +153,27 @@ def test_resolved_sbom_is_deterministic(release_dir):
     a = build_resolved_sbom(wheel, source_date_epoch=1700000000)
     b = build_resolved_sbom(wheel, source_date_epoch=1700000000)
     assert json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+
+
+def test_verify_release_validates_the_resolved_sbom_too(release_dir, tmp_path):
+    import shutil
+
+    broken = tmp_path / "broken"
+    shutil.copytree(release_dir, broken)
+    doc = json.loads((broken / "sbom.resolved.cdx.json").read_text(encoding="utf-8"))
+    doc["metadata"]["component"]["version"] = "0.0.0-wrong"
+    body = json.dumps(doc, indent=2, sort_keys=True) + "\n"
+    (broken / "sbom.resolved.cdx.json").write_text(body, encoding="utf-8")
+    # Keep SHA256SUMS consistent so only the SBOM content check can catch it.
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    sums = (broken / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
+    sums = [
+        f"{digest}  sbom.resolved.cdx.json" if ln.endswith("sbom.resolved.cdx.json") else ln
+        for ln in sums
+    ]
+    (broken / "SHA256SUMS").write_text("\n".join(sums) + "\n", encoding="utf-8")
+    errors = verify_release(broken)
+    assert any("sbom.resolved.cdx.json" in e and "component version" in e for e in errors), errors
 
 
 def test_build_backend_lock_is_hash_pinned():

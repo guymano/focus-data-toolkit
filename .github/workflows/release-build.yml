@@ -32,8 +32,12 @@ jobs:
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           python-version: "3.12"
-      - name: Install locked toolchain
-        run: uv sync --frozen --extra dev
+      - name: Install locked toolchain (tools only — no project build before the backend gate)
+        # --no-install-project: a plain sync would build/install the project itself through
+        # an unpinned PEP 517 backend resolution BEFORE the hash-locked backend below is in
+        # place. Tools first, then the pinned backend, and only then anything that builds
+        # the project.
+        run: uv sync --frozen --extra dev --no-install-project
 
       - name: Pin build timestamp to the commit (reproducible builds)
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
@@ -43,26 +47,30 @@ jobs:
 
       - name: Build wheel + sdist (locked backend, no isolation)
         # --no-isolation so the hash-verified backend installed above is the one that builds;
-        # an isolated build would re-resolve setuptools unpinned from the index.
-        run: uv run python -m build --no-isolation
+        # an isolated build would re-resolve setuptools unpinned from the index. --no-sync so
+        # uv run cannot trigger its own project build behind the gate.
+        run: uv run --no-sync python -m build --no-isolation
+
+      - name: Install the built wheel (the exact artifact under test)
+        run: uv pip install --no-deps dist/*.whl
 
       - name: Validate distribution metadata
-        run: uv run twine check dist/*
+        run: uv run --no-sync twine check dist/*
 
       - name: Test the built distribution
-        run: uv run pytest -m packaging -q
+        run: uv run --no-sync pytest -m packaging -q
 
       - name: Read version
         id: version
         run: |
-          v="$(uv run python -c 'import focus_data_toolkit as f; print(f.__version__)')"
+          v="$(uv run --no-sync python -c 'import focus_data_toolkit as f; print(f.__version__)')"
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Generate CycloneDX SBOMs (declared ranges + uv.lock-resolved profile)
         run: |
           for whl in dist/*.whl; do
-            uv run python scripts/generate_sbom.py "$whl" -o dist/sbom.cdx.json
-            uv run python scripts/generate_resolved_sbom.py "$whl" -o dist/sbom.resolved.cdx.json
+            uv run --no-sync python scripts/generate_sbom.py "$whl" -o dist/sbom.cdx.json
+            uv run --no-sync python scripts/generate_resolved_sbom.py "$whl" -o dist/sbom.resolved.cdx.json
           done
 
       - name: Stage the provenance manifests as release assets
@@ -78,7 +86,7 @@ jobs:
           COMMIT: ${{ github.sha }}
           REF: ${{ github.ref }}
         run: |
-          uv run python - <<'PY'
+          uv run --no-sync python - <<'PY'
           import importlib.metadata as md
           import json
           import os
@@ -118,7 +126,7 @@ jobs:
           cat SHA256SUMS
 
       - name: Verify release (offline gate)
-        run: uv run python scripts/verify_release.py --dist dist --no-hints
+        run: uv run --no-sync python scripts/verify_release.py --dist dist --no-hints
 
       - name: Upload release artifacts (passed downstream by digest)
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3

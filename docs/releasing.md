@@ -87,14 +87,16 @@ meantime).
    hashed distributions and the transitive tree from `uv.lock`), attests every
    asset (dists, both SBOMs, checksums, build manifest, and the three
    provenance manifests — model / official JSON schemas / provider adapters),
-   publishes to PyPI via Trusted Publishing after environment approval, and
-   creates the **GitHub Release** on the tag carrying the full attested asset
-   set permanently (workflow artifacts expire after 7 days) with notes taken
-   from the `CHANGELOG.md` section. While model provenance is `partial`, the
-   GitHub Release is marked **pre-release** automatically, with the limitation
-   stated in the notes. Artifacts pass between jobs **by digest**; nothing
-   downstream rebuilds. (The publish job also checks the tag matches the built
-   version.)
+   publishes to PyPI via Trusted Publishing after environment approval, and —
+   **only after publish succeeds** — creates the **GitHub Release** on the tag
+   carrying the full attested asset set permanently (workflow artifacts expire
+   after 7 days) with notes taken from the `CHANGELOG.md` section. Two honesty
+   gates enforce the provenance policy mechanically: the publish job **refuses
+   a final (non-PEP-440-pre-release) version while model provenance is
+   `partial`**, and the GitHub Release is marked **pre-release** with the
+   limitation stated in the notes whenever provenance is not `complete`.
+   Artifacts pass between jobs **by digest**; nothing downstream rebuilds.
+   (The publish job also checks the tag matches the built version.)
 8. Verify the published artifacts and that the PyPI page shows the attestations:
 
    ```bash

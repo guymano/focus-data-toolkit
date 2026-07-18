@@ -4,9 +4,11 @@
 Standard-library only. Complements ``generate_sbom.py`` (which records the *declared*
 dependency ranges from the wheel's METADATA): this profile records what those ranges
 **resolve to** — exact versions, versioned purls, the sha256 of every distributable artifact
-(sdist + wheels, as hashed ``distribution`` external references), environment markers, the
-extra each package enters through, and the transitive dependency tree — all read from the
-committed ``uv.lock``, so the SBOM describes the same resolution the lockfile pins.
+(sdist + wheels, as hashed ``distribution`` external references), every extra a package is
+reachable from (propagated over all paths, never only the first one visited), the
+environment markers on the project's direct extra requirements (labelled per extra), and
+the transitive dependency tree — all read from the committed ``uv.lock``, so the SBOM
+describes the same resolution the lockfile pins.
 
 Only the *runtime* extras are described (``parquet``, ``validator``, ``all``); ``dev`` /
 ``release`` tooling is excluded, exactly as in the declared SBOM. Licenses are filled from
@@ -95,34 +97,67 @@ def _distribution_refs(entry: dict) -> list[dict]:
     return sorted(refs, key=lambda r: r["url"])
 
 
-def _runtime_closure(lock: dict) -> tuple[dict[str, dict], dict[str, set[str]], dict[str, set[str]]]:
-    """(lock entry, entered-via extras, markers) per package in the runtime-extras closure."""
-    by_name = {p["name"]: p for p in lock["package"]}
-    project = by_name[_PACKAGE]
-    roots: list[tuple[str, str, str]] = [  # (name, extra, marker)
-        (dep["name"], extra, dep.get("marker", ""))
+def _runtime_extras(lock: dict) -> dict[str, list[dict]]:
+    project = next(p for p in lock["package"] if p["name"] == _PACKAGE)
+    return {
+        extra: deps
         for extra, deps in (project.get("optional-dependencies") or {}).items()
         if extra not in _TOOLING_EXTRAS
-        for dep in deps
-    ]
+    }
+
+
+def _runtime_closure(
+    lock: dict,
+) -> tuple[dict[str, dict], dict[str, set[str]], dict[str, set[tuple[str, str]]]]:
+    """(lock entry, reachable-from extras, direct extra markers) per closure package.
+
+    Extras are propagated to a **fixpoint over every edge** — a package reachable from
+    several extras (directly or transitively) records all of them, never only the path
+    visited first. Markers are recorded only from the project's *direct* extra
+    requirements, labelled with their extra: aggregating transitive edge markers onto a
+    package would misstate it as conditional even when another path installs it
+    unconditionally (e.g. pyarrow is unconditional via ``parquet`` but gated by
+    ``python >= 3.12`` via ``validator``).
+    """
+    by_name = {p["name"]: p for p in lock["package"]}
+    runtime_extras = _runtime_extras(lock)
+
     closure: dict[str, dict] = {}
-    via: dict[str, set[str]] = {}
-    markers: dict[str, set[str]] = {}
-    queue = list(roots)
+    queue = [dep["name"] for deps in runtime_extras.values() for dep in deps]
     while queue:
-        name, extra, marker = queue.pop()
-        via.setdefault(name, set()).add(extra)
-        if marker:
-            markers.setdefault(name, set()).add(marker)
+        name = queue.pop()
         if name in closure:
             continue
         entry = by_name.get(name)
         if entry is None:  # platform-filtered out of the lock: nothing to describe
             continue
         closure[name] = entry
-        for dep in entry.get("dependencies", []):
-            queue.append((dep["name"], extra, dep.get("marker", "")))
-    return closure, via, markers
+        queue.extend(dep["name"] for dep in entry.get("dependencies", []))
+
+    extras_of: dict[str, set[str]] = {}
+    for extra, deps in runtime_extras.items():
+        for dep in deps:
+            if dep["name"] in closure:
+                extras_of.setdefault(dep["name"], set()).add(extra)
+    changed = True
+    while changed:
+        changed = False
+        for parent, entry in closure.items():
+            for dep in entry.get("dependencies", []):
+                child = dep["name"]
+                if child not in closure:
+                    continue
+                missing = extras_of.get(parent, set()) - extras_of.get(child, set())
+                if missing:
+                    extras_of.setdefault(child, set()).update(missing)
+                    changed = True
+
+    direct_markers: dict[str, set[tuple[str, str]]] = {}
+    for extra, deps in runtime_extras.items():
+        for dep in deps:
+            if dep.get("marker") and dep["name"] in closure:
+                direct_markers.setdefault(dep["name"], set()).add((extra, dep["marker"]))
+    return closure, extras_of, direct_markers
 
 
 def build_resolved_sbom(wheel: Path, source_date_epoch: int | None, lock_path: Path = _LOCK) -> dict:
@@ -137,7 +172,11 @@ def build_resolved_sbom(wheel: Path, source_date_epoch: int | None, lock_path: P
         "name": name,
         "version": version,
         "purl": purl,
-        "licenses": [{"license": {"id": license_expr}}],
+        # Compound SPDX expressions use the expression form (see generate_sbom.py).
+        "licenses": (
+            [{"expression": license_expr}] if " " in license_expr
+            else [{"license": {"id": license_expr}}]
+        ),
     }
 
     components = []
@@ -158,8 +197,10 @@ def build_resolved_sbom(wheel: Path, source_date_epoch: int | None, lock_path: P
                 {"name": "focus:extras", "value": ",".join(sorted(via.get(pkg_name, ())))},
             ],
         }
-        for marker in sorted(markers.get(pkg_name, ())):
-            component["properties"].append({"name": "uv:marker", "value": marker})
+        for extra, marker in sorted(markers.get(pkg_name, ())):
+            component["properties"].append(
+                {"name": "uv:marker", "value": f"via {extra}: {marker}"}
+            )
         license_entry = _license_entry(pkg_name)
         if license_entry is not None:
             component["licenses"] = [license_entry]
@@ -172,13 +213,10 @@ def build_resolved_sbom(wheel: Path, source_date_epoch: int | None, lock_path: P
         dependencies.append({"ref": ref, "dependsOn": depends_on})
 
     # Direct dependencies = the packages the project's runtime extras name themselves.
-    by_name = {p["name"]: p for p in lock["package"]}
-    project = by_name[_PACKAGE]
     direct = sorted(
         {
             f"pkg:pypi/{d['name']}@{closure[d['name']]['version']}"
-            for extra, deps in (project.get("optional-dependencies") or {}).items()
-            if extra not in _TOOLING_EXTRAS
+            for deps in _runtime_extras(lock).values()
             for d in deps
             if d["name"] in closure
         }

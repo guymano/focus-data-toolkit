@@ -94,7 +94,8 @@ def test_wheel_metadata(dists):
         return next((ln.split(":", 1)[1].strip() for ln in meta.splitlines() if ln.startswith(f"{name}:")), None)
 
     assert field("Version") == _expected_version()
-    assert field("License-Expression") == "MIT"  # PEP 639
+    # PEP 639 compound expression: MIT toolkit code AND the CC-BY-4.0 embedded FOCUS data.
+    assert field("License-Expression") == "MIT AND CC-BY-4.0"
     # All three license files are declared: MIT code license, the NOTICE attributions, and
     # the CC-BY-4.0 text covering the embedded FOCUS model + vendored official schemas.
     license_files = [

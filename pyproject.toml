@@ -10,10 +10,11 @@ readme = "README.md"
 requires-python = ">=3.11"
 # PEP 639: SPDX expression + explicit license files (replaces the legacy license table and the
 # `License ::` classifier, which setuptools >= 77 deprecates when an SPDX expression is used).
-license = "MIT"
-# LICENSE covers the toolkit code (MIT); NOTICE + LICENSES/CC-BY-4.0.txt cover the embedded
-# FOCUS model / vendored official JSON schemas, which are CC-BY-4.0 derivative works of the
-# FinOps Foundation specification (see NOTICE for the attribution details).
+# The distribution carries MIT toolkit code AND CC-BY-4.0 data (the embedded FOCUS model and
+# the vendored official JSON schemas, works of the FinOps Foundation) — the compound SPDX
+# expression makes that visible to license scanners reading core metadata, not only to
+# readers of NOTICE (which carries the attribution details).
+license = "MIT AND CC-BY-4.0"
 license-files = ["LICENSE", "NOTICE", "LICENSES/CC-BY-4.0.txt"]
 authors = [{ name = "Guy-Hermann Adiko" }]
 keywords = ["finops", "focus", "billing", "cost", "sample-data"]

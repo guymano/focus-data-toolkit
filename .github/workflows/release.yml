@@ -69,6 +69,31 @@ jobs:
           if [ "$TAG" != "v$VERSION" ]; then
             echo "tag '$TAG' does not match built version 'v$VERSION'"; exit 1
           fi
+      - name: Honesty gate — partial model provenance publishes only pre-releases
+        # docs/model-provenance.md: a release presenting fully reproducible model provenance
+        # requires provenance_status = "complete"; anything else must be a pre-release. On
+        # PyPI that means a PEP 440 pre-release/dev version — a final version with partial
+        # provenance is refused here, before anything is uploaded.
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+
+          status = json.load(open("dist/model_provenance.json"))["provenance_status"]
+          version = os.environ["VERSION"]
+          is_prerelease = bool(re.search(r"(?:a|b|rc)\d+", version)) or ".dev" in version
+          if status != "complete" and not is_prerelease:
+              sys.exit(
+                  f"model provenance is {status!r} but {version!r} is a final version: "
+                  "publish a PEP 440 pre-release (aN/bN/rcN/.devN), or complete the "
+                  "provenance first (scripts/verify_model_provenance.py --complete)."
+              )
+          print(f"provenance {status!r} / version {version!r}: OK to publish")
+          PY
       - name: Stage only the distributable files for PyPI
         run: |
           mkdir -p dist-pypi
@@ -82,8 +107,11 @@ jobs:
   github-release:
     # Persistent, attested asset set on the tag itself — workflow artifacts expire after 7
     # days; the GitHub Release keeps the dists, both SBOM profiles, SHA256SUMS, the build
-    # manifest and the three provenance manifests permanently downloadable.
-    needs: [build, attest]
+    # manifest and the three provenance manifests permanently downloadable. Depends on
+    # `publish` so the tag/version check, the provenance gate and the pypi environment
+    # approval have all passed before any release appears — a failed or rejected publish
+    # never leaves a GitHub Release behind.
+    needs: [build, attest, publish]
     runs-on: ubuntu-24.04
     permissions:
       contents: write        # create the release on the tag

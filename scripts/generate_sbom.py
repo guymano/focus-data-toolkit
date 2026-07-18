@@ -125,7 +125,12 @@ def build_sbom(wheel: Path, source_date_epoch: int | None) -> dict:
         "name": name,
         "version": version,
         "purl": purl,
-        "licenses": [{"license": {"id": license_expr}}],
+        # A compound SPDX expression (e.g. "MIT AND CC-BY-4.0") uses the expression form; a
+        # single id keeps the license/id form.
+        "licenses": (
+            [{"expression": license_expr}] if " " in license_expr
+            else [{"license": {"id": license_expr}}]
+        ),
     }
     model = _model_component()
     deps = _dependency_components(meta, name)
