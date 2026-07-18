@@ -6,8 +6,8 @@ same manifests, diagnostics, checksums and exit codes, with **no FOCUS logic dup
 **batch-only**: there is no HTTP server; status is conveyed by the exit code, the logs, the
 `focus_1_4_manifest.json` and the produced files.
 
-Image: `ghcr.io/guymano/focus-data-toolkit`. Tags: **immutable** `<version>` (e.g. `0.10.0`) and
-`sha-<full-commit>`; plus a **rolling** `<major>.<minor>` alias (e.g. `0.10`) that advances with
+Image: `ghcr.io/guymano/focus-data-toolkit`. Tags: **immutable** `<version>` (e.g. `0.11.0`) and
+`sha-<full-commit>`; plus a **rolling** `<major>.<minor>` alias (e.g. `0.11`) that advances with
 each patch. Pin to `<version>` or a digest for reproducibility; use `<major>.<minor>` to follow
 patches. No `latest` tag is published.
 
@@ -37,7 +37,7 @@ docker run --rm \
   -v "$PWD/input:/input:ro" \
   -v "$PWD/output:/output" \
   -v fdt-work:/work \
-  ghcr.io/guymano/focus-data-toolkit:0.10.0 \
+  ghcr.io/guymano/focus-data-toolkit:0.11.0 \
   convert --cost-and-usage /input/focus.csv \
     --stream --output-format parquet --partition-by BillingCurrency \
     --out /output/result --exit-policy pipeline
@@ -46,10 +46,10 @@ docker run --rm \
 Generate synthetic test data (into a writable volume), then validate a bundle:
 
 ```bash
-docker run --rm -v fdt-work:/work ghcr.io/guymano/focus-data-toolkit:0.10.0 \
+docker run --rm -v fdt-work:/work ghcr.io/guymano/focus-data-toolkit:0.11.0 \
   generate --provider aws --focus-version 1.3 --rows 100000 --out /work/gen
 
-docker run --rm -v "$PWD/bundle:/input:ro" ghcr.io/guymano/focus-data-toolkit:0.10.0 \
+docker run --rm -v "$PWD/bundle:/input:ro" ghcr.io/guymano/focus-data-toolkit:0.11.0 \
   validate-bundle --directory /input --format json
 ```
 
@@ -114,11 +114,11 @@ Each published image is scanned (trivy, fails on HIGH/CRITICAL), carries a Cyclo
 image is pinned by digest. Verify, for example:
 
 ```bash
-cosign verify ghcr.io/guymano/focus-data-toolkit:0.10.0 \
+cosign verify ghcr.io/guymano/focus-data-toolkit:0.11.0 \
   --certificate-identity-regexp '^https://github.com/guymano/focus-data-toolkit' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
-gh attestation verify oci://ghcr.io/guymano/focus-data-toolkit:0.10.0 --repo guymano/focus-data-toolkit
+gh attestation verify oci://ghcr.io/guymano/focus-data-toolkit:0.11.0 --repo guymano/focus-data-toolkit
 ```
 
 ## Operational prerequisites (owner-only)
