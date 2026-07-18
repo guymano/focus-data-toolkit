@@ -72,26 +72,35 @@ class PathOutsideRoot(ValueError):
 
 
 def resolve_within_root(user_path: str, root: Path) -> Path:
-    """Resolve ``user_path`` under ``root``, confining it to the root (rejects ``..`` traversal).
+    """Resolve ``user_path`` to an existing entry under ``root`` by walking the directory tree.
 
-    ``root`` is always a server-controlled directory (never user input). The path is rebuilt one
-    component at a time: absolute inputs and ``..`` segments are refused, and every remaining
-    component is passed through :func:`os.path.basename` — a recognised path sanitiser that strips
-    any directory portion — before being joined onto the (trusted) base. The result therefore
-    contains no user-controlled directory component and cannot escape ``root`` by construction,
-    while still supporting nested browsing (``a/b/c.csv``).
+    ``root`` is always a server-controlled directory (never user input). Absolute inputs and any
+    ``..`` segment are refused. Each remaining component is matched **by name** against the actual
+    entries of the current directory (via :func:`os.scandir`), and resolution descends into the
+    matched entry. The returned path is therefore built entirely from real directory entries — the
+    user string only ever participates in an equality comparison, never in path construction — so
+    it cannot point outside ``root``, and no user-controlled data reaches a filesystem operation.
+    Nested browsing (``a/b/c.csv``) is fully supported; a component with no matching entry raises
+    :class:`PathOutsideRoot`.
     """
-    base = os.path.realpath(root)
-    if os.path.isabs(user_path):
+    if os.path.isabs(user_path) or user_path[:1] in ("/", "\\"):
         raise PathOutsideRoot(f"absolute paths are not allowed: {user_path!r}")
-    resolved = base
+    current = Path(os.path.realpath(root))
     for raw in user_path.replace("\\", "/").split("/"):
         if raw in ("", "."):
             continue
         if raw == "..":
             raise PathOutsideRoot(f"path {user_path!r} is outside the allowed root")
-        component = os.path.basename(raw)
-        if not component or component != raw:
-            raise PathOutsideRoot(f"invalid path component in {user_path!r}")
-        resolved = os.path.join(resolved, component)
-    return Path(resolved)
+        match: Path | None = None
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    if entry.name == raw:
+                        match = Path(entry.path)
+                        break
+        except OSError as exc:
+            raise PathOutsideRoot(f"cannot resolve {user_path!r} under the allowed root") from exc
+        if match is None:
+            raise PathOutsideRoot(f"no entry {raw!r} under the allowed root")
+        current = match
+    return current

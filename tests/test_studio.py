@@ -104,8 +104,9 @@ def test_resolve_within_root_unit(tmp_path):
 
 def test_source_file_confined_to_sources_dir(tmp_path):
     jm = JobManager(tmp_path / "jm", max_concurrency=1)
-    source_id, _dir = jm.new_source_dir()
-    # a well-formed (id, name) stays under the sources dir...
+    source_id, sdir = jm.new_source_dir()
+    (sdir / "cau.csv").write_text("x")  # a real managed source (as upload/generate would create)
+    # a well-formed (id, name) resolves under the sources dir...
     resolved = jm.source_file(source_id, "cau.csv")
     assert resolved.name == "cau.csv"
     # ...and neither component can be used to climb out of it.
