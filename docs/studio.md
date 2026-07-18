@@ -38,7 +38,8 @@ several defenses (all local, no external calls):
 | **Token** | A fresh URL-safe token per start, required on every API request (header or query). |
 | **Host header** | Validated against the loopback/bind allowlist — defeats DNS-rebinding. |
 | **Origin** | Required and validated on state-changing (POST) requests — defeats CSRF. |
-| **Root allowlist** | All file access is confined under `--root`; absolute paths and `..` traversal are rejected. |
+| **Root allowlist** | All file access is confined under `--root`; absolute paths, drive-relative/UNC paths and `..` traversal are rejected. |
+| **Symlinks / junctions** | Each entry is resolved to its real target (symlink, Windows junction, reparse point); a link whose target escapes `--root` is refused. A link that stays inside `--root` is followed. |
 | **Uploads** | Streamed to disk, capped (`--max-upload`, default 200 MB), never held fully in RAM. |
 
 With `--allow-remote` the Host/Origin checks are relaxed (you can't predict a remote authority) and

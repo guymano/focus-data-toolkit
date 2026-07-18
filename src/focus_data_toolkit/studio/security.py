@@ -72,20 +72,33 @@ class PathOutsideRoot(ValueError):
 
 
 def resolve_within_root(user_path: str, root: Path) -> Path:
-    """Resolve ``user_path`` to an existing entry under ``root`` by walking the directory tree.
+    """Resolve ``user_path`` to an existing entry whose *physical* location stays under ``root``.
 
-    ``root`` is always a server-controlled directory (never user input). Absolute inputs and any
-    ``..`` segment are refused. Each remaining component is matched **by name** against the actual
-    entries of the current directory (via :func:`os.scandir`), and resolution descends into the
-    matched entry. The returned path is therefore built entirely from real directory entries — the
-    user string only ever participates in an equality comparison, never in path construction — so
-    it cannot point outside ``root``, and no user-controlled data reaches a filesystem operation.
-    Nested browsing (``a/b/c.csv``) is fully supported; a component with no matching entry raises
-    :class:`PathOutsideRoot`.
+    ``root`` is always a server-controlled directory (never user input). The path is walked one
+    component at a time and confined on two levels:
+
+    * **Lexically** — absolute inputs, drive-relative / UNC paths and any ``..`` segment are
+      refused, and each component is matched **by name** against the actual entries of the current
+      directory (via :func:`os.scandir`), so the user string never participates in path
+      construction (only in an equality comparison).
+    * **Physically** — the matched entry is canonicalised with :meth:`Path.resolve` (which follows
+      symlinks, Windows junctions and reparse points) and must remain *at or under* the canonical
+      root (:meth:`Path.is_relative_to`, not a textual prefix check) **before** the walk descends
+      into it. A link whose real target escapes the root is therefore rejected — a link that stays
+      inside the root is followed and accepted.
+
+    Nested browsing (``a/b/c.csv``) is fully supported. A component with no matching entry, a broken
+    link, a symlink loop or an inaccessible/missing root all raise :class:`PathOutsideRoot`; the
+    returned path is fully canonical (all links already resolved). No user-controlled data reaches a
+    filesystem operation.
     """
-    if os.path.isabs(user_path) or user_path[:1] in ("/", "\\"):
+    if os.path.isabs(user_path) or user_path[:1] in ("/", "\\") or os.path.splitdrive(user_path)[0]:
         raise PathOutsideRoot(f"absolute paths are not allowed: {user_path!r}")
-    current = Path(os.path.realpath(root))
+    try:
+        base = Path(root).resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise PathOutsideRoot("allowed root is not accessible") from exc
+    current = base
     for raw in user_path.replace("\\", "/").split("/"):
         if raw in ("", "."):
             continue
@@ -102,5 +115,11 @@ def resolve_within_root(user_path: str, root: Path) -> Path:
             raise PathOutsideRoot(f"cannot resolve {user_path!r} under the allowed root") from exc
         if match is None:
             raise PathOutsideRoot(f"no entry {raw!r} under the allowed root")
-        current = match
+        try:
+            resolved = match.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:  # broken link, symlink loop, permission denied, ...
+            raise PathOutsideRoot(f"cannot resolve {user_path!r} under the allowed root") from exc
+        if not resolved.is_relative_to(base):
+            raise PathOutsideRoot(f"path {user_path!r} is outside the allowed root")
+        current = resolved
     return current

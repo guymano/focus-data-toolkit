@@ -145,7 +145,11 @@ def create_app(config: StudioConfig, jobs: JobManager | None = None) -> FastAPI:
     @app.post("/api/detect")
     async def detect(request: Request) -> Response:
         body = await request.json()
-        source = _resolve_source(config, jm, body)
+        try:
+            source = _resolve_source(config, jm, body)
+        except PathOutsideRoot as exc:
+            _LOG.warning("rejected detect source: %s", exc)
+            return JSONResponse({"error": "path is outside the allowed root"}, status_code=400)
         if source is None:
             return JSONResponse({"error": "provide a path or source"}, status_code=400)
         from focus_data_toolkit.io.records import MalformedRecordError

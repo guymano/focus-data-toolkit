@@ -116,6 +116,115 @@ def test_source_file_confined_to_sources_dir(tmp_path):
         jm.source_file("../..", "passwd")
 
 
+# --- physical confinement: symlinks / junctions / reparse points ------------------------
+
+
+def _symlink_or_skip(link: Path, target: Path, *, directory: bool = False) -> None:
+    """Create ``link`` -> ``target`` or skip (Windows without the create-symlink privilege)."""
+    try:
+        link.symlink_to(target, target_is_directory=directory)
+    except (OSError, NotImplementedError):  # pragma: no cover - platform/permission dependent
+        pytest.skip("filesystem links are not creatable in this environment")
+
+
+def test_normal_subdir_and_file_accepted(tmp_path):
+    root = tmp_path / "root"
+    (root / "sub").mkdir(parents=True)
+    (root / "sub" / "f.csv").write_text("x")
+    assert resolve_within_root("sub", root) == (root / "sub").resolve()
+    assert resolve_within_root("sub/f.csv", root) == (root / "sub" / "f.csv").resolve()
+
+
+def test_symlink_file_to_external_rejected(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    external = tmp_path / "outside.txt"
+    external.write_text("secret")
+    _symlink_or_skip(root / "link.txt", external)
+    with pytest.raises(PathOutsideRoot):
+        resolve_within_root("link.txt", root)
+
+
+def test_symlink_dir_to_external_rejected(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    external = tmp_path / "ext"
+    external.mkdir()
+    (external / "passwd").write_text("x")
+    _symlink_or_skip(root / "external", external, directory=True)
+    # both descending through the link and listing the link itself are refused
+    with pytest.raises(PathOutsideRoot):
+        resolve_within_root("external/passwd", root)
+    with pytest.raises(PathOutsideRoot):
+        resolve_within_root("external", root)
+
+
+def test_symlink_within_root_accepted(tmp_path):
+    root = tmp_path / "root"
+    (root / "sub").mkdir(parents=True)
+    (root / "sub" / "f.csv").write_text("x")
+    _symlink_or_skip(root / "alias", root / "sub", directory=True)
+    # policy: a link whose target stays under the root is followed
+    assert resolve_within_root("alias/f.csv", root) == (root / "sub" / "f.csv").resolve()
+
+
+def test_symlink_chain_escaping_rejected(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    external = tmp_path / "ext2"
+    external.mkdir()
+    _symlink_or_skip(root / "b", external, directory=True)
+    _symlink_or_skip(root / "a", root / "b", directory=True)  # a -> b -> external
+    with pytest.raises(PathOutsideRoot):
+        resolve_within_root("a", root)
+
+
+def test_broken_symlink_rejected(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    _symlink_or_skip(root / "broken", tmp_path / "does-not-exist")
+    with pytest.raises(PathOutsideRoot):
+        resolve_within_root("broken", root)
+
+
+def test_nonexistent_root_rejected(tmp_path):
+    with pytest.raises(PathOutsideRoot):
+        resolve_within_root("a.csv", tmp_path / "no-such-root")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "/etc/passwd",  # POSIX absolute
+        "C:\\Windows\\System32\\drivers\\etc\\hosts",  # Windows absolute
+        "C:relative-path",  # Windows drive-relative
+        "\\Windows\\system.ini",  # rooted, no drive
+        "\\\\server\\share\\file",  # UNC
+    ],
+)
+def test_absolute_drive_and_unc_paths_rejected(tmp_path, bad):
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "ok.csv").write_text("x")
+    with pytest.raises(PathOutsideRoot):
+        resolve_within_root(bad, root)
+
+
+def test_api_routes_reject_symlink_escape(tmp_path):
+    client, config = _client(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.csv").write_text("provider,cost\nx,1\n")
+    _symlink_or_skip(config.root / "escape", outside, directory=True)
+    # /api/files must not list through the escaping link
+    assert client.get("/api/files?subpath=escape", headers=_auth(config)).status_code == 400
+    # /api/detect must not read a source reached through the escaping link
+    resp = client.post(
+        "/api/detect", headers=_post_headers(config), json={"path": "escape/secret.csv"}
+    )
+    assert resp.status_code == 400
+
+
 def test_run_refuses_non_loopback_without_allow_remote(capsys):
     rc = server.run(host="0.0.0.0", allow_remote=False, open_browser=False)
     assert rc == 2

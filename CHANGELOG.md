@@ -22,6 +22,11 @@ policy.
   `--allow-remote`); a fresh per-start token is required on every API call; `Host`/`Origin` are
   validated (anti DNS-rebinding / CSRF); file access is confined to the allowlisted `--root`;
   uploads stream to disk and are size-capped. No telemetry, no external upload.
+- **Path confinement:** `resolve_within_root` walks real directory entries (matching each component
+  by name, never concatenating the user string into a path) **and** canonicalises every matched
+  entry with `Path.resolve` — a symlink, Windows junction or reparse point whose real target
+  escapes `--root` is refused, while a link that stays inside is followed; absolute, drive-relative
+  and UNC paths and `..` traversal are rejected.
 - **Bounded by design:** one conversion at a time by default (extra submissions queue); per-job
   scratch under a work dir with TTL + startup cleanup; generation is row-capped in the UI (use the
   CLI/Runner for very large synthetic sets). New extras `studio` and `studio-all`; see
