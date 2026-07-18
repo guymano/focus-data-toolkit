@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Focus Data Toolkit Studio</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Focus Data Toolkit <span class="badge">Studio</span></h1>
+    <p id="meta" class="muted">local · your data never leaves this machine</p>
+  </header>
+
+  <main>
+    <section id="tokenWarn" class="card warn hidden">
+      <strong>Missing access token.</strong> Open the URL printed by
+      <code>focus-toolkit ui</code> — it contains <code>?token=…</code>.
+    </section>
+
+    <section class="card">
+      <h2>1 · Source</h2>
+      <div class="tabs" id="tabs">
+        <button data-tab="server" class="active">Server file</button>
+        <button data-tab="upload">Upload</button>
+        <button data-tab="generate">Generate test data</button>
+      </div>
+
+      <div id="tab-server" class="tab">
+        <p class="muted">Files under the allowed root (<code id="rootLabel"></code>). Best for large files.</p>
+        <div id="crumbs" class="crumbs"></div>
+        <ul id="browser" class="browser"></ul>
+      </div>
+
+      <div id="tab-upload" class="tab hidden">
+        <p class="muted">For small/medium files only (capped, <span id="uploadCap"></span>).</p>
+        <input type="file" id="uploadFile">
+        <button id="uploadBtn">Upload</button>
+      </div>
+
+      <div id="tab-generate" class="tab hidden">
+        <div class="row">
+          <label>Provider <select id="genProvider"></select></label>
+          <label>FOCUS <select id="genVersion"></select></label>
+          <label>Rows <input type="number" id="genRows" value="1000" min="1"></label>
+          <label>Seed <input type="number" id="genSeed" value="1202"></label>
+        </div>
+        <button id="genBtn">Generate</button>
+        <p class="muted" id="genNote"></p>
+      </div>
+
+      <p id="sourceLabel" class="pill hidden"></p>
+      <button id="detectBtn" disabled>Detect</button>
+      <pre id="detectOut" class="hidden"></pre>
+    </section>
+
+    <section class="card">
+      <h2>2 · Convert</h2>
+      <div class="row">
+        <label>Mode
+          <select id="mode">
+            <option value="strict">strict</option>
+            <option value="synthetic">synthetic</option>
+          </select>
+        </label>
+        <label>Output <select id="format"></select></label>
+        <label>On exists
+          <select id="onExists">
+            <option value="refuse">refuse</option>
+            <option value="replace">replace</option>
+            <option value="version">version</option>
+          </select>
+        </label>
+      </div>
+      <button id="convertBtn" disabled>Convert</button>
+    </section>
+
+    <section class="card hidden" id="progressCard">
+      <h2>3 · Progress</h2>
+      <div class="bar"><div id="barFill"></div></div>
+      <p id="progressText" class="muted">starting…</p>
+      <button id="cancelBtn">Cancel</button>
+    </section>
+
+    <section class="card hidden" id="resultCard">
+      <h2>4 · Results</h2>
+      <p id="resultStatus"></p>
+      <table id="datasets" class="grid"></table>
+      <div id="downloads" class="downloads"></div>
+      <h3>Preview <span class="muted">(sampled — the full file is never loaded)</span></h3>
+      <div class="row">
+        <label>File <select id="previewFile"></select></label>
+        <button id="previewBtn">Preview</button>
+      </div>
+      <div id="previewTable" class="scroll"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

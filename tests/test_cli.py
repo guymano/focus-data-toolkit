@@ -311,6 +311,16 @@ def test_validate_bundle_directory_and_flags(tmp_path, capsys):
     ]) == 0
 
 
+def test_ui_command_refuses_non_loopback_without_allow_remote(capsys):
+    import pytest
+
+    pytest.importorskip("fastapi")
+    # Exercises the CLI wiring + the server guard without starting a server (returns before uvicorn).
+    rc = main(["ui", "--host", "0.0.0.0", "--no-open-browser"])
+    assert rc == 2
+    assert "allow-remote" in capsys.readouterr().err
+
+
 def test_validate_bundle_rejects_mixed_modes():
     assert main(["validate-bundle", "--directory", "x", "--cost-and-usage", "y"]) == 2
 
