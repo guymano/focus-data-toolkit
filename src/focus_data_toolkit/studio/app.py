@@ -9,9 +9,11 @@ test client without starting a server.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import csv
 import io
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +43,10 @@ from focus_data_toolkit.studio.security import (
 _FRONTEND = Path(__file__).resolve().parent / "frontend"
 _MANIFEST_NAME = "focus_1_4_manifest.json"
 _CHECKSUMS_NAME = "SHA256SUMS"
+
+# Error detail is logged server-side; API responses carry only generic, non-revealing messages
+# (no exception text / stack info flows to the client).
+_LOG = logging.getLogger("focus_data_toolkit.studio")
 
 
 def _parquet_available() -> bool:
@@ -119,7 +125,8 @@ def create_app(config: StudioConfig, jobs: JobManager | None = None) -> FastAPI:
         try:
             target = resolve_within_root(subpath or ".", config.root)
         except PathOutsideRoot as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
+            _LOG.warning("rejected file listing outside root: %s", exc)
+            return JSONResponse({"error": "path is outside the allowed root"}, status_code=400)
         if not target.is_dir():
             return JSONResponse({"error": "not a directory"}, status_code=400)
         entries = []
@@ -146,14 +153,12 @@ def create_app(config: StudioConfig, jobs: JobManager | None = None) -> FastAPI:
         from focus_data_toolkit.schema import detect_focus_schema
 
         try:
-            reader = open_row_source(str(source))
-            try:
+            with contextlib.closing(open_row_source(str(source))) as reader:
                 header = reader.source_columns
-            finally:
-                reader.close()
             result = detect_focus_schema(header)
         except (MalformedRecordError, PathOutsideRoot, OSError) as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
+            _LOG.warning("detect failed: %s", exc)
+            return JSONResponse({"error": "could not read the source file"}, status_code=400)
         return JSONResponse(result.as_dict())
 
     # --- managed sources: upload + generate ----------------------------------------------
@@ -232,7 +237,8 @@ def create_app(config: StudioConfig, jobs: JobManager | None = None) -> FastAPI:
             source = _resolve_source(config, jm, body)
             contract = _resolve_source(config, jm, body, prefix="contract_")
         except PathOutsideRoot as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
+            _LOG.warning("rejected job source outside root: %s", exc)
+            return JSONResponse({"error": "source path is outside the allowed root"}, status_code=400)
         if source is None:
             return JSONResponse({"error": "provide a source (path or source_id)"}, status_code=400)
         mode = str(body.get("mode", "strict"))
@@ -337,7 +343,8 @@ def create_app(config: StudioConfig, jobs: JobManager | None = None) -> FastAPI:
         try:
             path = jm.job_file(job_id, file)
         except (KeyError, PathOutsideRoot) as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
+            _LOG.warning("rejected preview file: %s", exc)
+            return JSONResponse({"error": "invalid file"}, status_code=400)
         if not path.exists():
             return JSONResponse({"error": "no such produced file"}, status_code=404)
         limit = max(1, min(limit, MAX_PREVIEW_LIMIT))
@@ -346,7 +353,8 @@ def create_app(config: StudioConfig, jobs: JobManager | None = None) -> FastAPI:
         try:
             page = sampled_page(path, offset=offset, limit=limit)
         except (MalformedRecordError, OSError) as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
+            _LOG.warning("preview failed: %s", exc)
+            return JSONResponse({"error": "could not read the file"}, status_code=400)
         return JSONResponse(page)
 
     @app.get("/api/jobs/{job_id}/manifest")
@@ -379,7 +387,8 @@ def create_app(config: StudioConfig, jobs: JobManager | None = None) -> FastAPI:
         try:
             path = jm.job_file(job_id, file)
         except (KeyError, PathOutsideRoot) as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
+            _LOG.warning("rejected download file: %s", exc)
+            return JSONResponse({"error": "invalid file"}, status_code=400)
         if not path.is_file():
             return JSONResponse({"error": "not a downloadable file"}, status_code=404)
         return FileResponse(str(path), filename=path.name, media_type="application/octet-stream")

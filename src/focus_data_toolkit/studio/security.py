@@ -71,12 +71,17 @@ class PathOutsideRoot(ValueError):
 
 
 def resolve_within_root(user_path: str, root: Path) -> Path:
-    """Resolve ``user_path`` and ensure it stays under ``root`` (rejects ``..``/symlink escapes)."""
+    """Resolve ``user_path`` under ``root``; reject absolute paths and any ``..``/symlink escape.
+
+    Absolute inputs are refused outright, and the fully resolved candidate must be *contained* by
+    the resolved root (``Path.is_relative_to``) — this containment check is the barrier that makes
+    the returned path safe to use in a filesystem operation.
+    """
     root_resolved = Path(root).resolve()
     candidate = Path(user_path)
-    if not candidate.is_absolute():
-        candidate = root_resolved / candidate
-    resolved = candidate.resolve()
-    if resolved != root_resolved and root_resolved not in resolved.parents:
-        raise PathOutsideRoot(f"path {user_path!r} is outside the allowed root {root_resolved}")
+    if candidate.is_absolute():
+        raise PathOutsideRoot(f"absolute paths are not allowed: {user_path!r}")
+    resolved = (root_resolved / candidate).resolve()
+    if not resolved.is_relative_to(root_resolved):
+        raise PathOutsideRoot(f"path {user_path!r} is outside the allowed root")
     return resolved
