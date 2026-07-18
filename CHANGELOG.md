@@ -23,11 +23,13 @@ policy.
   Parquet convert, exit codes, SIGTERM handling — plus a trivy scan (fails on HIGH/CRITICAL). A
   fast static test (`tests/test_container.py`) enforces the base-image digest pin, non-root user
   and exec-form entrypoint.
-- **Container release** (`.github/workflows/release-container.yml`): on a `v*` tag, builds and
-  pushes to `ghcr.io/guymano/focus-data-toolkit` with **immutable tags** (`<version>`,
-  `<major>.<minor>`, `sha-<commit>`), scans by digest (trivy), generates a CycloneDX SBOM,
-  attests build provenance and **signs with cosign** (keyless OIDC), in a reviewer-gated `ghcr`
-  environment. All actions pinned by commit SHA.
+- **Container release** (`.github/workflows/release-container.yml`): on a `v*` tag, runs the same
+  release gates as the PyPI flow (tag matches `__version__`; provenance-honesty gate), builds a
+  candidate image, **scans it (trivy) before any public tag is assigned**, then publishes to
+  `ghcr.io/guymano/focus-data-toolkit` — **immutable** `<version>` and `sha-<full-commit>` tags
+  plus a **rolling** `<major>.<minor>` alias (PEP 440 tag parsing; no `latest`) — generates a
+  CycloneDX SBOM, attests build provenance and **signs with cosign** (keyless OIDC), in a
+  reviewer-gated `ghcr` environment. All actions pinned by commit SHA.
 
 ### Added — progress, cancellation, disk budgets & pipeline ergonomics (deployment Lot A)
 

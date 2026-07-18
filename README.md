@@ -379,8 +379,10 @@ docker run --rm \
 | Hundreds of GB | Runner with fast local `/work` + sized resources; Parquet + partitioning + zstd |
 | Beyond a single node | Partition upstream / orchestrate multiple batches |
 
-The image is not a distributed engine. Tags are immutable (`<version>`, `<major>.<minor>`,
-`sha-<commit>`); each release is scanned (trivy), carries a CycloneDX SBOM, and is signed
+The image is not a distributed engine. **Immutable** tags — `<version>` (e.g. `0.10.0`) and
+`sha-<full-commit>` — always identify the same bytes; the `<major>.<minor>` tag (e.g. `0.10`)
+is a **rolling** convenience alias that advances with each patch release. Every release is
+scanned (trivy) **before** its public tags are assigned, carries a CycloneDX SBOM, and is signed
 (cosign) and attested (build provenance). See [docs/runner.md](docs/runner.md) for details.
 
 ## What is really migratable

@@ -17,8 +17,10 @@ WORKDIR /src
 COPY . .
 # The core is dependency-free; the image bundles [parquet] (PyArrow) so production conversions
 # can read/write Parquet. Building into /opt/venv keeps the runtime layer free of build tools.
+# PyArrow is pinned via constraints/runtime.txt (mirrors uv.lock) so a rebuild of the same
+# release tag installs the same bytes.
 RUN python -m venv /opt/venv \
- && /opt/venv/bin/pip install ".[parquet]"
+ && /opt/venv/bin/pip install -c constraints/runtime.txt ".[parquet]"
 
 # --- runtime: minimal, non-root, no build tools ------------------------------------------
 FROM ${BASE} AS runtime

@@ -6,7 +6,10 @@ same manifests, diagnostics, checksums and exit codes, with **no FOCUS logic dup
 **batch-only**: there is no HTTP server; status is conveyed by the exit code, the logs, the
 `focus_1_4_manifest.json` and the produced files.
 
-Image: `ghcr.io/guymano/focus-data-toolkit` (tags: `<version>`, `<major>.<minor>`, `sha-<commit>`).
+Image: `ghcr.io/guymano/focus-data-toolkit`. Tags: **immutable** `<version>` (e.g. `0.10.0`) and
+`sha-<full-commit>`; plus a **rolling** `<major>.<minor>` alias (e.g. `0.10`) that advances with
+each patch. Pin to `<version>` or a digest for reproducibility; use `<major>.<minor>` to follow
+patches. No `latest` tag is published.
 
 ## Layout
 

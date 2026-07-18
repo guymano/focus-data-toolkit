@@ -89,15 +89,24 @@ jobs:
           code="$(docker inspect -f '{{.State.ExitCode}}' "$cid")"
           docker rm "$cid" >/dev/null 2>&1 || true
           echo "post-SIGTERM exit=$code"
-          # 137 = SIGKILL after the stop grace period => SIGTERM was ignored (regression).
-          if [ "$code" = "137" ]; then echo "container ignored SIGTERM (killed)"; exit 1; fi
-          # If it was cancelled (130), nothing must have been published.
-          if [ "$code" = "130" ]; then
-            docker run --rm -v fdt-outbig:/output --entrypoint sh focus-data-toolkit:ci \
-              -c 'if [ -e /output/result ]; then echo "partial output published"; ls -R /output; exit 1; fi; echo "no partial output"'
-          else
-            echo "run finished before stop (exit $code) - signal path not exercised this run"
-          fi
+          case "$code" in
+            130)
+              # Cancelled cleanly — nothing must have been published.
+              docker run --rm -v fdt-outbig:/output --entrypoint sh focus-data-toolkit:ci \
+                -c 'if [ -e /output/result ]; then echo "partial output published"; ls -R /output; exit 1; fi; echo "no partial output"'
+              ;;
+            0|3|4)
+              # Finished before the stop landed — a valid functional completion; signal path
+              # simply was not exercised this run.
+              echo "run finished before stop (exit $code) - acceptable completion"
+              ;;
+            137)
+              echo "container ignored SIGTERM (SIGKILLed after the grace period)"; exit 1
+              ;;
+            *)
+              echo "unexpected container exit code $code (broken image / error path)"; exit 1
+              ;;
+          esac
 
       - name: Vulnerability scan (trivy, fail on HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0

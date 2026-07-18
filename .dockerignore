@@ -18,7 +18,6 @@ build
 *.egg-info
 tests
 docs
-constraints
 uv.lock
 Dockerfile
 .dockerignore

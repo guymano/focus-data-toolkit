@@ -49,3 +49,10 @@ def test_work_dir_configured_and_volumes_declared():
     text = _dockerfile()
     assert "FOCUS_TOOLKIT_WORK_DIR=/work" in text
     assert '/input' in text and '/output' in text and '/work' in text
+
+
+def test_runtime_dependencies_installed_from_constraints():
+    # Reproducible image: PyArrow is pinned via a committed constraints lock, not resolved live.
+    assert "constraints/runtime.txt" in _dockerfile()
+    constraints = (ROOT / "constraints" / "runtime.txt").read_text(encoding="utf-8")
+    assert "pyarrow==" in constraints
