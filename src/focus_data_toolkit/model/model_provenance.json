@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/guymano/focus-data-toolkit/main/schema/model_provenance.schema.json",
   "schema_version": "1.0",
   "focus_version": "1.4",
-  "provenance_status": "partial",
+  "provenance_status": "complete",
   "description": "Provenance for the committed FOCUS 1.4 machine-readable model (focus_1_4_model.json). The JSON is a deterministic extraction of the FinOps Foundation FOCUS 1.4 Data Model and is the artifact of record for this package.",
   "source": {
     "name": "FinOps FOCUS 1.4 Data Model workbook",
@@ -13,8 +13,8 @@
     "license_verified": true,
     "license_reference": "https://github.com/FinOps-Open-Cost-and-Usage-Spec/FOCUS_Spec/blob/main/license.md",
     "artifact": "FOCUS 1.4 Data Model workbook (spreadsheet), downloaded from https://focus.finops.org; not redistributed in this repository",
-    "artifact_sha256": null,
-    "artifact_retrieved": null
+    "artifact_sha256": "39b3e3347e902a484cad180ead6fcb5a96b70cc76391c9af1916911a25a68005",
+    "artifact_retrieved": "2026-07-18"
   },
   "supplements": [
     {
@@ -49,10 +49,10 @@
       "generator.script_sha256 matches the committed extractor",
       "supplements[].sha256 match the committed supplement files"
     ],
-    "limitation": "The exact source workbook is not committed or hashed (provenance_status = partial), so end-to-end reproduction requires obtaining the same workbook revision from the FinOps Foundation. source.artifact_sha256 is therefore null and is NOT verifiable from this repository."
+    "limitation": "None for the model chain: the source workbook is hashed (source.artifact_sha256) and the committed output was reproduced byte-for-byte from it by the pinned extractor at completion time. The workbook itself is still not redistributed; obtain it from the FinOps Foundation and verify it against source.artifact_sha256."
   },
   "attribution": "FOCUS(TM) is a trademark of the FinOps Foundation. The FOCUS specification and data model are (c) the FinOps Foundation and are licensed CC-BY-4.0. The committed model JSON and this provenance file are a derivative work distributed under CC-BY-4.0 with attribution. This project is an independent community toolkit and is not endorsed by the FinOps Foundation.",
   "notes": [
-    "provenance_status is 'partial' until the exact source workbook artifact is archived and hashed (source.artifact_sha256, source.artifact_retrieved). Per the release gate, a stable release that claims fully verifiable, end-to-end reproducible model provenance requires provenance_status = 'complete'; see docs/model-provenance.md."
+    "provenance_status was set to 'complete' by scripts/verify_model_provenance.py --complete: the source workbook was hashed and the committed model was reproduced byte-for-byte from it with the pinned extractor."
   ]
 }
