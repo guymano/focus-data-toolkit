@@ -49,16 +49,89 @@ recording, per column, how each value was obtained
 
 The core package is **standard-library only** (Python ≥ 3.11).
 
-## Quickstart
+## Installation
+
+### Prerequisites
+
+- **Python 3.11, 3.12 or 3.13** (the `validator` extra needs **3.12+**). Linux, macOS and
+  Windows are supported — CI tests Ubuntu and Windows across all three versions (see
+  [docs/compatibility.md](docs/compatibility.md)).
+- `pip` (or [uv](https://docs.astral.sh/uv/)). **No compiler is needed**: the core package is
+  pure Python and standard-library only — zero runtime dependencies.
+
+### Standard install
+
+In a virtual environment (recommended):
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install focus-data-toolkit
 ```
 
-The core package is standard-library only and supports **Python 3.11+**. Optional extras add
-capabilities: `parquet` (PyArrow columnar output), `validator` (the official FinOps validator,
-**Python 3.12+**), and `all` (both). Until the first PyPI release, install from source with
-`pip install "git+https://github.com/guymano/focus-data-toolkit"`.
+> **Until the first PyPI release**, install straight from GitHub instead:
+> `pip install "git+https://github.com/guymano/focus-data-toolkit"`
+> (append `@vX.Y.Z` to pin a tag once releases exist).
+
+This installs the `focus-toolkit` command (alias of `python -m focus_data_toolkit`).
+
+### Optional extras
+
+The core covers generation, 1.2/1.3 → 1.4 conversion, client supplements + the AWS/Azure/GCP
+provider-export adapters, bounded-memory CSV streaming, and every validation gate — all with
+the standard library alone (the streaming state uses built-in `sqlite3`). Extras add:
+
+| Command | Adds | Requires |
+|---|---|---|
+| `pip install "focus-data-toolkit[parquet]"` | Parquet **input and output** (PyArrow; value-exact decimal128, Hive partitioning). On Windows, `tzdata` comes along automatically. | Python ≥ 3.11 |
+| `pip install "focus-data-toolkit[validator]"` | the official FinOps `focus-validator`, used by `focus-toolkit validate --official` (rule models for FOCUS 1.2/1.3) | Python ≥ 3.12 |
+| `pip install "focus-data-toolkit[all]"` | both of the above (on 3.11 the validator part is skipped automatically by its Python marker) | Python ≥ 3.11 |
+
+### With uv
+
+```bash
+uv tool install focus-data-toolkit          # standalone CLI on your PATH
+uv add "focus-data-toolkit[parquet]"        # as a project dependency
+uvx focus-toolkit --help                    # one-off run, nothing installed
+```
+
+### From source
+
+```bash
+git clone https://github.com/guymano/focus-data-toolkit
+cd focus-data-toolkit
+pip install .                                # or: pip install ".[all]"
+```
+
+For a development install (editable, with the test/lint toolchain), see
+[Development](#development). Release artifacts (wheel, sdist) attached to GitHub Releases
+ship with `SHA256SUMS`, two SBOM profiles and GitHub Artifact Attestations — verify a
+downloaded wheel with `sha256sum -c SHA256SUMS` and
+`gh attestation verify <wheel> --repo guymano/focus-data-toolkit`, then install it directly:
+`pip install ./focus_data_toolkit-X.Y.Z-py3-none-any.whl`.
+
+### Verify the installation
+
+```bash
+focus-toolkit --help                                         # CLI is on the PATH
+python -c "import focus_data_toolkit as f; print(f.__version__)"
+# end-to-end smoke test (deterministic, ~1 s):
+focus-toolkit generate --provider aws --focus-version 1.3 --rows 10 --out /tmp/fdt-smoke
+focus-toolkit convert --cost-and-usage /tmp/fdt-smoke/focus_1_3_cost_and_usage_aws.csv \
+  --out /tmp/fdt-smoke/focus-1.4
+# exit code 3 is expected: the strict result is intentionally incomplete without supplements
+```
+
+### Upgrade / uninstall
+
+```bash
+pip install -U focus-data-toolkit
+pip uninstall focus-data-toolkit
+```
+
+## Quickstart
+
+Install first (see [Installation](#installation) above), then:
 
 ### 1. Generate FOCUS 1.2/1.3 sample data
 

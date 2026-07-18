@@ -205,3 +205,14 @@ def test_convert_stream_honors_manifest_option(tmp_path):
                "--mode", "synthetic", "--stream", "--manifest", str(manifest_copy)])
     assert rc == 4
     assert manifest_copy.read_bytes() == (out / "focus_1_4_manifest.json").read_bytes()
+
+
+def test_python_dash_m_entry_point_matches_the_console_script():
+    import subprocess
+    import sys
+
+    out = subprocess.run(
+        [sys.executable, "-m", "focus_data_toolkit", "--help"],
+        capture_output=True, text=True, check=True,
+    )
+    assert "generate" in out.stdout and "convert" in out.stdout
