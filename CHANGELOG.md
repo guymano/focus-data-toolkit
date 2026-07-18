@@ -9,6 +9,16 @@ policy.
 
 ## [Unreleased]
 
+## [0.11.0rc1] — 2026-07-18
+
+First release candidate published to PyPI — a **pre-release** (marked as such per the honesty gate,
+because the embedded FOCUS model's provenance is `partial`; see
+[docs/model-provenance.md](docs/model-provenance.md)). It bundles the three deployment access
+methods on the single Core: the CLI/SDK, the containerised **Runner** (Lot B) and the local
+**Studio** web UI (Lot C), plus the Core progress/cancellation, disk-budget and CLI additions
+(Lot A). Install with `pip install --pre focus-data-toolkit` (pre-releases are not selected by a
+plain `pip install`).
+
 ### Added — Studio: local web UI (deployment Lot C)
 
 - **`focus-toolkit ui`** launches a local web app (FastAPI, behind the optional `[studio]` extra;
@@ -520,5 +530,6 @@ conformance defects.
 
 <!-- Reference links. 0.2.0/0.3.0 were pre-release development milestones and were never tagged
      or published, so only the first public release (0.9.0) has a tag link. -->
-[Unreleased]: https://github.com/guymano/focus-data-toolkit/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/guymano/focus-data-toolkit/compare/v0.11.0rc1...HEAD
+[0.11.0rc1]: https://github.com/guymano/focus-data-toolkit/compare/v0.9.0...v0.11.0rc1
 [0.9.0]: https://github.com/guymano/focus-data-toolkit/releases/tag/v0.9.0

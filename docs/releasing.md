@@ -105,6 +105,66 @@ meantime).
      --repo guymano/focus-data-toolkit                    # GitHub Artifact Attestation
    ```
 
+## First release (R1): concrete owner runbook
+
+The release **pipeline is fully coded but has never been executed**. R1's goal is to run the whole
+chain end-to-end for the first time — Trusted Publishing, attestations, SBOM, packaging — and, as a
+by-product, make the toolkit installable with `pip`/`pipx`/`uv tool`. The repository work (version
+bump + `CHANGELOG`) is done in a normal PR; everything below is **owner-only** and cannot be done
+from CI or by an automated agent.
+
+Current facts that shape R1:
+
+- **Model provenance is `partial`** (the FinOps source workbook is not archived/hashed), so the
+  honesty gate **forbids a final version**. R1 must be a **PEP 440 pre-release** — this repo uses
+  **`0.11.0rc1`** (tag `v0.11.0rc1`). A plain `pip install focus-data-toolkit` does **not** select
+  pre-releases; use `pip install --pre focus-data-toolkit` (or pin `==0.11.0rc1`).
+- A `v*` tag triggers **both** `release.yml` (PyPI, `pypi` environment) **and**
+  `release-container.yml` (GHCR image, `ghcr` environment). Each waits for its own environment
+  approval, so you can approve/hold them independently.
+
+### One-time setup (before the first tag)
+
+- [ ] **PyPI** — create the project and configure a **Trusted Publisher (OIDC)** pointing at
+      `guymano/focus-data-toolkit`, workflow `release.yml`, environment `pypi`. No API token.
+- [ ] **GitHub → Settings → Environments** — create **`pypi`** and **`ghcr`**, each with **required
+      reviewers** (you), so a publish needs a human click.
+- [ ] **GHCR** — ensure Actions may publish packages for the repo (org/user package settings).
+- [ ] **Rulesets / protection** — branch protection on `main`; **tag protection** for `v*`
+      (immutable; require signed/`Verified` tags).
+- [ ] **Security** — enable Private Vulnerability Reporting, secret scanning + push protection,
+      Dependency Graph + code scanning (so CodeQL/Scorecard uploads land).
+
+### Rehearse with zero publish
+
+- [ ] Run **`release-dry-run.yml`** (Actions → Run workflow). It calls `release-build`, produces the
+      wheel/sdist + SBOM + `SHA256SUMS` + `verify_release.py`, and **requests no id-token, uses no
+      environment, publishes nothing**. This is the true "validate the chain in isolation" step.
+      Inspect the artifacts; optionally run `scripts/verify_release.py --dist <downloaded>` locally.
+
+### Cut R1
+
+- [ ] Merge the release-prep PR (this one: `_version.py` → `0.11.0rc1`, `CHANGELOG` dated — confirm
+      the date matches the tag day).
+- [ ] Create the **signed, protected** tag `v0.11.0rc1` on the merge commit and push it:
+      `git tag -s v0.11.0rc1 -m "focus-data-toolkit 0.11.0rc1" && git push origin v0.11.0rc1`.
+- [ ] In **Actions**, approve the **`pypi`** environment when `release.yml` pauses (this is the point
+      where PyPI actually receives the package — the only step that cannot be delegated). Approve or
+      hold **`ghcr`** for the container as you wish.
+- [ ] Verify:
+      `python scripts/verify_release.py --dist dist` and
+      `gh attestation verify focus_data_toolkit-0.11.0rc1-py3-none-any.whl --repo guymano/focus-data-toolkit`;
+      confirm the PyPI page shows the attestations and that the GitHub Release is flagged
+      **pre-release** with the provenance note.
+
+### Later: the first *final* release
+
+To publish a version that `pip install` selects by default, **complete the provenance first**:
+`python scripts/verify_model_provenance.py --complete /path/to/focus_1_4_data_model.xlsx` (needs the
+exact FinOps workbook + `openpyxl`), commit the flipped `model_provenance.json`, then cut a final
+tag (e.g. `v0.11.0`). The gate then allows a non-pre-release and the GitHub Release is not marked
+pre-release.
+
 ## Reproducibility of releases
 
 The pipeline records its runner, Python, build tooling, lock and
