@@ -98,6 +98,21 @@ def test_resolve_within_root_unit(tmp_path):
     assert resolve_within_root("a.csv", root) == (root / "a.csv").resolve()
     with pytest.raises(PathOutsideRoot):
         resolve_within_root("../secret", root)
+    with pytest.raises(PathOutsideRoot):
+        resolve_within_root("/etc/passwd", root)  # absolute inputs are refused outright
+
+
+def test_source_file_confined_to_sources_dir(tmp_path):
+    jm = JobManager(tmp_path / "jm", max_concurrency=1)
+    source_id, _dir = jm.new_source_dir()
+    # a well-formed (id, name) stays under the sources dir...
+    resolved = jm.source_file(source_id, "cau.csv")
+    assert resolved.name == "cau.csv"
+    # ...and neither component can be used to climb out of it.
+    with pytest.raises(PathOutsideRoot):
+        jm.source_file(source_id, "../../etc/passwd")
+    with pytest.raises(PathOutsideRoot):
+        jm.source_file("../..", "passwd")
 
 
 def test_run_refuses_non_loopback_without_allow_remote(capsys):

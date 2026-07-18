@@ -38,7 +38,7 @@ several defenses (all local, no external calls):
 | **Token** | A fresh URL-safe token per start, required on every API request (header or query). |
 | **Host header** | Validated against the loopback/bind allowlist — defeats DNS-rebinding. |
 | **Origin** | Required and validated on state-changing (POST) requests — defeats CSRF. |
-| **Root allowlist** | All file access resolved and confined under `--root` (no `..`/symlink escape). |
+| **Root allowlist** | All file access is confined under `--root`; absolute paths and `..` traversal are rejected. |
 | **Uploads** | Streamed to disk, capped (`--max-upload`, default 200 MB), never held fully in RAM. |
 
 With `--allow-remote` the Host/Origin checks are relaxed (you can't predict a remote authority) and

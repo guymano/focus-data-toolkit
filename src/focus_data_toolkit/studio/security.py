@@ -72,19 +72,19 @@ class PathOutsideRoot(ValueError):
 
 
 def resolve_within_root(user_path: str, root: Path) -> Path:
-    """Resolve ``user_path`` under ``root``; reject absolute paths and any ``..``/symlink escape.
+    """Resolve ``user_path`` under ``root``, confining it to the root (rejects ``..`` traversal).
 
-    Absolute inputs are refused outright (an absolute path would otherwise discard ``root`` when
-    joined). The candidate is normalised with :func:`os.path.realpath`, which also resolves
-    symlinks so a symlinked escape is caught, and must sit *at or under* the realpath of ``root``.
-    The ``startswith`` prefix check — guarded with ``os.sep`` to avoid sibling-prefix false matches
-    (``/root-evil`` must not pass for root ``/root``) — is the barrier that makes the returned path
-    safe to use in a filesystem operation.
+    ``root`` is always a server-controlled directory (never user input). Absolute ``user_path``
+    inputs are refused outright — an absolute path would otherwise discard ``root`` when joined.
+    The user-controlled part is then collapsed with **pure-string** :func:`os.path.normpath`
+    (no filesystem access) and must sit *at or under* ``root``; the ``startswith`` prefix check —
+    guarded with ``os.sep`` so a sibling like ``/root-evil`` cannot pass for root ``/root`` — is
+    the barrier that sanitises the value before it is used in any filesystem operation.
     """
-    root_resolved = os.path.realpath(root)
+    base = os.path.realpath(root)
     if os.path.isabs(user_path):
         raise PathOutsideRoot(f"absolute paths are not allowed: {user_path!r}")
-    resolved = os.path.realpath(os.path.join(root_resolved, user_path))
-    if resolved != root_resolved and not resolved.startswith(root_resolved + os.sep):
+    target = os.path.normpath(os.path.join(base, user_path))
+    if target != base and not target.startswith(base + os.sep):
         raise PathOutsideRoot(f"path {user_path!r} is outside the allowed root")
-    return Path(resolved)
+    return Path(target)

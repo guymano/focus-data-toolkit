@@ -9,6 +9,7 @@ Studio's outputs are identical to a CLI run and cancellation never leaves partia
 
 from __future__ import annotations
 
+import os
 import queue
 import shutil
 import threading
@@ -81,8 +82,9 @@ class JobManager:
         return source_id, path
 
     def source_file(self, source_id: str, name: str) -> Path:
-        base = resolve_within_root(source_id, self._sources_dir)
-        return resolve_within_root(name, base)
+        # Resolve the (user-supplied) id + name in one pass against the server-owned sources dir,
+        # so the confinement root is never itself derived from user input.
+        return resolve_within_root(os.path.join(source_id, name), self._sources_dir)
 
     # --- jobs ---------------------------------------------------------------------------
     def get(self, job_id: str) -> Job | None:
