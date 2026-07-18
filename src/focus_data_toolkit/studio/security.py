@@ -10,6 +10,7 @@ root. All checks are standard-library only.
 from __future__ import annotations
 
 import hmac
+import os
 import secrets
 from pathlib import Path
 
@@ -73,15 +74,17 @@ class PathOutsideRoot(ValueError):
 def resolve_within_root(user_path: str, root: Path) -> Path:
     """Resolve ``user_path`` under ``root``; reject absolute paths and any ``..``/symlink escape.
 
-    Absolute inputs are refused outright, and the fully resolved candidate must be *contained* by
-    the resolved root (``Path.is_relative_to``) — this containment check is the barrier that makes
-    the returned path safe to use in a filesystem operation.
+    Absolute inputs are refused outright (an absolute path would otherwise discard ``root`` when
+    joined). The candidate is normalised with :func:`os.path.realpath`, which also resolves
+    symlinks so a symlinked escape is caught, and must sit *at or under* the realpath of ``root``.
+    The ``startswith`` prefix check — guarded with ``os.sep`` to avoid sibling-prefix false matches
+    (``/root-evil`` must not pass for root ``/root``) — is the barrier that makes the returned path
+    safe to use in a filesystem operation.
     """
-    root_resolved = Path(root).resolve()
-    candidate = Path(user_path)
-    if candidate.is_absolute():
+    root_resolved = os.path.realpath(root)
+    if os.path.isabs(user_path):
         raise PathOutsideRoot(f"absolute paths are not allowed: {user_path!r}")
-    resolved = (root_resolved / candidate).resolve()
-    if not resolved.is_relative_to(root_resolved):
+    resolved = os.path.realpath(os.path.join(root_resolved, user_path))
+    if resolved != root_resolved and not resolved.startswith(root_resolved + os.sep):
         raise PathOutsideRoot(f"path {user_path!r} is outside the allowed root")
-    return resolved
+    return Path(resolved)
