@@ -514,12 +514,9 @@ class _FileRows:
     def __iter__(self):
         from focus_data_toolkit.io.row_source import open_row_source
 
-        reader = open_row_source(self._path, dataset=self._dataset)
-        try:
+        with contextlib.closing(open_row_source(self._path, dataset=self._dataset)) as reader:
             for record in reader:
                 yield record.values
-        finally:
-            reader.close()
 
 
 def _detect_bundle_dir(directory: str) -> dict[str, str]:
@@ -534,17 +531,24 @@ def _detect_bundle_dir(directory: str) -> dict[str, str]:
         raise ValueError(f"not a directory: {directory}")
     found: dict[str, Path] = {}
     for path in sorted(base.iterdir()):
-        if path.is_dir() or path.name.startswith(".") or path.name == "SHA256SUMS":
+        if path.name.startswith(".") or path.name == "SHA256SUMS":
             continue
-        if path.suffix.lower() not in (".csv", ".gz", ".parquet"):
+        if path.is_file() and path.suffix.lower() not in (".csv", ".gz", ".parquet"):
+            continue
+        # A directory is a candidate only if it looks like a Hive-partitioned Parquet dataset
+        # (COL=value subdirectories) — which open_row_source reads natively. Without this, a
+        # partitioned Cost and Usage dataset would be skipped and its cross-dataset checks lost.
+        if path.is_dir() and not _looks_partitioned(path):
             continue
         try:
             header = _read_header(str(path))
-        except MalformedRecordError:
+        except (MalformedRecordError, OSError):
             continue
         result = detect_focus_schema(header)
         if result.dataset is None or result.confidence == "LOW":
             continue
+        if result.detected_version != "1.4":
+            continue  # validate-bundle validates a FOCUS 1.4 bundle; skip 1.2/1.3 exports
         if result.dataset in found:
             raise ValueError(
                 f"ambiguous bundle: {found[result.dataset].name} and {path.name} both look "
@@ -552,8 +556,16 @@ def _detect_bundle_dir(directory: str) -> dict[str, str]:
             )
         found[result.dataset] = path
     if not found:
-        raise ValueError(f"no FOCUS datasets detected under {directory}")
+        raise ValueError(f"no FOCUS 1.4 datasets detected under {directory}")
     return {name: str(path) for name, path in found.items()}
+
+
+def _looks_partitioned(directory: Path) -> bool:
+    """Whether ``directory`` has ``COL=value`` subdirectories (a Hive-partitioned dataset root)."""
+    try:
+        return any(child.is_dir() and "=" in child.name for child in directory.iterdir())
+    except OSError:
+        return False
 
 
 def _cmd_validate_bundle(args: argparse.Namespace) -> int:
@@ -605,7 +617,8 @@ def _cmd_validate_bundle(args: argparse.Namespace) -> int:
         Path(args.report).write_text(
             json.dumps(report.as_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
-        print(f"wrote {args.report}")
+        # stderr, so `--format json` keeps stdout a single parseable JSON document.
+        print(f"wrote {args.report}", file=sys.stderr)
     if args.format == "json":
         print(json.dumps(report.as_dict(), indent=2, sort_keys=True))
     else:

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import focus_data_toolkit.runtime as rt
 from focus_data_toolkit.convert import convert_files
 from focus_data_toolkit.generators import get_generator
 from focus_data_toolkit.runtime import (
@@ -14,6 +15,7 @@ from focus_data_toolkit.runtime import (
     enforce_limits,
     parse_size,
     preflight,
+    work_run_dir,
 )
 
 
@@ -104,4 +106,40 @@ def test_preflight_min_output_free_blocks_convert(tmp_path, monkeypatch):
     with pytest.raises(ResourceLimitError) as exc:
         convert_files(src, tmp_path / "out", mode="synthetic")
     assert exc.value.diagnostic.code == "FDT-IO-005"
+    assert not (tmp_path / "out").exists()
+
+
+# --- PR #23 remediation ------------------------------------------------------------------
+
+
+def test_work_run_dir_is_per_run(tmp_path):
+    cfg = RuntimeConfig(work_dir=tmp_path / "w")
+    a = work_run_dir(cfg, "run-A")
+    b = work_run_dir(cfg, "run-B")
+    assert a is not None and b is not None
+    assert a != b  # per-run scoping -> concurrent runs sharing WORK_DIR never collide
+    assert a.parent == (tmp_path / "w") and a.is_dir()
+    assert work_run_dir(RuntimeConfig(), "x") is None  # no WORK_DIR -> no relocation
+
+
+def test_preflight_requires_estimate_plus_reserve(tmp_path, monkeypatch):
+    # input ~1000 bytes -> estimate 1300; reserve 2000; need 3300 > free 3000 -> must fail now.
+    # (The old max(1300, 2000) = 2000 <= 3000 would have wrongly passed.)
+    src = tmp_path / "in.csv"
+    src.write_bytes(b"x" * 1000)
+    monkeypatch.setattr(rt, "_free", lambda _p: 3000)
+    cfg = RuntimeConfig(min_output_free_bytes=2000)
+    with pytest.raises(ResourceLimitError) as exc:
+        preflight(cfg, tmp_path, [str(src)])
+    assert exc.value.diagnostic.code == "FDT-IO-005"
+
+
+def test_max_work_bytes_enforced_default_config_small_input(tmp_path, monkeypatch):
+    # No WORK_DIR (scratch stays in staging) and an input shorter than the progress step:
+    # the default scratch is still tracked and the post-loop guard enforces the budget.
+    src = _cau(tmp_path, n=200)
+    monkeypatch.setenv("FOCUS_TOOLKIT_MAX_WORK_BYTES", "1")
+    with pytest.raises(ResourceLimitError) as exc:
+        convert_files(src, tmp_path / "out", mode="synthetic")
+    assert exc.value.diagnostic.code == "FDT-IO-006"
     assert not (tmp_path / "out").exists()

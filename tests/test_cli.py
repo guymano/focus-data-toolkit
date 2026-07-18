@@ -317,3 +317,48 @@ def test_validate_bundle_rejects_mixed_modes():
 
 def test_validate_bundle_requires_input():
     assert main(["validate-bundle"]) == 2
+
+
+# --- PR #23 remediation: validate-bundle auto-detection + JSON output ----------------------
+
+
+def test_validate_bundle_directory_includes_partitioned_dataset(tmp_path, capsys):
+    import pytest
+
+    pytest.importorskip("pyarrow")
+    src = _generate(tmp_path, "aws", "1.3", 80, 5)
+    cau = src / "focus_1_3_cost_and_usage_aws.csv"
+    bundle = tmp_path / "pqbundle"
+    rc = main([
+        "convert", "--cost-and-usage", str(cau), "--out", str(bundle),
+        "--output-format", "parquet", "--partition-by", "BillingCurrency", "--mode", "synthetic",
+    ])
+    assert rc == 4
+    capsys.readouterr()
+    # Cost and Usage is a Hive-partitioned *directory*; it must still be picked up.
+    assert main(["validate-bundle", "--directory", str(bundle)]) == 0
+    assert "Cost and Usage" in capsys.readouterr().out
+
+
+def test_validate_bundle_directory_rejects_non_1_4(tmp_path, capsys):
+    # _generate leaves a directory of FOCUS 1.3 source exports.
+    src = _generate(tmp_path, "aws", "1.3", 40, 5)
+    assert main(["validate-bundle", "--directory", str(src)]) == 2
+    assert "no FOCUS 1.4 datasets" in capsys.readouterr().err
+
+
+def test_validate_bundle_json_stdout_is_parseable_with_report(tmp_path, capsys):
+    src = _generate(tmp_path, "aws", "1.3", 50, 5)
+    cau = src / "focus_1_3_cost_and_usage_aws.csv"
+    bundle = tmp_path / "b"
+    assert main([
+        "convert", "--cost-and-usage", str(cau), "--out", str(bundle),
+        "--stream", "--mode", "synthetic",
+    ]) == 4
+    capsys.readouterr()
+    report = tmp_path / "r.json"
+    rc = main([
+        "validate-bundle", "--directory", str(bundle), "--format", "json", "--report", str(report)
+    ])
+    assert rc == 0
+    json.loads(capsys.readouterr().out)  # stdout must be a single parseable JSON document

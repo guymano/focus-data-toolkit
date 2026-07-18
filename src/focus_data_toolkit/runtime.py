@@ -142,17 +142,18 @@ def _io_error(code: str, message: str, path: Path, **context: str) -> ResourceLi
     )
 
 
-def resolve_work_path(config: RuntimeConfig, default_path: Path) -> Path:
-    """Where a scratch file should live: under ``WORK_DIR`` (created) if set, else ``default_path``.
+def work_run_dir(config: RuntimeConfig, run_id: str) -> Path | None:
+    """Per-run scratch subdirectory under ``WORK_DIR`` (created), or ``None`` when unset.
 
-    ``default_path`` is the caller's in-staging location; when ``WORK_DIR`` is set the scratch is
-    relocated there (off the output filesystem), and the caller becomes responsible for unlinking
-    it (the atomic output context only cleans its own staging directory).
+    Relocated scratch is scoped by the conversion's run id (``WORK_DIR/fdt-<run_id>/``) so that
+    concurrent runs sharing a single ``FOCUS_TOOLKIT_WORK_DIR`` never collide on the same SQLite
+    files. The directory lives outside the atomic staging dir, so the caller removes it on exit.
     """
     if config.work_dir is None:
-        return default_path
-    config.work_dir.mkdir(parents=True, exist_ok=True)
-    return config.work_dir / Path(default_path).name
+        return None
+    run_dir = config.work_dir / f"fdt-{run_id}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
 
 
 def preflight(config: RuntimeConfig, out_parent: Path, input_paths: _InputPaths) -> None:
@@ -165,9 +166,10 @@ def preflight(config: RuntimeConfig, out_parent: Path, input_paths: _InputPaths)
     out_parent = Path(out_parent)
     free_out = _free(out_parent)
     if free_out is not None:
-        need = _estimate_output_bytes(input_paths)
-        if config.min_output_free_bytes is not None:
-            need = max(need, config.min_output_free_bytes)
+        # Require room for the bytes we expect to write AND the reserve that must remain free
+        # afterwards — not the larger of the two (which would let a run drive free space below
+        # the configured minimum and only fail later during an in-run check).
+        need = _estimate_output_bytes(input_paths) + (config.min_output_free_bytes or 0)
         if need and free_out < need:
             raise _io_error(
                 "FDT-IO-005",
@@ -237,5 +239,5 @@ __all__ = [
     "enforce_limits",
     "parse_size",
     "preflight",
-    "resolve_work_path",
+    "work_run_dir",
 ]

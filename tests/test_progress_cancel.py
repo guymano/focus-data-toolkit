@@ -115,3 +115,24 @@ def test_parquet_reader_expected_rows(tmp_path):
     reader = ParquetRowReader(parquet_file, dataset="Cost and Usage")
     assert reader.expected_rows == 300
     reader.close()
+
+
+def test_progress_totals_skips_recount_without_callback():
+    # Regression (PR #23): without a progress callback the engine must not touch expected_rows
+    # (count_rows() is expensive for partitioned Parquet).
+    from focus_data_toolkit.convert.streaming import _progress_totals
+
+    class _Boom:
+        bytes_total = None
+
+        @property
+        def expected_rows(self):
+            raise AssertionError("expected_rows must not be read without a progress callback")
+
+    assert _progress_totals(_Boom(), None) == ("rows", None)
+
+    class _Reader:
+        bytes_total = None
+        expected_rows = 42
+
+    assert _progress_totals(_Reader(), lambda _e: None) == ("rows", 42)

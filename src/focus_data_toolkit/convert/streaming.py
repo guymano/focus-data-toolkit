@@ -110,7 +110,28 @@ def _unlink_db(path: Path) -> None:
         try:
             Path(str(path) + suffix).unlink()
         except OSError:
-            pass
+            pass  # best-effort cleanup: a missing/locked sidecar is not an error
+
+
+def _progress_totals(reader, progress) -> tuple[str, int | None]:
+    """(unit, total) for a source reader, computed **once** — bytes for CSV, rows for Parquet.
+
+    Returns ``("rows", None)`` when no progress callback is set, so a partitioned-Parquet source
+    is never row-counted (``count_rows()``) purely for metrics that no one consumes.
+    """
+    if progress is None:
+        return "rows", None
+    bytes_total = getattr(reader, "bytes_total", None)
+    if bytes_total:
+        return "bytes", bytes_total
+    return "rows", getattr(reader, "expected_rows", None)
+
+
+def _source_completed(reader, unit: str, count: int) -> int:
+    """Completed amount for a source reader given the chosen unit (live byte cursor or row count)."""
+    if unit == "bytes":
+        return getattr(reader, "bytes_read", None) or count
+    return count
 
 
 def _discard_scratch(out, config, name: str, path: Path) -> None:
@@ -134,13 +155,15 @@ class _StagedRows:
     """
 
     def __init__(
-        self, path: Path, output_format: str, dataset: str, partition_by=None, *, check=None
+        self, path: Path, output_format: str, dataset: str, partition_by=None,
+        *, check=None, guard=None,
     ) -> None:
         self._path = path
         self._output_format = output_format
         self._dataset = dataset
         self._partition_by = partition_by
         self._check = check
+        self._guard = guard
 
     def __iter__(self):
         reader = _open_reader(
@@ -151,8 +174,11 @@ class _StagedRows:
             n = 0
             for record in reader:
                 n += 1
-                if self._check is not None and n % _PROGRESS_STEP_MAX == 0:
-                    self._check()
+                if n % _PROGRESS_STEP_MAX == 0:
+                    if self._check is not None:
+                        self._check()
+                    if self._guard is not None:
+                        self._guard()  # enforce disk budgets as the bundle spill DB grows
                 yield record.values
         finally:
             reader.close()
@@ -377,7 +403,7 @@ def convert_files(
     config.apply_logging()
     out_parent = Path(out_dir).parent
     work_dir_eff = config.work_dir or out_parent
-    scratch_paths: list[Path] = []
+    scratch_paths: list[Path] = []  # scratch DB files, tracked for MAX_WORK_BYTES accounting
     # Best-effort pre-flight before any staging: fail fast with a structured FDT-IO-005/006
     # diagnostic (exit 5) rather than a raw OSError mid-run.
     runtime.preflight(config, out_parent, [cost_and_usage, contract_commitment])
@@ -388,7 +414,7 @@ def convert_files(
             try:
                 scratch_bytes += p.stat().st_size
             except OSError:
-                pass
+                pass  # scratch DB may not exist yet / already discarded — not an error
         runtime.enforce_limits(config, out_parent, work_dir_eff, scratch_bytes)
 
     # --- progress + cooperative cancellation (opt-in; no-ops when unset) -----------------
@@ -441,14 +467,6 @@ def convert_files(
         except Exception:  # a misbehaving progress sink must never break a conversion
             pass
 
-    def _source_metric(rdr, count: int) -> tuple[int, int | None, str]:
-        """(completed, total, unit) for the source reader: bytes for CSV, rows for Parquet."""
-        br = getattr(rdr, "bytes_read", None)
-        bt = getattr(rdr, "bytes_total", None)
-        if br is not None and bt:
-            return br, bt, "bytes"
-        return count, getattr(rdr, "expected_rows", None), "rows"
-
     def _meta(dataset: str) -> dict | None:
         if output_format != "parquet":
             return None
@@ -492,8 +510,8 @@ def convert_files(
         supp_keys = SourceKeySets()
         pre = open_row_source(cost_and_usage)
         try:
-            _emit("READING", 0, getattr(pre, "bytes_total", None), "bytes",
-                  "collecting source keys", force=True)
+            pre_unit, pre_total = _progress_totals(pre, progress)
+            _emit("READING", 0, pre_total, pre_unit, "collecting source keys", force=True)
             pre_count = 0
             for record in pre:
                 supp_keys.observe_cau_row(record.values)
@@ -501,8 +519,9 @@ def convert_files(
                 if pre_count % step == 0:
                     _check()
                     _resource_guard()
-                    completed, total, unit = _source_metric(pre, pre_count)
-                    _emit("READING", completed, total, unit, "collecting source keys")
+                    if progress is not None:
+                        _emit("READING", _source_completed(pre, pre_unit, pre_count),
+                              pre_total, pre_unit, "collecting source keys")
         finally:
             pre.close()
         for cc_row in cc_rows or ():
@@ -550,14 +569,20 @@ def convert_files(
         out = stack.enter_context(
             AtomicOutputDir(out_dir, on_exists=on_exists, keep_temp=keep_temp)
         )
+        # Relocated scratch (FOCUS_TOOLKIT_WORK_DIR) lives in a per-run subdirectory so concurrent
+        # runs sharing one WORK_DIR never collide; it is outside the atomic staging dir, so we
+        # remove it ourselves on every exit path.
+        work_run = runtime.work_run_dir(config, out.run_id)
 
         def _cleanup_relocated_scratch() -> None:
-            # Defensive: on any error path, remove scratch relocated outside the staging dir
-            # (AtomicOutputDir only cleans its own staging).
-            for p in scratch_paths:
-                _unlink_db(p)
+            if work_run is not None:
+                shutil.rmtree(work_run, ignore_errors=True)
 
         stack.callback(_cleanup_relocated_scratch)
+
+        def _scratch_path(name: str) -> Path:
+            """Scratch DB location: the per-run WORK_DIR subdir if set, else inside staging."""
+            return (work_run / name) if work_run is not None else out.path_for(name)
 
         cu_columns = dataset_columns("Cost and Usage")
         cu_partition = partition_map.get("Cost and Usage")
@@ -573,9 +598,8 @@ def convert_files(
             partition_by=cu_partition,
             target_file_size=target_file_size,
         )
-        index_db_path = runtime.resolve_work_path(config, out.path_for(_INDEX_DB))
-        if config.work_dir is not None:
-            scratch_paths.append(index_db_path)
+        index_db_path = _scratch_path(_INDEX_DB)
+        scratch_paths.append(index_db_path)  # tracked for the work budget in both configs
         index = (
             ExternalIndexOpener(index_db_path)
             if (synthetic or supplements)
@@ -587,9 +611,8 @@ def convert_files(
         cu_counters = LineageCounters()
         cu_count = 0
 
-        _emit("TRANSFORMING", 0, getattr(reader, "bytes_total", None),
-              "bytes" if getattr(reader, "bytes_total", None) else "rows",
-              "converting Cost and Usage", force=True)
+        tr_unit, tr_total = _progress_totals(reader, progress)
+        _emit("TRANSFORMING", 0, tr_total, tr_unit, "converting Cost and Usage", force=True)
         try:
             for record in reader:
                 row = record.values
@@ -630,8 +653,9 @@ def convert_files(
                 if cu_count % step == 0:
                     _check()
                     _resource_guard()
-                    completed, total, unit = _source_metric(reader, cu_count)
-                    _emit("TRANSFORMING", completed, total, unit, "converting Cost and Usage")
+                    if progress is not None:
+                        _emit("TRANSFORMING", _source_completed(reader, tr_unit, cu_count),
+                              tr_total, tr_unit, "converting Cost and Usage")
         finally:
             cu_handle.close()
             reader.close()
@@ -640,6 +664,9 @@ def convert_files(
             # directory. Raising inside the context removes the staging dir (nothing published).
             raise ConversionError("no Cost and Usage rows to convert")
         row_counts["Cost and Usage"] = cu_count
+        # Enforce budgets once the aggregation scratch is fully written — covers inputs shorter
+        # than `step` and any growth after the last in-loop check.
+        _resource_guard()
         if cu_partition is not None:
             diagnostics.extend(_partition_diagnostics(cu_partition, cu_writer.partition_count()))
 
@@ -843,13 +870,12 @@ def convert_files(
             bundle_rows = {
                 name: _StagedRows(
                     out.path_for(fname), output_format, name,
-                    partition_by=partition_map.get(name), check=_check,
+                    partition_by=partition_map.get(name), check=_check, guard=_resource_guard,
                 )
                 for name, fname in produced_output_files.items()
             }
-            spill_db_path = runtime.resolve_work_path(config, out.path_for(_BUNDLE_DB))
-            if config.work_dir is not None:
-                scratch_paths.append(spill_db_path)
+            spill_db_path = _scratch_path(_BUNDLE_DB)
+            scratch_paths.append(spill_db_path)  # tracked for the work budget in both configs
             spill = SpillableIndexPool(spill_db_path)
             try:
                 bundle_report = validate_dataset_bundle(
@@ -857,6 +883,8 @@ def convert_files(
                 )
             finally:
                 spill.close()
+            # Catch a spill DB that grew past the budget before it is discarded.
+            _resource_guard()
             _discard_scratch(out, config, _BUNDLE_DB, spill_db_path)
             manifest["bundle_validation"] = bundle_report.as_dict()
             if not bundle_report.ok:
@@ -876,9 +904,10 @@ def convert_files(
             else:
                 out.add_data_file(fname)
 
-        # Last cancel opportunity before the atomic publish; the rename itself is fast and is
+        # Last cancel + budget check before the atomic publish; the rename itself is fast and is
         # intentionally not interrupted (interrupting it would defeat atomicity).
         _check()
+        _resource_guard()
         _emit("PUBLISHING", 0, None, "rows", "writing checksums + manifest", force=True)
         checksums = out.checksums()
         manifest_bytes = manifest_mod.render(manifest).encode("utf-8")
