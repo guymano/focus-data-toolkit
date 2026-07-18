@@ -15,6 +15,8 @@ Subcommands:
 * ``validate-bundle`` — run the cross-dataset validation gate over a bundle of
   FOCUS 1.4 datasets (explicit per-dataset files or an auto-detected directory).
 * ``version``     — print the toolkit version and optional-extra availability.
+* ``ui``          — launch the local Studio web UI (needs the ``[studio]`` extra;
+  localhost-only by default).
 * ``clean``       — recover interrupted publishes and remove leftover staging
   directories.
 
@@ -642,6 +644,32 @@ def _cmd_version(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ui(args: argparse.Namespace) -> int:
+    try:
+        from focus_data_toolkit import studio
+    except ImportError:
+        print(
+            "error: the Studio web UI needs the [studio] extra: "
+            "pip install 'focus-data-toolkit[studio]' (or [studio-all] for Parquet)",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        max_upload = _parse_size(args.max_upload)
+    except ConversionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return studio.run(
+        host=args.host,
+        port=args.port,
+        root=args.root,
+        work_dir=args.work_dir,
+        allow_remote=args.allow_remote,
+        open_browser=not args.no_open_browser,
+        max_upload_bytes=max_upload or 200 * 1000 * 1000,
+    )
+
+
 def _cmd_clean(args: argparse.Namespace) -> int:
     from focus_data_toolkit.io.atomic_writer import clean_leftovers
 
@@ -893,6 +921,30 @@ def build_parser() -> argparse.ArgumentParser:
         "version", help="print the toolkit version and optional-extra availability"
     )
     ver.set_defaults(func=_cmd_version)
+
+    ui = sub.add_parser(
+        "ui",
+        help="launch the local Studio web UI (needs the [studio] extra); localhost-only by default",
+    )
+    ui.add_argument("--host", default="127.0.0.1", help="bind address (default: 127.0.0.1)")
+    ui.add_argument("--port", type=int, default=8765, help="port (default: 8765)")
+    ui.add_argument(
+        "--root", default=".", help="directory the UI may read source files from (default: .)"
+    )
+    ui.add_argument("--work-dir", help="scratch/output directory (default: a fresh temp dir)")
+    ui.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="permit binding a non-loopback --host (the access token is still required); "
+        "expose only on trusted networks",
+    )
+    ui.add_argument(
+        "--no-open-browser", action="store_true", help="do not open a browser on start"
+    )
+    ui.add_argument(
+        "--max-upload", default="200MB", help="max browser upload size (default: 200MB)"
+    )
+    ui.set_defaults(func=_cmd_ui)
 
     clean = sub.add_parser(
         "clean",

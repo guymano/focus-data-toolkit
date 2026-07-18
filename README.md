@@ -336,6 +336,28 @@ rows = result.datasets["Invoice Detail"]
 print(lint_focus_1_4_structure("Invoice Detail", rows).levels_passed)
 ```
 
+## Studio (local web UI)
+
+For a no-CLI experience, launch the **Studio** — a local web app over the same engine:
+
+```bash
+pip install "focus-data-toolkit[studio]"   # or [studio-all] to also read/write Parquet
+focus-toolkit ui                           # opens http://127.0.0.1:8765/?token=…
+```
+
+- **Local & private:** binds `127.0.0.1` by default, requires a fresh per-start **token** on every
+  request, validates `Host`/`Origin` (anti DNS-rebinding / CSRF), and confines file access to an
+  allowlisted `--root`. No telemetry, no external upload — data never leaves the machine.
+- **Workflow:** pick a file already under `--root` (best for large files), upload a small/medium
+  file (capped), or generate synthetic test data → **Detect** → **Convert** with live per-phase
+  progress and **Cancel** → preview a **sampled** page (the full file is never loaded) → download
+  datasets, the manifest, diagnostics (JSON/CSV), `SHA256SUMS`, and an HTML summary.
+- **Same Core:** every operation drives the same SDK the CLI and Runner use, so the Studio's
+  manifests, diagnostics and checksums are identical to a CLI run.
+- Exposing it on a network needs `--allow-remote` (the token is still required). Generation is
+  capped in the UI (use the CLI/Runner for very large synthetic sets). See
+  [docs/studio.md](docs/studio.md).
+
 ## Runner (Docker / OCI)
 
 For production, automation and large volumes, the toolkit ships as a container image whose
