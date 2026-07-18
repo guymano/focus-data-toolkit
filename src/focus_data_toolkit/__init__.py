@@ -19,7 +19,12 @@ Public API:
 """
 
 from focus_data_toolkit._version import __version__
-from focus_data_toolkit.convert import ConversionResult, convert_files, convert_to_focus_1_4
+from focus_data_toolkit.convert import (
+    ConversionCancelled,
+    ConversionResult,
+    convert_files,
+    convert_to_focus_1_4,
+)
 from focus_data_toolkit.lifecycle import (
     DatasetInstance,
     check_dataset_instances,
@@ -33,6 +38,7 @@ from focus_data_toolkit.model.validator import (
     lint_focus_1_4_structure,
     validate_focus_1_4,
 )
+from focus_data_toolkit.progress import ProgressEvent
 from focus_data_toolkit.schema import SchemaDetectionResult, detect_focus_schema
 from focus_data_toolkit.validate import BundleReport, validate_dataset_bundle
 
@@ -41,9 +47,11 @@ validate_bundle = validate_dataset_bundle
 
 __all__ = [
     "BundleReport",
+    "ConversionCancelled",
     "ConversionResult",
     "DatasetInstance",
     "LintReport",
+    "ProgressEvent",
     "SchemaDetectionResult",
     "ValidationReport",
     "Violation",

@@ -18,12 +18,15 @@ import hashlib
 import json
 import os
 import shutil
+import time
 from collections.abc import Sequence
+from contextlib import ExitStack
 from dataclasses import astuple, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 from focus_data_toolkit import manifest as manifest_mod
+from focus_data_toolkit import runtime
 from focus_data_toolkit.context import (
     billing_context_of_row,
     provider_context_of_row,
@@ -36,6 +39,7 @@ from focus_data_toolkit.convert import (
     OUTPUT_FORMATS,
     RUN_SIDECAR_FILENAME,
     SHA256SUMS_FILENAME,
+    ConversionCancelled,
     ConversionError,
     assemble_manifest,
     output_filename_for,
@@ -65,6 +69,7 @@ from focus_data_toolkit.io.row_source import open_row_source, read_source_rows
 from focus_data_toolkit.model import dataset_columns, load_model
 from focus_data_toolkit.model.capabilities import CapabilityProfile
 from focus_data_toolkit.modes import Mode
+from focus_data_toolkit.progress import CancelPredicate, ProgressCallback, ProgressEvent
 from focus_data_toolkit.provenance import (
     ColumnRule,
     Lineage,
@@ -92,6 +97,34 @@ _LINT_CHUNK = 5000
 _INDEX_DB = "_index.sqlite"
 _BUNDLE_DB = "_bundle_index.sqlite"
 
+# Cancel is checked, and a ProgressEvent considered, on this row cadence; the emitted events
+# are further time-throttled (below) so a fast conversion cannot flood the callback. Capped so
+# a large ``progress_interval`` never makes cancellation unresponsive.
+_PROGRESS_STEP_MAX = 5000
+_PROGRESS_MIN_SECONDS = 0.5
+
+
+def _unlink_db(path: Path) -> None:
+    """Remove a scratch SQLite DB and any sidecar (-wal/-shm/-journal), ignoring absence."""
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        try:
+            Path(str(path) + suffix).unlink()
+        except OSError:
+            pass
+
+
+def _discard_scratch(out, config, name: str, path: Path) -> None:
+    """Drop a scratch DB: from the staging dir by name (default) or by path when relocated.
+
+    A relocated scratch (under ``FOCUS_TOOLKIT_WORK_DIR``) is not inside the atomic staging dir,
+    so ``AtomicOutputDir`` never publishes or cleans it — we unlink it explicitly here (and again,
+    defensively, on any error via the ExitStack callback).
+    """
+    if config.work_dir is None:
+        out.discard(name)  # scratch DB inside staging must never be published
+    else:
+        _unlink_db(path)
+
 
 class _StagedRows:
     """Re-iterable row stream over a staged output file (or partition tree).
@@ -101,12 +134,13 @@ class _StagedRows:
     """
 
     def __init__(
-        self, path: Path, output_format: str, dataset: str, partition_by=None
+        self, path: Path, output_format: str, dataset: str, partition_by=None, *, check=None
     ) -> None:
         self._path = path
         self._output_format = output_format
         self._dataset = dataset
         self._partition_by = partition_by
+        self._check = check
 
     def __iter__(self):
         reader = _open_reader(
@@ -114,7 +148,11 @@ class _StagedRows:
             dataset=self._dataset, partition_by=self._partition_by,
         )
         try:
+            n = 0
             for record in reader:
+                n += 1
+                if self._check is not None and n % _PROGRESS_STEP_MAX == 0:
+                    self._check()
                 yield record.values
         finally:
             reader.close()
@@ -187,8 +225,14 @@ def _lint_file(
     *,
     partition_by=None,
     capabilities: CapabilityProfile | None = None,
+    check=None,
+    on_rows=None,
 ):
-    """Lint a produced file (or partition tree) in bounded chunks, returning a merged LintReport."""
+    """Lint a produced file (or partition tree) in bounded chunks, returning a merged LintReport.
+
+    ``check`` (a no-arg callable) is invoked per chunk to honour cancellation; ``on_rows`` (an
+    ``int -> None`` callable) receives the running row count for progress reporting.
+    """
     from focus_data_toolkit.model.validator import (
         _CHECKED_LEVELS,
         LintReport,
@@ -218,6 +262,10 @@ def _lint_file(
             if len(chunk) >= _LINT_CHUNK:
                 flush(chunk)
                 chunk = []
+                if check is not None:
+                    check()
+                if on_rows is not None:
+                    on_rows(total)
         if chunk:
             flush(chunk)
     finally:
@@ -276,6 +324,9 @@ def convert_files(
     target_file_size: int | None = None,
     capabilities: CapabilityProfile | None = None,
     supplements: SupplementBundle | None = None,
+    progress: ProgressCallback | None = None,
+    cancel: CancelPredicate | None = None,
+    progress_interval: int = 5000,
 ) -> Path:
     """Stream-convert a Cost and Usage file to the FOCUS 1.4 datasets in ``out_dir``.
 
@@ -294,6 +345,14 @@ def convert_files(
     ``target_file_size`` (approximate uncompressed bytes) rolls each partition to a new part file.
     Returns the published path. Supplement handling is shared with the eager path
     (same ``apply_*`` functions), so both produce identical bytes.
+
+    ``progress`` (an optional callback) receives throttled :class:`~focus_data_toolkit.progress.ProgressEvent`\\ s
+    per phase; ``cancel`` (an optional predicate) is checked cooperatively between rows and
+    validation passes — when it returns True the conversion raises
+    :class:`~focus_data_toolkit.convert.ConversionCancelled` and the atomic staging directory is
+    removed, so **nothing partial is ever published**. Both default to ``None`` (unchanged
+    behaviour). ``progress_interval`` is the row cadence (capped at 5000) at which cancel is
+    checked and progress considered.
     """
     from focus_data_toolkit import __version__
     from focus_data_toolkit.convert import _resolve_source_version
@@ -312,6 +371,83 @@ def convert_files(
     mode = Mode(mode)
     synthetic = mode is Mode.SYNTHETIC
     generated_at = datetime.now(UTC).isoformat()
+
+    # --- runtime disk budgets (two filesystems: work scratch vs output staging) ----------
+    config = runtime.RuntimeConfig.from_env()
+    config.apply_logging()
+    out_parent = Path(out_dir).parent
+    work_dir_eff = config.work_dir or out_parent
+    scratch_paths: list[Path] = []
+    # Best-effort pre-flight before any staging: fail fast with a structured FDT-IO-005/006
+    # diagnostic (exit 5) rather than a raw OSError mid-run.
+    runtime.preflight(config, out_parent, [cost_and_usage, contract_commitment])
+
+    def _resource_guard() -> None:
+        scratch_bytes = 0
+        for p in scratch_paths:
+            try:
+                scratch_bytes += p.stat().st_size
+            except OSError:
+                pass
+        runtime.enforce_limits(config, out_parent, work_dir_eff, scratch_bytes)
+
+    # --- progress + cooperative cancellation (opt-in; no-ops when unset) -----------------
+    step = max(1, min(int(progress_interval or _PROGRESS_STEP_MAX), _PROGRESS_STEP_MAX))
+    _last_emit_t = 0.0
+    _last_emit_completed = 0
+    _last_emit_phase: str | None = None
+
+    def _check() -> None:
+        if cancel is not None and cancel():
+            raise ConversionCancelled("conversion cancelled")
+
+    def _emit(
+        phase: str,
+        completed: int,
+        total: int | None = None,
+        unit: str = "rows",
+        message: str | None = None,
+        *,
+        force: bool = False,
+    ) -> None:
+        nonlocal _last_emit_t, _last_emit_completed, _last_emit_phase
+        if progress is None:
+            return
+        now = time.monotonic()
+        # Fire on a phase boundary, once the completed count advances by the interval, or at
+        # least every _PROGRESS_MIN_SECONDS — so fast runs still show movement and slow phases
+        # still tick, without a callback per row.
+        due = (
+            force
+            or phase != _last_emit_phase
+            or completed - _last_emit_completed >= progress_interval
+            or now - _last_emit_t >= _PROGRESS_MIN_SECONDS
+        )
+        if not due:
+            return
+        _last_emit_t = now
+        _last_emit_completed = completed
+        _last_emit_phase = phase
+        try:
+            progress(
+                ProgressEvent(
+                    phase=phase,  # type: ignore[arg-type]
+                    completed=completed,
+                    total=total,
+                    unit=unit,
+                    message=message,
+                )
+            )
+        except Exception:  # a misbehaving progress sink must never break a conversion
+            pass
+
+    def _source_metric(rdr, count: int) -> tuple[int, int | None, str]:
+        """(completed, total, unit) for the source reader: bytes for CSV, rows for Parquet."""
+        br = getattr(rdr, "bytes_read", None)
+        bt = getattr(rdr, "bytes_total", None)
+        if br is not None and bt:
+            return br, bt, "bytes"
+        return count, getattr(rdr, "expected_rows", None), "rows"
 
     def _meta(dataset: str) -> dict | None:
         if output_format != "parquet":
@@ -356,8 +492,17 @@ def convert_files(
         supp_keys = SourceKeySets()
         pre = open_row_source(cost_and_usage)
         try:
+            _emit("READING", 0, getattr(pre, "bytes_total", None), "bytes",
+                  "collecting source keys", force=True)
+            pre_count = 0
             for record in pre:
                 supp_keys.observe_cau_row(record.values)
+                pre_count += 1
+                if pre_count % step == 0:
+                    _check()
+                    _resource_guard()
+                    completed, total, unit = _source_metric(pre, pre_count)
+                    _emit("READING", completed, total, unit, "collecting source keys")
         finally:
             pre.close()
         for cc_row in cc_rows or ():
@@ -401,7 +546,19 @@ def convert_files(
     }
     row_counts = dict.fromkeys(load_model()["datasets"], 0)
 
-    with AtomicOutputDir(out_dir, on_exists=on_exists, keep_temp=keep_temp) as out:
+    with ExitStack() as stack:
+        out = stack.enter_context(
+            AtomicOutputDir(out_dir, on_exists=on_exists, keep_temp=keep_temp)
+        )
+
+        def _cleanup_relocated_scratch() -> None:
+            # Defensive: on any error path, remove scratch relocated outside the staging dir
+            # (AtomicOutputDir only cleans its own staging).
+            for p in scratch_paths:
+                _unlink_db(p)
+
+        stack.callback(_cleanup_relocated_scratch)
+
         cu_columns = dataset_columns("Cost and Usage")
         cu_partition = partition_map.get("Cost and Usage")
         cu_file = _output_filename(
@@ -416,8 +573,11 @@ def convert_files(
             partition_by=cu_partition,
             target_file_size=target_file_size,
         )
+        index_db_path = runtime.resolve_work_path(config, out.path_for(_INDEX_DB))
+        if config.work_dir is not None:
+            scratch_paths.append(index_db_path)
         index = (
-            ExternalIndexOpener(out.path_for(_INDEX_DB))
+            ExternalIndexOpener(index_db_path)
             if (synthetic or supplements)
             else None
         )
@@ -427,6 +587,9 @@ def convert_files(
         cu_counters = LineageCounters()
         cu_count = 0
 
+        _emit("TRANSFORMING", 0, getattr(reader, "bytes_total", None),
+              "bytes" if getattr(reader, "bytes_total", None) else "rows",
+              "converting Cost and Usage", force=True)
         try:
             for record in reader:
                 row = record.values
@@ -463,6 +626,12 @@ def convert_files(
                     issuer = (row.get("InvoiceIssuerName") or "").strip()
                     if start and end:
                         index.stage_billing_period(start, end, issuer)
+
+                if cu_count % step == 0:
+                    _check()
+                    _resource_guard()
+                    completed, total, unit = _source_metric(reader, cu_count)
+                    _emit("TRANSFORMING", completed, total, unit, "converting Cost and Usage")
         finally:
             cu_handle.close()
             reader.close()
@@ -482,10 +651,15 @@ def convert_files(
             # cardinality). With supplements they are materialized and pushed through the
             # same apply function as the eager path, so both stay byte-identical.
             emitted = emitted_invoice_detail_columns()
-            invd_rows = [
-                invoice_detail_row(grain, total, invoice_detail_id(grain), emitted)
-                for grain, total in index.finalize_invoice_groups()
-            ]
+            _emit("AGGREGATING", 0, None, "rows", "aggregating Invoice Detail", force=True)
+            invd_rows = []
+            for j, (grain, grp_total) in enumerate(index.finalize_invoice_groups(), 1):
+                invd_rows.append(
+                    invoice_detail_row(grain, grp_total, invoice_detail_id(grain), emitted)
+                )
+                if j % step == 0:
+                    _check()
+                    _emit("AGGREGATING", j, None, "rows", "aggregating Invoice Detail")
             if supplements and supp_keys is not None and invd_rows:
                 applied, _mapping = apply_invoice_details(
                     invd_rows, {}, supplements, supp_keys, INVOICE_DETAIL_PROVENANCE,
@@ -503,17 +677,24 @@ def convert_files(
                 metadata=_meta("Invoice Detail"),
                 compression=compression,
             )
-            for invd_row in invd_rows:
+            _emit("WRITING", 0, len(invd_rows), "rows", "writing Invoice Detail", force=True)
+            for j, invd_row in enumerate(invd_rows, 1):
                 id_writer.write(invd_row)
+                if j % step == 0:
+                    _check()
+                    _emit("WRITING", j, len(invd_rows), "rows", "writing Invoice Detail")
             id_handle.close()
             staged["Invoice Detail"] = id_file
             row_counts["Invoice Detail"] = len(invd_rows)
 
             bp_columns = dataset_columns("Billing Period")
-            bp_rows = [
-                billing_period_row(start, end, issuer, bp_columns)
-                for start, end, issuer in index.finalize_billing_periods()
-            ]
+            _emit("AGGREGATING", 0, None, "rows", "aggregating Billing Period", force=True)
+            bp_rows = []
+            for j, (bp_start, bp_end, bp_issuer) in enumerate(index.finalize_billing_periods(), 1):
+                bp_rows.append(billing_period_row(bp_start, bp_end, bp_issuer, bp_columns))
+                if j % step == 0:
+                    _check()
+                    _emit("AGGREGATING", j, None, "rows", "aggregating Billing Period")
             if supplements and supp_keys is not None and bp_rows:
                 bp_applied = apply_billing_periods(
                     bp_rows, supplements, supp_keys, BILLING_PERIOD_PROVENANCE,
@@ -530,8 +711,12 @@ def convert_files(
                 metadata=_meta("Billing Period"),
                 compression=compression,
             )
-            for bp_row in bp_rows:
+            _emit("WRITING", 0, len(bp_rows), "rows", "writing Billing Period", force=True)
+            for j, bp_row in enumerate(bp_rows, 1):
                 bp_writer.write(bp_row)
+                if j % step == 0:
+                    _check()
+                    _emit("WRITING", j, len(bp_rows), "rows", "writing Billing Period")
             bp_handle.close()
             staged["Billing Period"] = bp_file
             row_counts["Billing Period"] = len(bp_rows)
@@ -568,8 +753,12 @@ def convert_files(
                     metadata=_meta("Contract Commitment"),
                     compression=compression,
                 )
-                for r in cc_out:
+                _emit("WRITING", 0, len(cc_out), "rows", "writing Contract Commitment", force=True)
+                for j, r in enumerate(cc_out, 1):
                     cc_writer.write(r)
+                    if j % step == 0:
+                        _check()
+                        _emit("WRITING", j, len(cc_out), "rows", "writing Contract Commitment")
                 cc_handle.close()
                 staged["Contract Commitment"] = cc_file
                 row_counts["Contract Commitment"] = len(cc_out)
@@ -577,7 +766,7 @@ def convert_files(
 
         if index is not None:
             index.close()
-            out.discard(_INDEX_DB)  # scratch aggregation DB must never be published
+            _discard_scratch(out, config, _INDEX_DB, index_db_path)
 
         providers = [provider_seen[k] for k in sorted(provider_seen)]
         billing = [billing_seen[k] for k in sorted(billing_seen)]
@@ -618,9 +807,17 @@ def convert_files(
         # Mandatory validation gate (chunked, bounded memory): never publish a lint failure.
         if validate:
             for name, fname in produced_output_files.items():
+                _check()
+                dataset_total = row_counts.get(name) or 0
+                _emit("VALIDATING", 0, dataset_total, "rows", f"linting {name}", force=True)
+
+                def _lint_rows(done: int, _name: str = name, _total: int = dataset_total) -> None:
+                    _emit("VALIDATING", done, _total, "rows", f"linting {_name}")
+
                 report = _lint_file(
                     name, out.path_for(fname), output_format,
                     partition_by=partition_map.get(name), capabilities=capabilities,
+                    check=_check, on_rows=_lint_rows,
                 )
                 entry = manifest["datasets"][name]
                 if entry["conformance"] == manifest_mod.CONF_NOT_VALIDATED:
@@ -641,21 +838,26 @@ def convert_files(
             from focus_data_toolkit.storage.spill import SpillableIndexPool
             from focus_data_toolkit.validate.bundle import validate_dataset_bundle
 
+            _check()
+            _emit("VALIDATING", 0, None, "rows", "cross-dataset bundle validation", force=True)
             bundle_rows = {
                 name: _StagedRows(
                     out.path_for(fname), output_format, name,
-                    partition_by=partition_map.get(name),
+                    partition_by=partition_map.get(name), check=_check,
                 )
                 for name, fname in produced_output_files.items()
             }
-            spill = SpillableIndexPool(out.path_for(_BUNDLE_DB))
+            spill_db_path = runtime.resolve_work_path(config, out.path_for(_BUNDLE_DB))
+            if config.work_dir is not None:
+                scratch_paths.append(spill_db_path)
+            spill = SpillableIndexPool(spill_db_path)
             try:
                 bundle_report = validate_dataset_bundle(
                     bundle_rows, index_factory=spill.make_map
                 )
             finally:
                 spill.close()
-            out.discard(_BUNDLE_DB)  # scratch spill DB must never be published
+            _discard_scratch(out, config, _BUNDLE_DB, spill_db_path)
             manifest["bundle_validation"] = bundle_report.as_dict()
             if not bundle_report.ok:
                 first = bundle_report.errors[0]
@@ -674,6 +876,10 @@ def convert_files(
             else:
                 out.add_data_file(fname)
 
+        # Last cancel opportunity before the atomic publish; the rename itself is fast and is
+        # intentionally not interrupted (interrupting it would defeat atomicity).
+        _check()
+        _emit("PUBLISHING", 0, None, "rows", "writing checksums + manifest", force=True)
         checksums = out.checksums()
         manifest_bytes = manifest_mod.render(manifest).encode("utf-8")
         sidecar = _run_metadata(

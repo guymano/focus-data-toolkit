@@ -53,6 +53,38 @@ class CsvRowReader:
                 )
             yield Record(dict(zip(self.source_columns, row, strict=True)), self._reader.line_num)
 
+    @property
+    def bytes_total(self) -> int | None:
+        """Size of the source file in bytes (the *compressed* size for a ``.gz`` input)."""
+        try:
+            return self._path.stat().st_size
+        except OSError:
+            return None
+
+    @property
+    def bytes_read(self) -> int | None:
+        """Approximate position in the *compressed* byte stream, for progress reporting.
+
+        Both this and :attr:`bytes_total` are measured on the compressed stream, so the
+        ratio is consistent for gzip input. The value advances in buffered read-ahead steps
+        (monotonic, slightly ahead of the last yielded row) — fine for a progress bar. For a
+        gzip source the compressed offset lives on the wrapped raw file object, not on the
+        ``GzipFile`` (whose ``tell()`` is the *uncompressed* offset); returns ``None`` if the
+        underlying stream exposes no usable position.
+        """
+        try:
+            buffer = self._fh.buffer  # the TextIOWrapper's underlying binary stream
+        except (AttributeError, ValueError):
+            return None
+        # gzip: the compressed offset is on the wrapped raw file, exposed as ``fileobj``.
+        raw = getattr(buffer, "fileobj", None)
+        target = raw if raw is not None else buffer
+        try:
+            pos = target.tell()
+        except (OSError, ValueError, AttributeError):
+            return None
+        return pos if isinstance(pos, int) and pos >= 0 else None
+
     def close(self) -> None:
         self._fh.close()
 
