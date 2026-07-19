@@ -9,6 +9,17 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **CI: `dependency-review` job** in `.github/workflows/security.yml` (PR-only, informational).
+  Now that the repository Dependency Graph is enabled, `actions/dependency-review-action` gates a
+  PR's dependency **diff** against the GitHub Advisory database and fails on a HIGH+ vulnerability.
+  It complements `pip-audit` (which scans the installed Linux/py3.12 environment every run) by
+  covering the full locked graph at PR time — including platform-/version-conditional packages
+  (e.g. the Windows-only `tzdata`) that the single-platform install never exercises — ahead of
+  Dependabot's post-merge alerts. Least privilege (`contents: read`), guarded to `pull_request`
+  events, SHA-pinned; deliberately not a required check.
+
 ### Changed
 
 - **CI (risk-based audit follow-up; no runtime code changed).** The container SIGTERM smoke
