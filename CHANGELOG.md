@@ -9,6 +9,16 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **CI: `dependency-review` job** in `.github/workflows/security.yml` (PR-only, informational).
+  Now that the repository Dependency Graph is enabled, `actions/dependency-review-action` diffs a
+  PR's dependency changes and fails on a HIGH+ vulnerability. It is the only control that catches a
+  vulnerable/malicious dependency introduced by a PR **in an extra not installed in CI** (e.g.
+  `[validator]`), which `pip-audit` (installed environment only) and Dependabot (post-merge alerts
+  on `main`) do not cover at PR time. Least privilege (`contents: read`), guarded to `pull_request`
+  events, SHA-pinned; deliberately not a required check.
+
 ## [0.11.0] — 2026-07-18
 
 First **stable** release. Same feature set as `0.11.0rc1`, promoted to a final release now that the
