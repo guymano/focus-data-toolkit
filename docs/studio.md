@@ -24,7 +24,7 @@ self-contained. Already comfortable? Skip to the [one-liner](#already-have-pytho
 2. In the folder holding your FOCUS files (or any folder), set the toolkit up in an isolated
    environment and launch it:
    ```powershell
-   py -3.11 -m venv .venv
+   py -m venv .venv
    .\.venv\Scripts\Activate.ps1
    pip install "focus-data-toolkit[studio]"
    focus-toolkit ui
@@ -45,8 +45,9 @@ self-contained. Already comfortable? Skip to the [one-liner](#already-have-pytho
 
 ### macOS (Terminal)
 
-1. Install **Python 3.11+** from [python.org/downloads](https://www.python.org/downloads/) (or
-   `brew install python@3.12`). Check:
+1. Install **Python 3.11+** from [python.org/downloads](https://www.python.org/downloads/) (the
+   installer provides `python3`). With Homebrew instead, use `brew install python` — the
+   unversioned formula links `python3` onto your PATH. Check it's 3.11+:
    ```bash
    python3 --version
    ```
@@ -61,12 +62,23 @@ self-contained. Already comfortable? Skip to the [one-liner](#already-have-pytho
 
 ### Linux (Terminal)
 
-1. Ensure **Python 3.11+** with the venv/pip modules. On Debian/Ubuntu:
+1. Check your Python version:
    ```bash
-   sudo apt install python3-venv python3-pip
    python3 --version
    ```
-2. In the folder holding your FOCUS files:
+   - **3.11 or newer** (recent distros, e.g. Ubuntu 24.04+ / Debian 12+): just add the venv/pip
+     modules and use `python3` below —
+     ```bash
+     sudo apt install python3-venv python3-pip     # Debian/Ubuntu
+     ```
+   - **Older than 3.11** (e.g. Ubuntu 22.04 ships 3.10): install 3.11 alongside it and use
+     `python3.11` below —
+     ```bash
+     sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt update
+     sudo apt install python3.11 python3.11-venv
+     ```
+     (On non-Ubuntu distros, install your distribution's `python3.11` package the same way.)
+2. In the folder holding your FOCUS files (use `python3.11` if you installed it above):
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
