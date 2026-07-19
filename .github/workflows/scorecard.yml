@@ -21,6 +21,7 @@ jobs:
   analysis:
     name: Scorecard analysis
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       # A job-level permissions block replaces the top-level one entirely (unset scopes become
       # `none`), so `contents: read` must be restated for actions/checkout to read the repo.

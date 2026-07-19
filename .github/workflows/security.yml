@@ -18,6 +18,7 @@ jobs:
   pip-audit:
     name: Dependency vulnerability scan (pip-audit)
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -25,7 +26,10 @@ jobs:
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           python-version: "3.12"
-      - run: uv sync --frozen --extra dev
+      # --extra validator: `dev` covers release+parquet+studio but NOT the advertised
+      # [validator] extra; install it too (the runner's 3.12 satisfies its >=3.12 marker)
+      # so focus-validator and its transitive deps are inside the audited environment.
+      - run: uv sync --frozen --extra dev --extra validator
       - name: Audit installed dependencies
         # No documented exceptions: the lock resolves pyarrow >= 23.0.1 (currently 25.x), which
         # fixes PYSEC-2026-113, so the previous `--ignore-vuln PYSEC-2026-113` is no longer needed.
@@ -36,6 +40,7 @@ jobs:
   secret-scan:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -50,6 +55,7 @@ jobs:
   workflow-lint:
     name: Lint workflows (actionlint + zizmor + pinning)
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
