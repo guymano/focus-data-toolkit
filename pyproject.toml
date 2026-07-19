@@ -127,7 +127,9 @@ branch = true
 
 [tool.coverage.report]
 # Non-regressive floor (measured at introduction; raise, never lower on failure).
-fail_under = 80
+# Raised 80 -> 85: every CI combo currently measures ~89-90%, so 85 guards against a large
+# under-tested module diluting the global figure while keeping headroom for OS-skipped paths.
+fail_under = 85
 show_missing = true
 exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "@overload"]
 

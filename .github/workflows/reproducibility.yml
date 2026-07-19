@@ -4,6 +4,10 @@ name: Reproducibility check
 # byte-for-byte reproducible and is asserted as a hard gate; the sdist's file *contents* are
 # reproducible but its tar PAX-header mtime is not normalized by SOURCE_DATE_EPOCH, so the sdist
 # comparison is reported (not failed). See docs/releasing.md for the documented limitation.
+#
+# The build procedure mirrors release-build.yml exactly (same locked toolchain, same hash-pinned
+# backend, --no-isolation) so what this check proves reproducible is the build the release
+# actually ships — not a differently-resolved local build.
 
 on:
   workflow_dispatch:
@@ -14,21 +18,24 @@ permissions:
 jobs:
   double-build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           python-version: "3.12"
-      - name: Install locked toolchain
-        run: uv sync --frozen --extra dev
+      - name: Install locked toolchain (tools only — no project build before the backend gate)
+        run: uv sync --frozen --extra dev --no-install-project
       - name: Fixed build timestamp
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
-      - name: Build twice
+      - name: Install the locked build backend (exact version + hashes)
+        run: uv pip install --require-hashes -r constraints/build-backend.txt
+      - name: Build twice (locked backend, no isolation — same procedure as release-build.yml)
         run: |
-          uv run python -m build --outdir out1
-          uv run python -m build --outdir out2
+          uv run --no-sync python -m build --no-isolation --outdir out1
+          uv run --no-sync python -m build --no-isolation --outdir out2
       - name: Compare (wheel is a hard gate; sdist is reported)
         run: |
           set -euo pipefail

@@ -1,0 +1,48 @@
+name: Scale
+
+# Runs the `slow`-marked large-scale tests (tests/test_streaming.py::test_memory_stays_bounded_at_scale:
+# 100k/300k rows under tracemalloc), which the default pytest run excludes via addopts — without
+# this workflow the bounded-memory promise is protected by nothing.
+#
+# The test is deterministic but takes ~10 minutes (tracemalloc overhead dominates), so it does
+# NOT run on every PR: it triggers on changes to the streaming engine and its test, on every
+# push to main (a safety net for indirect regressions, off the PR critical path), and manually.
+# Deliberately NOT a required check — it is paths-filtered, and a paths-filtered required check
+# would block every PR that does not touch these paths.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "src/focus_data_toolkit/convert/**"
+      - "src/focus_data_toolkit/io/**"
+      - "src/focus_data_toolkit/storage/**"
+      - "src/focus_data_toolkit/runtime.py"
+      - "src/focus_data_toolkit/progress.py"
+      - "tests/test_streaming.py"
+      - ".github/workflows/scale.yml"
+      - "uv.lock"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scale-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scale:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen --extra dev
+      - name: Large-scale streaming tests (memory stays bounded)
+        run: uv run pytest -m slow -q

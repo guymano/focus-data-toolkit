@@ -16,6 +16,7 @@ concurrency:
 jobs:
   lint:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -28,6 +29,7 @@ jobs:
 
   typecheck:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -44,7 +46,14 @@ jobs:
       matrix:
         os: [ubuntu-24.04, windows-2025]
         python: ["3.11", "3.12", "3.13"]
+        include:
+          # Single macOS smoke combo: the wheel is pure Python and PyPI advertises
+          # "OS Independent", so one macOS run (POSIX paths/symlinks + the native PyArrow
+          # wheel) is proportionate; a full macOS matrix is not.
+          - os: macos-15
+            python: "3.13"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     env:
       UV_PYTHON: ${{ matrix.python }}
     steps:
@@ -61,6 +70,7 @@ jobs:
 
   package:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -75,9 +85,19 @@ jobs:
         run: uv run twine check dist/*
       - name: Build/install/smoke the distribution (packaging suite)
         run: uv run pytest -m packaging -q
+      - name: Smoke - the [all] extra resolves and installs (fresh venv, Python 3.12)
+        # `[all]` (parquet + validator + studio) is advertised but was never installed by any
+        # workflow; the runner's Python 3.12 satisfies focus-validator's >=3.12 marker.
+        run: |
+          python3 -m venv /tmp/all-venv
+          whl="$(ls dist/*.whl)"
+          /tmp/all-venv/bin/pip install --quiet "${whl}[all]"
+          /tmp/all-venv/bin/focus-toolkit version
+          test -x /tmp/all-venv/bin/focus-validator
 
   actions-pinned:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:

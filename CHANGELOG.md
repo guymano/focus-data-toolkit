@@ -9,6 +9,22 @@ policy.
 
 ## [Unreleased]
 
+### Changed
+
+- **CI (risk-based audit follow-up; no runtime code changed).** The container SIGTERM smoke
+  is now deterministic: it waits for the conversion to observably start before stopping, and
+  a run that finishes before the signal lands **fails** as inconclusive instead of passing
+  silently. The bounded-memory streaming test (`-m slow`, ~10 min under tracemalloc) now runs
+  automatically in a new `scale.yml` — on streaming-engine PRs, every push to main, and on
+  demand — instead of never. `reproducibility.yml` uses the exact locked build procedure of
+  `release-build.yml` (hash-pinned backend, `--no-isolation`). `release-dry-run.yml` also
+  triggers on PRs touching release-relevant paths (informational). One macOS combo
+  (`macos-15`/3.13) joins the test matrix. pip-audit now also audits the `[validator]` extra,
+  and the `package` job smoke-installs `[all]`. All jobs set `timeout-minutes`; the container
+  workflow gained `concurrency` cancellation; `actions/checkout` and `astral-sh/setup-uv`
+  pins are converged to one version repo-wide. Coverage floor raised 80 → 85. New unit tests
+  cover the `official_validator` subprocess wrapper.
+
 ## [0.11.0] — 2026-07-18
 
 First **stable** release. Same feature set as `0.11.0rc1`, promoted to a final release now that the

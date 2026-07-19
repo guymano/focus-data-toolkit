@@ -1,14 +1,34 @@
 name: Release dry-run
 
-# Manual rehearsal of the release build. It calls the reusable build-once workflow and re-verifies
+# Rehearsal of the release build. It calls the reusable build-once workflow and re-verifies
 # the produced artifacts, but requests NO publish/attestation scopes, uses NO environment, and
 # publishes nothing. Use it to exercise the pipeline on any branch before cutting a tag.
 #
 # Separation from the real release is structural (a distinct workflow with no id-token/publish),
 # not a boolean flag — a dry-run cannot become a publish.
+#
+# Besides the manual dispatch, it runs automatically on PRs that touch release-relevant files,
+# so a change that breaks the locked build chain is caught at PR time instead of at the next
+# tag. Deliberately NOT a required check: a paths-filtered required check would block every PR
+# that does not touch these paths.
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/release-build.yml"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/release-container.yml"
+      - ".github/workflows/release-dry-run.yml"
+      - "constraints/**"
+      - "scripts/verify_release.py"
+      - "scripts/generate_sbom.py"
+      - "scripts/generate_resolved_sbom.py"
+      - "pyproject.toml"
+      - "MANIFEST.in"
+      - "uv.lock"
+      - "src/focus_data_toolkit/_version.py"
+      - "CHANGELOG.md"
 
 permissions:
   contents: read
@@ -20,10 +40,11 @@ jobs:
   verify:
     needs: build
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0

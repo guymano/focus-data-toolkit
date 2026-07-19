@@ -9,7 +9,7 @@ The release **pipeline** lives in `.github/workflows/`:
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
 | `release-build.yml` | `workflow_call` (reusable) | Build wheel+sdist **once** (locked toolchain, `SOURCE_DATE_EPOCH` = commit date), test them, generate the CycloneDX SBOM + `SHA256SUMS` + a build manifest, run `verify_release.py`, upload the artifacts. No publish scopes. |
-| `release-dry-run.yml` | `workflow_dispatch` | Calls `release-build` and re-verifies — **no** id-token, **no** environment, publishes nothing. Rehearse on any branch. |
+| `release-dry-run.yml` | `workflow_dispatch` + `pull_request` on release-relevant paths | Calls `release-build` and re-verifies — **no** id-token, **no** environment, publishes nothing. Rehearse on any branch; also runs automatically on PRs touching the release workflows, `constraints/`, the release scripts, packaging metadata or the version/CHANGELOG, so a broken release chain is caught at PR time (informational — deliberately not a required check, because a paths-filtered required check would block unrelated PRs). |
 | `release.yml` | push tag `v*` | Calls `release-build`, then **attests** wheel/sdist/SBOM/checksums (GitHub Artifact Attestations, keyless OIDC) and **publishes** to PyPI via Trusted Publishing in the `pypi` environment. The same artifacts flow by digest — nothing is rebuilt to publish. |
 | `reproducibility.yml` | `workflow_dispatch` | Double-builds and compares (see Reproducibility below). |
 
@@ -49,6 +49,16 @@ these are in place:
 - [ ] **Dependency Graph + code scanning** enabled, so CodeQL, OpenSSF Scorecard,
       and dependency-review can run (see below).
 - [ ] **CODEOWNERS** confirmed and "require review from Code Owners" turned on.
+
+Pre-release manual steps (each release, owner-run):
+
+- [ ] Run `reproducibility.yml` (workflow_dispatch) on the release commit and check the
+      wheel double-build gate is green — it uses the exact locked build procedure of
+      `release-build.yml`, so a green run vouches for the artifact the release will ship.
+- [ ] Studio browser smoke (the JS frontend has no automated browser test — a deliberate
+      trade-off, see `tests/test_studio.py` for the API-level coverage): `focus-toolkit ui`,
+      open the printed tokenized URL, select a file, run a conversion, watch progress,
+      download the result.
 
 ## The security workflows
 
