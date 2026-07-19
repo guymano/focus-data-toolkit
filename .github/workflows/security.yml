@@ -76,8 +76,25 @@ jobs:
       - name: All actions pinned to a full SHA (project policy)
         run: python3 scripts/check_pinned_actions.py
 
-  # NOTE (Ops follow-up): actions/dependency-review-action requires the repository's Dependency
-  # Graph to be enabled (and GitHub Advanced Security on private repos). It is intentionally not
-  # wired here yet because it errors ("Dependency review is not supported on this repository")
-  # until that setting is turned on. Dependency CVEs are already covered by the pip-audit job
-  # above and by Dependabot; re-add a `dependency-review` job once the Dependency Graph is enabled.
+  dependency-review:
+    name: Dependency review (PR)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # dependency-review-action diffs base..head, so it only runs on pull_request events; this
+    # workflow also runs on push/schedule, where the action would error — guard it so the job is
+    # skipped (not failed) there. Requires the repository Dependency Graph (now enabled).
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Review dependency changes for known-vulnerable versions
+        # Catches a vulnerable/malicious dependency introduced by a PR — including in extras that
+        # are NOT installed in CI (e.g. [validator]) — which pip-audit (installed environment only)
+        # and Dependabot (alerts on main, after merge) do not cover at PR time.
+        uses: actions/dependency-review-action@56339e523c0409420f6c2c9a2f4292bbb3c07dd3 # v4.8.0
+        with:
+          fail-on-severity: high        # aligned with the repo's Trivy HIGH/CRITICAL posture
+          comment-summary-in-pr: never  # no PR comment -> no pull-requests: write needed
