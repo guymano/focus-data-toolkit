@@ -91,9 +91,10 @@ jobs:
         with:
           persist-credentials: false
       - name: Review dependency changes for known-vulnerable versions
-        # Catches a vulnerable/malicious dependency introduced by a PR — including in extras that
-        # are NOT installed in CI (e.g. [validator]) — which pip-audit (installed environment only)
-        # and Dependabot (alerts on main, after merge) do not cover at PR time.
+        # Complements pip-audit: pip-audit scans the *installed* Linux/py3.12 environment, while
+        # this gates the PR's dependency diff against the GitHub Advisory DB across the full locked
+        # graph — incl. platform/version-conditional packages (e.g. Windows-only tzdata) the
+        # single-platform install never exercises — ahead of Dependabot's post-merge alert.
         uses: actions/dependency-review-action@56339e523c0409420f6c2c9a2f4292bbb3c07dd3 # v4.8.0
         with:
           fail-on-severity: high        # aligned with the repo's Trivy HIGH/CRITICAL posture

@@ -12,11 +12,12 @@ policy.
 ### Added
 
 - **CI: `dependency-review` job** in `.github/workflows/security.yml` (PR-only, informational).
-  Now that the repository Dependency Graph is enabled, `actions/dependency-review-action` diffs a
-  PR's dependency changes and fails on a HIGH+ vulnerability. It is the only control that catches a
-  vulnerable/malicious dependency introduced by a PR **in an extra not installed in CI** (e.g.
-  `[validator]`), which `pip-audit` (installed environment only) and Dependabot (post-merge alerts
-  on `main`) do not cover at PR time. Least privilege (`contents: read`), guarded to `pull_request`
+  Now that the repository Dependency Graph is enabled, `actions/dependency-review-action` gates a
+  PR's dependency **diff** against the GitHub Advisory database and fails on a HIGH+ vulnerability.
+  It complements `pip-audit` (which scans the installed Linux/py3.12 environment every run) by
+  covering the full locked graph at PR time — including platform-/version-conditional packages
+  (e.g. the Windows-only `tzdata`) that the single-platform install never exercises — ahead of
+  Dependabot's post-merge alerts. Least privilege (`contents: read`), guarded to `pull_request`
   events, SHA-pinned; deliberately not a required check.
 
 ### Changed

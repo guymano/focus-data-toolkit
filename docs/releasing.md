@@ -66,10 +66,11 @@ Pre-release manual steps (each release, owner-run):
 / `schedule` (plus `branch_protection_rule` for Scorecard). They upload results
 to GitHub **code scanning**, which must be enabled in the repository settings
 (Operationally Ready checklist above) for the uploads to land.
-`actions/dependency-review-action` similarly needs the **Dependency Graph**; a
-`dependency-review` job can be added to `security.yml` once it is enabled
-(dependency CVEs are already covered by `pip-audit` + Dependabot in the
-meantime).
+`.github/workflows/security.yml` also runs a **`dependency-review`** job (pull
+requests only) that gates a PR's dependency **diff** against the GitHub Advisory
+database; it needs the repository **Dependency Graph** (now enabled). It
+complements `pip-audit` (which scans the installed environment) and Dependabot
+(post-merge alerts).
 
 ## Cutting a release
 

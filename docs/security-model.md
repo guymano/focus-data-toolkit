@@ -81,9 +81,11 @@ These reduce risk; they are **indicators, not guarantees**:
   read`; jobs elevate only the scopes they need.
 - **Locked dependencies**: a committed `uv.lock` plus hash-pinned
   `constraints/*.txt` for reproducible installs.
-- **Automated scanning**: `pip-audit` (dependency CVEs), `gitleaks` (secrets),
-  `actionlint` + `zizmor` (workflow security), Dependabot (updates), and — once
-  code scanning is enabled on the repository — CodeQL and OpenSSF Scorecard.
+- **Automated scanning**: `pip-audit` (dependency CVEs in the installed
+  environment), `dependency-review` (a PR's dependency diff vs the GitHub
+  Advisory database; requires the Dependency Graph), `gitleaks` (secrets),
+  `actionlint` + `zizmor` (workflow security), Dependabot (updates), and — with
+  code scanning enabled — CodeQL and OpenSSF Scorecard.
 - **Provenance**: the embedded FOCUS model is verifiable
   (`scripts/verify_model_provenance.py`); the release pipeline (P2-E) adds SBOM
   and build attestations.
@@ -95,8 +97,8 @@ These reduce risk; they are **indicators, not guarantees**:
 
 ## Enabling repository-level scanning (operational)
 
-CodeQL, Scorecard, and dependency-review require GitHub code scanning /
-Dependency Graph, which is available on public repositories (or with GitHub
-Advanced Security on private ones). Until that is enabled, those workflows are
-gated behind `workflow_dispatch` so they do not fail. The operational steps are
-in [docs/releasing.md](releasing.md).
+CodeQL, Scorecard, and `dependency-review` require GitHub code scanning /
+Dependency Graph, available on public repositories (or with GitHub Advanced
+Security on private ones). These are now enabled, so CodeQL and Scorecard run on
+`push` / `pull_request` / `schedule` and `dependency-review` runs on pull
+requests. The operational steps are in [docs/releasing.md](releasing.md).
