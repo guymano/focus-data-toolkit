@@ -6,12 +6,138 @@ drives the same SDK the CLI and Runner use (`detect_focus_schema`, `convert_file
 generators, `open_row_source`), so its manifests, diagnostics and checksums are **identical** to a
 CLI run.
 
+## Installation & first launch
+
+New to Python? Pick your operating system and run the block **top to bottom** — each is
+self-contained. Already comfortable? Skip to the [one-liner](#already-have-python-one-liner).
+
+**Prerequisite (every system): Python 3.11 or newer.** Check with `py --version` (Windows) or
+`python3 --version` (macOS/Linux). If it's missing or older, install it first (links below).
+
+### Windows (PowerShell)
+
+1. Install **Python 3.11+** from [python.org/downloads](https://www.python.org/downloads/) — on the
+   first installer screen, tick **"Add python.exe to PATH"**. Reopen PowerShell, then check:
+   ```powershell
+   py --version
+   ```
+2. In the folder holding your FOCUS files (or any folder), set the toolkit up in an isolated
+   environment and launch it:
+   ```powershell
+   py -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   pip install "focus-data-toolkit[studio]"
+   focus-toolkit ui
+   ```
+3. Your browser opens to `http://127.0.0.1:8765/?token=…`. Press **Ctrl-C** in PowerShell to stop.
+
+> **If activation says "running scripts is disabled on this system"**, either allow scripts for this
+> window only and re-run the activate line:
+> ```powershell
+> Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+> .\.venv\Scripts\Activate.ps1
+> ```
+> …or skip activation entirely and call the environment directly:
+> ```powershell
+> .\.venv\Scripts\python -m pip install "focus-data-toolkit[studio]"
+> .\.venv\Scripts\focus-toolkit ui
+> ```
+
+### macOS (Terminal)
+
+1. Install **Python 3.11+** from [python.org/downloads](https://www.python.org/downloads/) (the
+   installer provides `python3`). With Homebrew instead, use `brew install python` — the
+   unversioned formula links `python3` onto your PATH. Check it's 3.11+:
+   ```bash
+   python3 --version
+   ```
+2. In the folder holding your FOCUS files:
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install "focus-data-toolkit[studio]"
+   focus-toolkit ui
+   ```
+3. Your browser opens to `http://127.0.0.1:8765/?token=…`. Press **Ctrl-C** to stop.
+
+### Linux (Terminal)
+
+1. Check your Python version:
+   ```bash
+   python3 --version
+   ```
+   - **3.11 or newer** (recent distros, e.g. Ubuntu 24.04+ / Debian 12+): just add the venv/pip
+     modules and use `python3` below —
+     ```bash
+     sudo apt install python3-venv python3-pip     # Debian/Ubuntu
+     ```
+   - **Older than 3.11** (e.g. Ubuntu 22.04 ships 3.10): install 3.11 alongside it and use
+     `python3.11` below —
+     ```bash
+     sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt update
+     sudo apt install python3.11 python3.11-venv
+     ```
+     (On non-Ubuntu distros, install your distribution's `python3.11` package the same way.)
+2. In the folder holding your FOCUS files (use `python3.11` if you installed it above):
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install "focus-data-toolkit[studio]"
+   focus-toolkit ui
+   ```
+3. Open the printed `http://127.0.0.1:8765/?token=…` URL. Press **Ctrl-C** to stop.
+
+> On recent distros a system-wide `pip install` is refused ("externally-managed-environment"). The
+> virtual environment above is exactly what avoids that — nothing is installed system-wide.
+
+### Already have Python? One-liner
+
+With **pipx** or **uv**, install the tool in one isolated step (any OS), then launch it:
+
 ```bash
-pip install "focus-data-toolkit[studio]"   # or [studio-all] for Parquet
-focus-toolkit ui                           # opens http://127.0.0.1:8765/?token=…
+pipx install "focus-data-toolkit[studio]"     # or:  uv tool install "focus-data-toolkit[studio]"
+focus-toolkit ui
 ```
 
-The command prints a URL containing a one-time token and opens it in your browser.
+### Options you'll likely want
+
+- **Parquet support:** install `"focus-data-toolkit[studio-all]"` instead of `[studio]`.
+- **Point it at your data / change the port:**
+  ```bash
+  focus-toolkit ui --root /path/to/your/focus/files --port 8765
+  ```
+  (Windows: quote paths with spaces, e.g. `--root "C:\My Data\focus"`.)
+- **Come back later:** re-activate the environment (`source .venv/bin/activate`, or
+  `.\.venv\Scripts\Activate.ps1` on Windows) and run `focus-toolkit ui` again. A pipx/uv install
+  stays on your PATH — just run `focus-toolkit ui`.
+
+### Running it on a remote / headless machine (SSH)
+
+The Studio binds to `127.0.0.1`, so it isn't reachable from outside by design. To use it from your
+laptop, forward the port over SSH — your data stays on the server and the link is encrypted:
+
+```bash
+# on the server:
+focus-toolkit ui --no-open-browser --root /path/to/data
+# on your laptop (new terminal), then open the printed URL locally:
+ssh -L 8765:127.0.0.1:8765 user@server
+```
+
+Prefer this tunnel over `--allow-remote` (which exposes the port and leaves the token as the only
+guard — use it only on a trusted network).
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `focus-toolkit: command not found` | The environment isn't active — re-run the `activate` line, or call it directly (`.venv/bin/focus-toolkit`; Windows: `.\.venv\Scripts\focus-toolkit`). |
+| Windows: *"running scripts is disabled"* | See the ExecutionPolicy note under **Windows** above. |
+| Linux: *"externally-managed-environment"* | Use the virtual environment (or pipx) — don't `pip install` system-wide. |
+| `no matches found: focus-data-toolkit[studio]` | Quote it: `"focus-data-toolkit[studio]"` (needed in zsh/macOS and PowerShell). |
+| *"ui needs the studio extra"* / `ModuleNotFoundError: fastapi` | Installed without the extra — reinstall with `[studio]`. |
+| `Address already in use` (port 8765) | Pick another port: `focus-toolkit ui --port 8766`. |
+
+The launch command prints a URL containing a one-time token and opens it in your browser.
 
 ## What you can do
 
