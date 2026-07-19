@@ -147,5 +147,9 @@ def test_memory_stays_bounded_at_scale(tmp_path):
     # Peak Python memory must not scale with row count: 3x the rows must not ~3x the memory.
     # (Measured: a flat ~38 MB regardless of n — the CU file is read once and all aggregation
     # is staged in SQLite, so only one row + one group accumulator + the page cache are live.)
+    # Known blind spot: tracemalloc only counts Python-level allocations — native memory held
+    # by SQLite (page cache) or PyArrow buffers is invisible to it. Kept deliberately: an
+    # RSS-based bound would cover native memory but is runner-noise-flaky, while this check is
+    # deterministic and still catches the realistic regression (Python-side row accumulation).
     assert peaks[300_000] < 200e6
     assert peaks[300_000] < peaks[100_000] * 1.5
