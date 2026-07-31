@@ -63,7 +63,7 @@ studio = [
 studio-all = ["focus-data-toolkit[studio,parquet]"]
 all = ["focus-data-toolkit[parquet,validator,studio]"]
 # Building and checking distributions (used by the packaging tests and the release pipeline).
-release = ["build>=1,<2", "twine>=5,<7"]
+release = ["build>=1,<2", "twine>=5,<8"]
 # `dev` includes pyarrow so the Parquet test suite actually runs (not silently importorskip'd),
 # the release tooling so the packaging tests can build/inspect the wheel and sdist, and the
 # type-checker + coverage plugin used by CI.
