@@ -48,6 +48,10 @@ This is tracked as a "Windows streaming / atomic-write hardening" follow-up. On
 Windows, use the eager conversion path; on Linux/macOS, `--stream` gives flat
 memory regardless of row count.
 
+Windows users who need the streaming path can run it through the container
+instead: the Runner image is Linux, so `--stream`, Parquet and partitioned
+output work there from a Windows host. See [docs/runner.md](runner.md).
+
 > Note: because streaming is unsupported on Windows, the POSIX-only path-traversal
 > guard it relies on is not a Windows security control. See
 > [docs/security-model.md](security-model.md).
