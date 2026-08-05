@@ -22,6 +22,25 @@ policy.
 
 ### Changed
 
+- **Docs: `docs/runner.md` rewritten as a step-by-step guide, and several claims corrected** (no
+  runtime code changed). The page now walks a newcomer from `docker pull` to a validated FOCUS 1.4
+  output — prerequisites, a mount-free first run, directory setup, a six-step walkthrough with the
+  real command output, Podman, GitHub Actions / Kubernetes / cron examples, and a troubleshooting
+  table — before the reference sections. Corrections to previously published statements: the disk
+  budgets apply to the **streaming path only** (the eager CSV conversion ignores them and cannot
+  exit 5); the exit-code table is the **`convert`** contract, not a global one; the image ships the
+  `[parquet]` extra only, so `validate --official` and `ui` are unavailable in the container; the
+  image's CycloneDX SBOM is retained as a **workflow artifact**, not attached to the release or
+  pushed to the registry; trivy fails on HIGH/CRITICAL findings **that have a fix available**
+  (`ignore-unfixed: true`). Also documents `FOCUS_TOOLKIT_LOG_LEVEL` (with its current lack of
+  effect in the Runner), the `_run.json` sidecar, `focus-toolkit clean` after a hard kill, and the
+  `TMPDIR` vs `FOCUS_TOOLKIT_WORK_DIR` distinction for `validate-bundle`. Two further scope
+  corrections: the cooperative cancel (SIGTERM → exit 130, nothing published) is a property of the
+  **streaming** path — the eager CSV conversion installs no signal handler, so `docker stop` there
+  terminates it mid-flight (exit 143) and can leave staging behind; and `clean` takes only `--out`,
+  so it does **not** sweep `fdt-<run_id>` scratch orphaned under `FOCUS_TOOLKIT_WORK_DIR` by a
+  killed streaming run. `docs/compatibility.md` now points Windows readers to the Runner for the
+  streaming path.
 - **CI (risk-based audit follow-up; no runtime code changed).** The container SIGTERM smoke
   is now deterministic: it waits for the conversion to observably start before stopping, and
   a run that finishes before the signal lands **fails** as inconclusive instead of passing
