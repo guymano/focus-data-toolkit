@@ -154,25 +154,40 @@ lint [Cost and Usage]: lint OK
 > fill them from client data. To make an orchestrator treat this as success, add
 > `--exit-policy pipeline`, which maps 3 and 4 to **0** while leaving genuine failures non-zero.
 
-Two variants worth knowing, same mounts:
+Two variants worth knowing — same mounts, so only the trailing subcommand differs:
 
 ```bash
 # Fill the missing datasets with clearly-labelled assumptions (exit 4): filenames gain a
 # `synthetic_` prefix, and stderr carries one WARNING line.
-convert --cost-and-usage /input/gen/focus_1_3_cost_and_usage_aws.csv \
-  --out /output/synthetic --mode synthetic
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD/input:/input:ro" -v "$PWD/output:/output" -v "$PWD/work:/work" \
+  ghcr.io/guymano/focus-data-toolkit:0.11.0 \
+  convert --cost-and-usage /input/gen/focus_1_3_cost_and_usage_aws.csv \
+    --out /output/synthetic --mode synthetic
 
 # Bounded-memory streaming to partitioned Parquet — the large-file path.
-convert --cost-and-usage /input/gen/focus_1_3_cost_and_usage_aws.csv \
-  --out /output/parquet --stream --output-format parquet \
-  --partition-by BillingCurrency --compression zstd --progress
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD/input:/input:ro" -v "$PWD/output:/output" -v "$PWD/work:/work" \
+  ghcr.io/guymano/focus-data-toolkit:0.11.0 \
+  convert --cost-and-usage /input/gen/focus_1_3_cost_and_usage_aws.csv \
+    --out /output/parquet --stream --output-format parquet \
+    --partition-by BillingCurrency --compression zstd --progress
 ```
 
 The two paths report differently. The eager CSV conversion lists every file it wrote; the streaming
-path prints one line — `wrote /output/parquet/ (format parquet, mode strict)` — and sends per-phase
-progress and manifest notes to **stderr**. With `--partition-by`, the Cost and Usage output is a
-**directory** of Parquet parts, not a file. An existing `--out` is refused (exit 2) unless you pass
-`--on-exists replace` or `--on-exists version`.
+path prints a single `wrote` line naming the **directory** — followed, in strict mode, by the same
+`not produced` line per missing dataset:
+
+```console
+wrote /output/parquet/ (format parquet, mode strict)
+not produced [Billing Period]: Mandatory provider-issued fields unavailable from Cost and Usage
+not produced [Contract Commitment]: no source dataset available for this FOCUS 1.4 dataset
+not produced [Invoice Detail]: Mandatory provider-issued fields unavailable from Cost and Usage
+```
+
+Per-phase progress and manifest notes go to **stderr**, so stdout stays parseable. With
+`--partition-by`, the Cost and Usage output is a **directory** of Parquet parts, not a file. An
+existing `--out` is refused (exit 2) unless you pass `--on-exists replace` or `--on-exists version`.
 
 ### 4. Look at what you got
 
@@ -192,7 +207,7 @@ byte-identity of a deterministic output.
 Lint a single file, then check the datasets against each other as a bundle:
 
 ```console
-$ docker run --rm -v "$PWD/output:/output:ro" -v "$PWD/work:/work" \
+$ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/output:/output:ro" -v "$PWD/work:/work" \
     ghcr.io/guymano/focus-data-toolkit:0.11.0 validate-bundle --directory /output/result
 validated: Cost and Usage
 bundle validation: OK (not_executable=1)
@@ -206,16 +221,29 @@ isn't in the bundle. Add `--format json` for a report with an `ok` flag. Swap th
 1.4 conformance check**.
 
 Two limits here. `validate-bundle` spills large state through `tempfile`, which follows **`TMPDIR`**
-— the image presets `TMPDIR=/work`, so mounting `/work` is what keeps that spill on fast disk. And
+— the image presets `TMPDIR=/work`, so mounting `/work` is what keeps that spill on fast disk. Keep
+the `--user` flag on this command too: `tempfile` *probes* its candidate directories for
+writability, so an unwritable `/work` does not raise — it quietly falls back to the container's own
+`/tmp`, and the spill silently leaves the volume you sized for it. And
 `validate --official`, which runs the FinOps `focus-validator`, is **not available in this image**:
 it ships the `[parquet]` extra only. For an official-validator run, install the package with the
 `[validator]` extra on Python 3.12+ ([compatibility.md](compatibility.md)).
 
 ### 6. Recover after a crash
 
-A clean cancel publishes nothing and leaves nothing behind. A hard kill — OOM, `SIGKILL`, node
-eviction, container exit **137** — can leave `.output.tmp-*`, `.trash-*` or `.replace-journal-*.json`
-in the **parent** of `--out`, because that is where the atomic publish stages its work. Sweep them:
+The cooperative cancel — SIGTERM or SIGINT unwinding to exit 130 with nothing published — is a
+property of the **streaming** path. The eager CSV conversion installs no signal handler, so
+`docker stop` there hits Python's default SIGTERM behaviour and terminates the process mid-flight
+(exit 143). So leftovers are possible after a hard kill (OOM, `SIGKILL`, node eviction, exit **137**)
+**and** after a plain `docker stop` on a non-`--stream` run:
+
+- `.output.tmp-*`, `.trash-*` and `.replace-journal-*.json` in the **parent** of `--out`, because
+  that is where the atomic publish stages its work. `clean --out` sweeps these.
+- `fdt-<run_id>/` scratch directories under `FOCUS_TOOLKIT_WORK_DIR` (`/work` in the image), left by
+  a killed **streaming** run. `clean` takes only `--out` and does **not** reach `/work` — sweep that
+  yourself, from the host or with `--entrypoint sh`.
+
+Sweep the output side:
 
 ```console
 $ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/output:/output" \
@@ -224,7 +252,8 @@ nothing to clean
 ```
 
 > **Run `clean` only when nothing is publishing to that location.** It cannot tell a stale staging
-> directory from a live one, so a concurrent conversion would lose its work in progress.
+> directory from a live one, so a concurrent conversion would lose its work in progress. The same
+> caveat applies to sweeping `/work` by hand.
 
 ## Podman
 
@@ -354,8 +383,22 @@ spec:
 Use the absolute `/usr/bin/docker` — cron's `PATH` is minimal. Keep `--on-exists version` (or
 `replace`): the default `refuse` makes every run after the first exit 2. `--exit-policy pipeline`
 stops cron mailing you about a by-design exit 3, and `--progress` is best omitted since its
-rewritten status line is noise in a log file. A weekly companion job running `clean --out
-/output/nightly` sweeps anything a killed run left behind.
+rewritten status line is noise in a log file.
+
+Killed runs need two companion sweeps, not one — `clean` only ever looks at `--out`:
+
+```bash
+# Weekly: output-side staging left by a killed run.
+0 4 * * 0 /usr/bin/docker run --rm --user 1000:1000 -v /srv/focus/output:/output
+  ghcr.io/guymano/focus-data-toolkit:0.11.0 clean --out /output/nightly
+    >> /var/log/focus-toolkit.log 2>&1
+
+# Weekly: streaming scratch orphaned under the work mount (nothing in the CLI sweeps this).
+30 4 * * 0 find /srv/focus/work -maxdepth 1 -name 'fdt-*' -mtime +7 -exec rm -rf {} +
+```
+
+Both are safe only when no conversion is running against those paths — hence the quiet hours and
+the `-mtime +7` guard.
 
 ## Troubleshooting
 
@@ -366,7 +409,7 @@ rewritten status line is noise in a log file. A weekly companion job running `cl
 | `Permission denied` under rootless Podman | Rootless uid remapping, a different problem — see [Podman](#podman). |
 | Exit code 3 with no error message | Expected on a Cost-and-Usage-only source in strict mode. Add `--exit-policy pipeline`, supply [supplements](supplements.md), or use `--mode synthetic`. |
 | `error: destination … already exists (on_exists=refuse)` (exit 2) | Pick `--on-exists replace` or `--on-exists version`, or a fresh `--out`. |
-| Exit code 137, `.output.tmp-*` left behind | The container was `SIGKILL`ed, usually OOM. Raise the memory limit, use `--stream` to keep memory flat, then run `clean --out`. |
+| Exit 137 or 143, with `.output.tmp-*` or `/work/fdt-*` left behind | 137 is a `SIGKILL` (usually OOM); 143 is `docker stop` on the eager path, which installs no signal handler. Raise the memory limit, use `--stream` (which cancels cooperatively to 130), then run `clean --out` and sweep `/work` separately — see [step 6](#6-recover-after-a-crash). |
 | `OfficialValidatorNotInstalled` traceback from `validate --official` | The image ships `[parquet]` only. Run the official validator from a `pip install "focus-data-toolkit[validator]"` on Python 3.12+. |
 | `error: the Studio web UI needs the [studio] extra` (exit 2) | The Runner is batch-only; the Studio is a separate install — see [studio.md](studio.md). |
 

@@ -34,8 +34,13 @@ policy.
   pushed to the registry; trivy fails on HIGH/CRITICAL findings **that have a fix available**
   (`ignore-unfixed: true`). Also documents `FOCUS_TOOLKIT_LOG_LEVEL` (with its current lack of
   effect in the Runner), the `_run.json` sidecar, `focus-toolkit clean` after a hard kill, and the
-  `TMPDIR` vs `FOCUS_TOOLKIT_WORK_DIR` distinction for `validate-bundle`. `docs/compatibility.md`
-  now points Windows readers to the Runner for the streaming path.
+  `TMPDIR` vs `FOCUS_TOOLKIT_WORK_DIR` distinction for `validate-bundle`. Two further scope
+  corrections: the cooperative cancel (SIGTERM → exit 130, nothing published) is a property of the
+  **streaming** path — the eager CSV conversion installs no signal handler, so `docker stop` there
+  terminates it mid-flight (exit 143) and can leave staging behind; and `clean` takes only `--out`,
+  so it does **not** sweep `fdt-<run_id>` scratch orphaned under `FOCUS_TOOLKIT_WORK_DIR` by a
+  killed streaming run. `docs/compatibility.md` now points Windows readers to the Runner for the
+  streaming path.
 - **CI (risk-based audit follow-up; no runtime code changed).** The container SIGTERM smoke
   is now deterministic: it waits for the conversion to observably start before stopping, and
   a run that finishes before the signal lands **fails** as inconclusive instead of passing
