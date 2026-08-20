@@ -18,11 +18,13 @@ from focus_data_toolkit.generators.engine.determinism import (
     COMMIT_TERM_DAYS,
     COMMIT_TERM_HOURS,
     CONTRACT_LEAD_DAYS,
+    QTY_Q,
     contract_id_for,
     iso,
     negotiated_commitment_id,
     negotiated_contract_id,
     parse_iso,
+    q,
     s,
 )
 from focus_data_toolkit.generators.engine.ladder import generate_rows
@@ -45,7 +47,7 @@ _NEGOTIATED_TERMS: tuple[tuple[str, str, str, str, str, str, str], ...] = (
     ),
     (
         "USAGEMIN", "Usage", "Usage Commitment",
-        "Contracted minimum usage across eligible services", "150000", "100000", "Hours",
+        "Contracted minimum usage across eligible services", "150000", "100000.0000", "Hours",
     ),
 )
 
@@ -116,8 +118,9 @@ def generate_contract_commitment_rows(
         row["ContractCommitmentCategory"] = cu["CommitmentDiscountCategory"]
         row["ContractCommitmentCost"] = s(term_cost)
         if not spend_based:
+            # Four decimals so a CSV loader types the (integral) quantity as Decimal.
             row["ContractCommitmentQuantity"] = s(
-                Decimal(cu["CommitmentDiscountQuantity"]) * COMMIT_TERM_HOURS
+                q(Decimal(cu["CommitmentDiscountQuantity"]) * COMMIT_TERM_HOURS, QTY_Q)
             )
             row["ContractCommitmentUnit"] = cu["CommitmentDiscountUnit"]
         row["ContractCommitmentDescription"] = cu["CommitmentDiscountName"]

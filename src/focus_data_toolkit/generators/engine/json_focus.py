@@ -43,23 +43,23 @@ def contract_applied_element(
     applied_cost: str,
     applied_qty: str = "",
     applied_unit: str = "",
-) -> dict[str, str]:
+) -> dict[str, str | None]:
     """One ``ContractApplied`` element linking a row to a Contract Commitment.
 
     The identifier keys use the canonical ``Id`` casing of FOCUS erratum #3 (the
-    1.3.0.1 rule model), not the legacy pre-erratum ``ID`` casing. Quantity/unit are
-    carried only when provided: a spend commitment applies a cost alone, a usage
-    commitment applies a cost plus the measured quantity in its native unit.
+    1.3.0.1 rule model), not the legacy pre-erratum ``ID`` casing. Per that rule
+    model (``CAU-ContractAppliedObject-O-007-M``) every element carries **all five**
+    key-value pairs; a spend commitment applies a cost alone, so its quantity/unit
+    are explicit JSON nulls, while a usage commitment carries the measured quantity
+    in its native unit.
     """
-    element = {
+    return {
         "ContractId": contract_id,
         "ContractCommitmentId": commit_id,
         "ContractCommitmentAppliedCost": applied_cost,
+        "ContractCommitmentAppliedQuantity": applied_qty or None,
+        "ContractCommitmentAppliedUnit": applied_unit or None,
     }
-    if applied_qty:
-        element["ContractCommitmentAppliedQuantity"] = applied_qty
-        element["ContractCommitmentAppliedUnit"] = applied_unit
-    return element
 
 
 def contract_applied(elements: Sequence[Mapping[str, object]]) -> str:

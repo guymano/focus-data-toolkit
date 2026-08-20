@@ -133,9 +133,11 @@ def _on_commit_usage(
     applied_unit: str,
 ) -> None:
     # FOCUS 1.3 ContractApplied: the JSON link to the Contract Commitment dataset, on
-    # every commitment usage row (Used and Unused alike — an Unused row is still a
-    # charge tied to the commitment). Spend commitments apply a cost alone; usage
-    # commitments also carry the measured quantity in its native unit.
+    # every commitment row — the recurring Purchase (whose ResourceId is the
+    # commitment, per rule CAU-ContractAppliedObject-O-039-C) and the Used and Unused
+    # usage rows alike (an Unused row is still a charge tied to the commitment).
+    # Spend commitments apply a cost alone; usage commitments also carry the measured
+    # quantity in its native unit.
     usage["ContractApplied"] = contract_applied(
         [contract_applied_element(commit_id, contract_id, applied_cost, applied_qty, applied_unit)]
     )

@@ -1,0 +1,85 @@
+2026-08-20 21:30:27 [INFO] focus_validator.main:97 [main] — === FOCUS Validator Starting ===
+2026-08-20 21:30:27 [INFO] focus_validator.main:98 [main] — Python version: 3.12.3
+2026-08-20 21:30:27 [INFO] focus_validator.main:99 [main] — Command line: /tmp/claude-0/-home-user-focus-data-toolkit/2aa5931b-7603-530e-8cbb-ed6696bff9e6/scratchpad/v312/bin/focus-validator --supported-versions
+2026-08-20 21:30:27 [DEBUG] focus_validator.main:100 [main] — Full arguments: ['/tmp/claude-0/-home-user-focus-data-toolkit/2aa5931b-7603-530e-8cbb-ed6696bff9e6/scratchpad/v312/bin/focus-validator', '--supported-versions']
+2026-08-20 21:30:27 [INFO] focus_validator.main:246 [main] — Configuration parsed:
+2026-08-20 21:30:27 [INFO] focus_validator.main:247 [main] —   Data file: -
+2026-08-20 21:30:27 [INFO] focus_validator.main:248 [main] —   Validation version: 1.2
+2026-08-20 21:30:27 [INFO] focus_validator.main:249 [main] —   Focus dataset: CostAndUsage
+2026-08-20 21:30:27 [INFO] focus_validator.main:250 [main] —   Output type: console
+2026-08-20 21:30:27 [INFO] focus_validator.main:251 [main] —   Output destination: None
+2026-08-20 21:30:27 [INFO] focus_validator.main:252 [main] —   Rule set path: /tmp/claude-0/-home-user-focus-data-toolkit/2aa5931b-7603-530e-8cbb-ed6696bff9e6/scratchpad/v312/lib/python3.12/site-packages/focus_validator/rules
+2026-08-20 21:30:27 [INFO] focus_validator.main:253 [main] —   Transitional rules: False
+2026-08-20 21:30:27 [INFO] focus_validator.main:254 [main] —   Visualization: False
+2026-08-20 21:30:27 [INFO] focus_validator.main:255 [main] —   Explain mode: False
+2026-08-20 21:30:27 [INFO] focus_validator.validator.Validator:52 [__init__] — Initializing FOCUS Validator
+2026-08-20 21:30:27 [DEBUG] focus_validator.validator.Validator:53 [__init__] — Data file: -
+2026-08-20 21:30:27 [DEBUG] focus_validator.validator.Validator:54 [__init__] — Rule set path: /tmp/claude-0/-home-user-focus-data-toolkit/2aa5931b-7603-530e-8cbb-ed6696bff9e6/scratchpad/v312/lib/python3.12/site-packages/focus_validator/rules
+2026-08-20 21:30:27 [DEBUG] focus_validator.validator.Validator:55 [__init__] — Rules version: 1.2
+2026-08-20 21:30:27 [DEBUG] focus_validator.validator.Validator:56 [__init__] — Focus dataset: CostAndUsage
+2026-08-20 21:30:27 [DEBUG] focus_validator.validator.Validator:57 [__init__] — Output type: console, destination: None
+2026-08-20 21:30:27 [INFO] focus_validator.rules.spec_rules.SpecRules:83 [__init__] — Found 1 local supported versions: ['1.2.0.1']
+2026-08-20 21:30:27 [INFO] focus_validator.rules.spec_rules.SpecRules:161 [__init__] — Matched requested version 1.2 to 1.2.0.1 from local files
+2026-08-20 21:30:27 [DEBUG] focus_validator.validator.Validator:137 [__init__] — Validator initialization completed
+2026-08-20 21:30:27 [INFO] focus_validator.main:303 [main] — Retrieving supported versions...
+2026-08-20 21:30:27 [DEBUG] focus_validator.validator.Validator:401 [get_supported_versions] — Retrieving supported versions...
+2026-08-20 21:30:27 [DEBUG] urllib3.connectionpool:1062 [_new_conn] — Starting new HTTPS connection (1): api.github.com:443
+2026-08-20 21:30:27 [DEBUG] urllib3.connectionpool:544 [_make_request] — https://api.github.com:443 "GET /repos/FinOps-Open-Cost-and-Usage-Spec/FOCUS_Spec/releases?per_page=100&page=1 HTTP/1.1" 403 378
+2026-08-20 21:34:52 [INFO] focus_validator.main:97 [main] — === FOCUS Validator Starting ===
+2026-08-20 21:34:52 [INFO] focus_validator.main:98 [main] — Python version: 3.12.3
+2026-08-20 21:34:52 [INFO] focus_validator.main:99 [main] — Command line: /tmp/claude-0/-home-user-focus-data-toolkit/2aa5931b-7603-530e-8cbb-ed6696bff9e6/scratchpad/v312/bin/focus-validator --data-file /tmp/claude-0/-home-user-focus-data-toolkit/2aa5931b-7603-530e-8cbb-ed6696bff9e6/scratchpad/aws12.csv --validate-version 1.2.0.1 --block-download --show-violations
+2026-08-20 21:34:52 [DEBUG] focus_validator.main:100 [main] — Full arguments: ['/tmp/claude-0/-home-user-focus-data-toolkit/2aa5931b-7603-530e-8cbb-ed6696bff9e6/scratchpad/v312/bin/focus-validator', '--data-file', '/tmp/claude-0/-home-user-focus-data-toolkit/2aa5931b-7603-530e-8cbb-ed6696bff9e6/scratchpad/aws12.csv', '--validate-version', '1.2.0.1', '--block-download', '--show-violations']
+2026-08-20 21:34:52 [INFO] focus_validator.main:246 [main] — Configuration parsed:
+2026-08-20 21:34:52 [INFO] focus_validator.main:247 [main] —   Data file: /tmp/claude-0/-home-user-focus-data-toolkit/2aa5931b-7603-530e-8cbb-ed6696bff9e6/scratchpad/aws12.csv
+2026-08-20 21:34:52 [INFO] focus_validator.main:248 [main] —   Validation version: 1.2.0.1
+2026-08-20 21:34:52 [INFO] focus_validator.main:249 [main] —   Focus dataset: CostAndUsage
+2026-08-20 21:34:52 [INFO] focus_validator.main:250 [main] —   Output type: console
+2026-08-20 21:34:52 [INFO] focus_validator.main:251 [main] —   Output destination: None
+2026-08-20 21:34:52 [INFO] focus_validator.main:252 [main] —   Rule set path: /tmp/claude-0/-home-user-focus-data-toolkit/2aa5931b-7603-530e-8cbb-ed6696bff9e6/scratchpad/v312/lib/python3.12/site-packages/focus_validator/rules
+2026-08-20 21:34:52 [INFO] focus_validator.main:253 [main] —   Transitional rules: False
+2026-08-20 21:34:52 [INFO] focus_validator.main:254 [main] —   Visualization: False
+2026-08-20 21:34:52 [INFO] focus_validator.main:255 [main] —   Explain mode: False
+2026-08-20 21:34:52 [INFO] focus_validator.validator.Validator:52 [__init__] — Initializing FOCUS Validator
+2026-08-20 21:34:52 [DEBUG] focus_validator.validator.Validator:53 [__init__] — Data file: /tmp/claude-0/-home-user-focus-data-toolkit/2aa5931b-7603-530e-8cbb-ed6696bff9e6/scratchpad/aws12.csv
+2026-08-20 21:34:52 [DEBUG] focus_validator.validator.Validator:54 [__init__] — Rule set path: /tmp/claude-0/-home-user-focus-data-toolkit/2aa5931b-7603-530e-8cbb-ed6696bff9e6/scratchpad/v312/lib/python3.12/site-packages/focus_validator/rules
+2026-08-20 21:34:52 [DEBUG] focus_validator.validator.Validator:55 [__init__] — Rules version: 1.2.0.1
+2026-08-20 21:34:52 [DEBUG] focus_validator.validator.Validator:56 [__init__] — Focus dataset: CostAndUsage
+2026-08-20 21:34:52 [DEBUG] focus_validator.validator.Validator:57 [__init__] — Output type: console, destination: None
+2026-08-20 21:34:52 [INFO] focus_validator.rules.spec_rules.SpecRules:83 [__init__] — Found 1 local supported versions: ['1.2.0.1']
+2026-08-20 21:34:52 [INFO] focus_validator.rules.spec_rules.SpecRules:161 [__init__] — Matched requested version 1.2.0.1 to 1.2.0.1 from local files
+2026-08-20 21:34:52 [DEBUG] focus_validator.validator.Validator:137 [__init__] — Validator initialization completed
+2026-08-20 21:34:52 [INFO] focus_validator.main:347 [main] — Starting validation process...
+2026-08-20 21:34:52 [INFO] performance:34 [start] — Started validator.validate (instance=Validator)
+2026-08-20 21:34:52 [INFO] focus_validator.validator.Validator:212 [validate] — Starting validation process...
+2026-08-20 21:34:52 [INFO] performance:34 [start] — Started validator.load (instance=Validator)
+2026-08-20 21:34:52 [INFO] focus_validator.validator.Validator:144 [load] — Loading validation data and rules...
+2026-08-20 21:34:52 [DEBUG] focus_validator.validator.Validator:147 [load] — Loading specification rules...
+2026-08-20 21:34:52 [INFO] focus_validator.config_objects.json_loader.JsonLoader:191 [load_json_rules_with_dependencies_and_types] — No applicability criteria specified. Rules with applicability criteria will be skipped.
+2026-08-20 21:34:52 [DEBUG] focus_validator.rules.spec_rules.SpecRules:430 [load_rules] — Loaded FOCUS version: 1.2
+2026-08-20 21:34:52 [DEBUG] focus_validator.rules.spec_rules.SpecRules:438 [load_rules] — Loaded model version: 1.2.0.1
+2026-08-20 21:34:52 [INFO] focus_validator.validator.Validator:159 [load] — Extracted column types for 55 columns: {'AvailabilityZone': 'string', 'BilledCost': 'float64', 'BillingAccountId': 'string', 'BillingAccountName': 'string', 'BillingAccountType': 'string', 'BillingCurrency': 'string', 'BillingPeriodEnd': 'datetime64[ns]', 'BillingPeriodStart': 'datetime64[ns]', 'CapacityReservationId': 'string', 'CapacityReservationStatus': 'string', 'ChargeCategory': 'string', 'ChargeClass': 'string', 'ChargeFrequency': 'string', 'ChargeDescription': 'string', 'ChargePeriodEnd': 'datetime64[ns]', 'ChargePeriodStart': 'datetime64[ns]', 'CommitmentDiscountCategory': 'string', 'CommitmentDiscountId': 'string', 'CommitmentDiscountName': 'string', 'CommitmentDiscountStatus': 'string', 'CommitmentDiscountType': 'string', 'CommitmentDiscountUnit': 'string', 'CommitmentDiscountQuantity': 'float64', 'ConsumedUnit': 'string', 'ConsumedQuantity': 'float64', 'ContractedCost': 'float64', 'EffectiveCost': 'float64', 'InvoiceId': 'string', 'InvoiceIssuerName': 'string', 'ListCost': 'float64', 'ListUnitPrice': 'float64', 'PricingCategory': 'string', 'PricingCurrency': 'string', 'PricingCurrencyContractedUnitPrice': 'float64', 'PricingCurrencyEffectiveCost': 'float64', 'PricingCurrencyListUnitPrice': 'float64', 'PricingQuantity': 'float64', 'PricingUnit': 'string', 'ProviderName': 'string', 'RegionId': 'string', 'RegionName': 'string', 'ResourceId': 'string', 'ResourceName': 'string', 'ResourceType': 'string', 'PublisherName': 'string', 'SubAccountId': 'string', 'SubAccountName': 'string', 'ServiceCategory': 'string', 'ServiceName': 'string', 'ServiceSubcategory': 'string', 'SkuId': 'string', 'SkuMeter': 'string', 'SkuPriceId': 'string', 'SubAccountType': 'string', 'ContractedUnitPrice': 'float64'}
+2026-08-20 21:34:52 [DEBUG] focus_validator.validator.Validator:171 [load] — Loading data from: /tmp/claude-0/-home-user-focus-data-toolkit/2aa5931b-7603-530e-8cbb-ed6696bff9e6/scratchpad/aws12.csv
+2026-08-20 21:34:52 [INFO] focus_validator.validator.Validator:174 [load] — Data file size: 0.85 MB
+2026-08-20 21:34:52 [INFO] focus_validator.data_loaders.data_loader.DataLoader:29 [__init__] — Initializing DataLoader for file: /tmp/claude-0/-home-user-focus-data-toolkit/2aa5931b-7603-530e-8cbb-ed6696bff9e6/scratchpad/aws12.csv
+2026-08-20 21:34:52 [INFO] focus_validator.data_loaders.data_loader.DataLoader:33 [__init__] — File size: 0.85 MB
+2026-08-20 21:34:52 [DEBUG] focus_validator.data_loaders.data_loader.DataLoader:45 [find_data_loader] — Determining data loader for file: /tmp/claude-0/-home-user-focus-data-toolkit/2aa5931b-7603-530e-8cbb-ed6696bff9e6/scratchpad/aws12.csv
+2026-08-20 21:34:52 [DEBUG] focus_validator.data_loaders.data_loader.DataLoader:60 [find_data_loader] — Using CSV data loader
+2026-08-20 21:34:52 [INFO] performance:34 [start] — Started data_loader.load (instance=DataLoader)
+2026-08-20 21:34:52 [INFO] focus_validator.data_loaders.data_loader.DataLoader:71 [load] — Loading data from file...
+2026-08-20 21:34:52 [INFO] focus_validator.data_loaders.csv_data_loader.CSVDataLoader:161 [_peek_for_all_null_columns] — Column 'CapacityReservationId' is all NULL in first 5000 rows - will force type from spec to avoid misleading type errors
+2026-08-20 21:34:52 [INFO] focus_validator.data_loaders.csv_data_loader.CSVDataLoader:161 [_peek_for_all_null_columns] — Column 'CapacityReservationStatus' is all NULL in first 5000 rows - will force type from spec to avoid misleading type errors
+2026-08-20 21:34:52 [INFO] focus_validator.data_loaders.csv_data_loader.CSVDataLoader:161 [_peek_for_all_null_columns] — Column 'ChargeClass' is all NULL in first 5000 rows - will force type from spec to avoid misleading type errors
+2026-08-20 21:34:52 [INFO] focus_validator.data_loaders.csv_data_loader.CSVDataLoader:197 [_try_load_with_types] — Forcing types for 3 all-NULL columns: CapacityReservationId, CapacityReservationStatus, ChargeClass
+2026-08-20 21:34:52 [DEBUG] focus_validator.data_loaders.csv_data_loader.CSVDataLoader:202 [_try_load_with_types] — Attempting to load with forced Polars dtypes: {'CapacityReservationId': String, 'CapacityReservationStatus': String, 'ChargeClass': String}
+2026-08-20 21:34:52 [INFO] focus_validator.data_loaders.data_loader.DataLoader:80 [load] — Data loaded successfully: 1000 rows, 57 columns
+2026-08-20 21:34:52 [DEBUG] focus_validator.data_loaders.data_loader.DataLoader:87 [load] — Columns: ['ProviderName', 'PublisherName', 'InvoiceIssuerName', 'InvoiceId', 'BillingAccountId', 'BillingAccountName', 'BillingAccountType', 'SubAccountId', 'SubAccountName', 'SubAccountType', 'BillingPeriodStart', 'BillingPeriodEnd', 'ChargePeriodStart', 'ChargePeriodEnd', 'ChargeCategory', 'ChargeClass', 'ChargeDescription', 'ChargeFrequency', 'BilledCost', 'EffectiveCost', 'ListCost', 'ContractedCost', 'ListUnitPrice', 'ContractedUnitPrice', 'PricingCategory', 'PricingQuantity', 'PricingUnit', 'PricingCurrency', 'PricingCurrencyContractedUnitPrice', 'PricingCurrencyEffectiveCost', 'PricingCurrencyListUnitPrice', 'BillingCurrency', 'ConsumedQuantity', 'ConsumedUnit', 'ServiceName', 'ServiceCategory', 'ServiceSubcategory', 'SkuId', 'SkuMeter', 'SkuPriceId', 'SkuPriceDetails', 'ResourceId', 'ResourceName', 'ResourceType', 'RegionId', 'RegionName', 'AvailabilityZone', 'CommitmentDiscountId', 'CommitmentDiscountName', 'CommitmentDiscountCategory', 'CommitmentDiscountType', 'CommitmentDiscountStatus', 'CommitmentDiscountQuantity', 'CommitmentDiscountUnit', 'CapacityReservationId', 'CapacityReservationStatus', 'Tags']
+2026-08-20 21:34:52 [INFO] performance:62 [finish] — Completed data_loader.load in 0.245s — instance=DataLoader, result_size=1000
+2026-08-20 21:34:52 [INFO] focus_validator.validator.Validator:192 [load] — Data loaded successfully: 1000 rows, 57 columns
+2026-08-20 21:34:52 [DEBUG] focus_validator.validator.Validator:197 [load] — Column names: ['ProviderName', 'PublisherName', 'InvoiceIssuerName', 'InvoiceId', 'BillingAccountId', 'BillingAccountName', 'BillingAccountType', 'SubAccountId', 'SubAccountName', 'SubAccountType', 'BillingPeriodStart', 'BillingPeriodEnd', 'ChargePeriodStart', 'ChargePeriodEnd', 'ChargeCategory', 'ChargeClass', 'ChargeDescription', 'ChargeFrequency', 'BilledCost', 'EffectiveCost', 'ListCost', 'ContractedCost', 'ListUnitPrice', 'ContractedUnitPrice', 'PricingCategory', 'PricingQuantity', 'PricingUnit', 'PricingCurrency', 'PricingCurrencyContractedUnitPrice', 'PricingCurrencyEffectiveCost', 'PricingCurrencyListUnitPrice', 'BillingCurrency', 'ConsumedQuantity', 'ConsumedUnit', 'ServiceName', 'ServiceCategory', 'ServiceSubcategory', 'SkuId', 'SkuMeter', 'SkuPriceId', 'SkuPriceDetails', 'ResourceId', 'ResourceName', 'ResourceType', 'RegionId', 'RegionName', 'AvailabilityZone', 'CommitmentDiscountId', 'CommitmentDiscountName', 'CommitmentDiscountCategory', 'CommitmentDiscountType', 'CommitmentDiscountStatus', 'CommitmentDiscountQuantity', 'CommitmentDiscountUnit', 'CapacityReservationId', 'CapacityReservationStatus', 'Tags']
+2026-08-20 21:34:52 [INFO] focus_validator.validator.Validator:208 [load] — Data and rules loading completed
+2026-08-20 21:34:52 [INFO] performance:62 [finish] — Completed validator.load in 0.301s — instance=Validator
+2026-08-20 21:34:52 [DEBUG] focus_validator.validator.Validator:216 [validate] — Executing rule validation...
+2026-08-20 21:34:52 [DEBUG] focus_validator.config_objects.focus_to_duckdb_converter.FocusToDuckDBSchemaConverter:5304 [prepare] — Using provided DuckDB connection
+2026-08-20 21:34:52 [DEBUG] focus_validator.config_objects.focus_to_duckdb_converter.FocusToDuckDBSchemaConverter:5336 [prepare] — FocusToDuckDBSchemaConverter initialized with FOCUS version: 1.2 (using default mappings)
+2026-08-20 21:35:00 [INFO] performance:62 [finish] — Completed validator.validate in 8.135s — instance=Validator, error=[Errno 2] No such file or directory: 'focus_validator/rules/currency_codes.csv'
+2026-08-20 21:35:00 [ERROR] focus_validator.main:356 [main] — Validation failed after 8.136 seconds: [Errno 2] No such file or directory: 'focus_validator/rules/currency_codes.csv'

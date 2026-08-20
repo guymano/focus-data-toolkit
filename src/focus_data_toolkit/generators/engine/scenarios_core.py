@@ -383,6 +383,7 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
             purchase["PricingQuantity"] = "1"
             purchase["PricingUnit"] = "Units"
             purchase["CommitmentDiscountQuantity"] = s(fee)
+            adapter.on_commit_usage(purchase, commit_id, contract_id, s(fee), "", "")
             set_currency(purchase, "USD", fee, fee, Decimal("0"))
         else:
             # A usage commitment purchases the committed capacity at the commitment
@@ -392,6 +393,7 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
             purchase["PricingQuantity"] = s(capacity)
             purchase["PricingUnit"] = "Hours"
             purchase["CommitmentDiscountQuantity"] = s(capacity)
+            adapter.on_commit_usage(purchase, commit_id, contract_id, s(fee), s(capacity), "Hours")
             set_currency(purchase, "USD", commit_unit_price, commit_unit_price, Decimal("0"))
         rows.append(purchase)
 
