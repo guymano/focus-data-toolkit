@@ -37,29 +37,33 @@ def allocated_method_details(
     return dumps_object({"Elements": list(elements)}, numeric_keys=numeric_keys)
 
 
-def contract_applied(
+def contract_applied_element(
     commit_id: str,
     contract_id: str,
     applied_cost: str,
-    applied_qty: str,
-    applied_unit: str,
-) -> str:
+    applied_qty: str = "",
+    applied_unit: str = "",
+) -> dict[str, str]:
+    """One ``ContractApplied`` element linking a row to a Contract Commitment.
+
+    The identifier keys use the canonical ``Id`` casing of FOCUS erratum #3 (the
+    1.3.0.1 rule model), not the legacy pre-erratum ``ID`` casing. Quantity/unit are
+    carried only when provided: a spend commitment applies a cost alone, a usage
+    commitment applies a cost plus the measured quantity in its native unit.
+    """
+    element = {
+        "ContractId": contract_id,
+        "ContractCommitmentId": commit_id,
+        "ContractCommitmentAppliedCost": applied_cost,
+    }
+    if applied_qty:
+        element["ContractCommitmentAppliedQuantity"] = applied_qty
+        element["ContractCommitmentAppliedUnit"] = applied_unit
+    return element
+
+
+def contract_applied(elements: Sequence[Mapping[str, object]]) -> str:
     """FOCUS 1.3 ``ContractApplied`` JSON: a top-level ``Elements`` array linking a Cost
     and Usage row to the Contract Commitment dataset via ``ContractCommitmentId``. The
-    identifier keys use the canonical ``Id`` casing of FOCUS erratum #3 (the 1.3.0.1
-    rule model), not the legacy pre-erratum ``ID`` casing. The applied cost/quantity
-    are emitted as JSON numbers."""
-    return dumps_object(
-        {
-            "Elements": [
-                {
-                    "ContractId": contract_id,
-                    "ContractCommitmentId": commit_id,
-                    "ContractCommitmentAppliedCost": applied_cost,
-                    "ContractCommitmentAppliedQuantity": applied_qty,
-                    "ContractCommitmentAppliedUnit": applied_unit,
-                }
-            ]
-        },
-        numeric_keys=CONTRACT_APPLIED_NUMERIC_KEYS,
-    )
+    applied cost/quantity are emitted as JSON numbers."""
+    return dumps_object({"Elements": list(elements)}, numeric_keys=CONTRACT_APPLIED_NUMERIC_KEYS)

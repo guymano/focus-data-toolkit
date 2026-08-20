@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from focus_data_toolkit.generators.engine.json_focus import contract_applied
+from focus_data_toolkit.generators.engine.determinism import (
+    negotiated_commitment_id,
+    negotiated_contract_id,
+)
+from focus_data_toolkit.generators.engine.json_focus import (
+    contract_applied,
+    contract_applied_element,
+)
 from focus_data_toolkit.generators.providers.profile import ProviderProfile
 from focus_data_toolkit.generators.versions.adapter import LadderBranch, VersionAdapter
 
@@ -117,9 +124,47 @@ def _fill_identity(row: dict, profile: ProviderProfile) -> None:
     row["HostProviderName"] = profile.host_provider_name
 
 
-def _on_commit_usage(usage: dict, commit_id: str, contract_id: str, effective_str: str) -> None:
-    # FOCUS 1.3 ContractApplied: the JSON link to the Contract Commitment dataset.
-    usage["ContractApplied"] = contract_applied(commit_id, contract_id, effective_str, "1.0000", "Hours")
+def _on_commit_usage(
+    usage: dict,
+    commit_id: str,
+    contract_id: str,
+    applied_cost: str,
+    applied_qty: str,
+    applied_unit: str,
+) -> None:
+    # FOCUS 1.3 ContractApplied: the JSON link to the Contract Commitment dataset, on
+    # every commitment usage row (Used and Unused alike — an Unused row is still a
+    # charge tied to the commitment). Spend commitments apply a cost alone; usage
+    # commitments also carry the measured quantity in its native unit.
+    usage["ContractApplied"] = contract_applied(
+        [contract_applied_element(commit_id, contract_id, applied_cost, applied_qty, applied_unit)]
+    )
+
+
+def _on_negotiated_usage(row: dict, profile: ProviderProfile) -> None:
+    # Eligible on-demand usage is linked to the three negotiated (non-discount) contract
+    # terms: the negotiated rate card explains the ContractedCost, the spend counts
+    # toward the contracted minimum, and the consumed quantity counts toward the usage
+    # commitment. These commitments are reachable ONLY through ContractApplied (they
+    # are not CommitmentDiscountIds) — the FOCUS-defined dataset relationship.
+    contract = negotiated_contract_id(profile.key)
+    row["ContractApplied"] = contract_applied(
+        [
+            contract_applied_element(
+                negotiated_commitment_id("RATECARD", profile.key), contract, row["ContractedCost"]
+            ),
+            contract_applied_element(
+                negotiated_commitment_id("MINSPEND", profile.key), contract, row["ContractedCost"]
+            ),
+            contract_applied_element(
+                negotiated_commitment_id("USAGEMIN", profile.key),
+                contract,
+                row["ContractedCost"],
+                row["ConsumedQuantity"],
+                row["ConsumedUnit"],
+            ),
+        ]
+    )
 
 
 V13 = VersionAdapter(
@@ -131,11 +176,12 @@ V13 = VersionAdapter(
         LadderBranch("credit", 0.05, requires_credits=True),
         LadderBranch("tax", 0.12),
         LadderBranch("purchase", 0.20),
-        LadderBranch("split", 0.40),
+        LadderBranch("split", 0.40, min_remaining=2, group=True),
         LadderBranch("commitment", 0.58, min_remaining=6, group=True),
     ),
     commitment_identity_keys=_COMMITMENT_IDENTITY_KEYS,
     emits_split_allocation=True,
     fill_version_identity=_fill_identity,
     on_commit_usage=_on_commit_usage,
+    on_negotiated_usage=_on_negotiated_usage,
 )

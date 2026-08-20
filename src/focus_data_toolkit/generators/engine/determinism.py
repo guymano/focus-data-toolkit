@@ -20,6 +20,7 @@ BILLING_END = datetime(2026, 6, 1, tzinfo=UTC)
 PERIOD_DAYS = 28
 PERIOD_HOURS = PERIOD_DAYS * 24
 COMMIT_TERM_DAYS = 365  # 1-year commitment / contract term
+CONTRACT_LEAD_DAYS = 90  # the contract period encloses the commitment period by this margin
 
 # --------------------------------------------------------------------------- #
 # Rounding quanta and commercial rates (single source of truth)
@@ -115,6 +116,26 @@ def sku_price_details(spec_sku_details: dict[str, object]) -> str:
 def contract_id_for(commit_id: str) -> str:
     """Deterministic parent ContractId for a commitment id (shared by both 1.3 datasets)."""
     return f"CONTRACT-{commit_id.rsplit('/', 1)[-1][:12]}"
+
+
+# Negotiated contract terms that are NOT commitment discounts (minimum spend, negotiated
+# rate card, usage commitment). They live in the Contract Commitment dataset and are
+# reachable from Cost and Usage exclusively through ``ContractApplied`` — never via
+# ``CommitmentDiscountId`` — which is the FOCUS-defined relationship between the two
+# datasets. Ids are RNG-free so the Cost and Usage rows (which reference them) and the
+# Contract Commitment dataset (which defines them) agree without sharing state.
+NEGOTIATED_TERM_KINDS: tuple[str, ...] = ("MINSPEND", "RATECARD", "USAGEMIN")
+
+
+def negotiated_contract_id(profile_key: str) -> str:
+    """The one negotiated contract per provider (a multi-commitment ContractId)."""
+    return f"CONTRACT-NEGOTIATED-{profile_key.upper()}"
+
+
+def negotiated_commitment_id(kind: str, profile_key: str) -> str:
+    if kind not in NEGOTIATED_TERM_KINDS:
+        raise ValueError(f"unknown negotiated term kind {kind!r}")
+    return f"CC-{kind}-{profile_key.upper()}"
 
 
 def set_currency(

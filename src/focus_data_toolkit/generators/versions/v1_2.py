@@ -85,8 +85,19 @@ def _noop_identity(row: dict, profile: object) -> None:
     """1.2 has no ServiceProviderName/HostProviderName columns to fill."""
 
 
-def _noop_commit_usage(usage: dict, commit_id: str, contract_id: str, effective_str: str) -> None:
+def _noop_commit_usage(
+    usage: dict,
+    commit_id: str,
+    contract_id: str,
+    applied_cost: str,
+    applied_qty: str,
+    applied_unit: str,
+) -> None:
     """1.2 has no ContractApplied column."""
+
+
+def _noop_negotiated_usage(row: dict, profile: object) -> None:
+    """1.2 has no ContractApplied column, so negotiated terms are not linkable."""
 
 
 V12 = VersionAdapter(
@@ -104,4 +115,5 @@ V12 = VersionAdapter(
     emits_split_allocation=False,
     fill_version_identity=_noop_identity,
     on_commit_usage=_noop_commit_usage,
+    on_negotiated_usage=_noop_negotiated_usage,
 )

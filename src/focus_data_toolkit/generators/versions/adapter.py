@@ -21,7 +21,7 @@ class LadderBranch:
     threshold: float
     requires_credits: bool = False
     min_remaining: int | None = None
-    group: bool = False  # True if the builder returns multiple rows (commitment)
+    group: bool = False  # True if the builder returns multiple rows (commitment, split)
 
 
 @dataclass(frozen=True)
@@ -36,4 +36,9 @@ class VersionAdapter:
     emits_split_allocation: bool
     # Per-version field hooks (no-ops in 1.2):
     fill_version_identity: Callable[[dict, ProviderProfile], None]  # (row, profile)
-    on_commit_usage: Callable[[dict, str, str, str], None]  # (usage, commit_id, contract_id, effective_str)
+    # (row, commit_id, contract_id, applied_cost, applied_qty, applied_unit) — qty/unit are
+    # empty for spend commitments (a spend commitment applies a cost alone).
+    on_commit_usage: Callable[[dict, str, str, str, str, str], None]
+    # (row, profile) — link eligible on-demand usage to the negotiated (non-discount)
+    # contract terms via ContractApplied.
+    on_negotiated_usage: Callable[[dict, ProviderProfile], None]
