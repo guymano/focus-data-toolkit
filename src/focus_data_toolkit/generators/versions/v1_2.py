@@ -67,24 +67,22 @@ COLUMNS: tuple[str, ...] = (
 assert len(COLUMNS) == 57, f"FOCUS 1.2 must have 57 columns, got {len(COLUMNS)}"
 assert len(set(COLUMNS)) == 57, "FOCUS 1.2 column names must be unique"
 
-# In 1.2 the commitment usage rows copied only the account ids from the purchase.
+# Every linked usage row copies the full billing identity of the commitment purchase, so
+# each BillingAccountId keeps a single (BillingAccountName, InvoiceId) across the group
+# (historically 1.2 copied only the account ids, leaving name/invoice to diverge).
 _COMMITMENT_IDENTITY_KEYS: tuple[str, ...] = (
     "BillingAccountId",
+    "BillingAccountName",
+    "BillingAccountType",
     "SubAccountId",
     "SubAccountName",
+    "SubAccountType",
+    "InvoiceId",
 )
 
 
 def _noop_identity(row: dict, profile: object) -> None:
-    """1.2 has no ServiceProviderName/HostProviderName and does not seed PricingCurrency."""
-
-
-def _noop_tax(row: dict, amount_str: str) -> None:
-    """1.2 leaves PricingCurrencyEffectiveCost null on Tax."""
-
-
-def _noop_credit(row: dict, negative_str: str) -> None:
-    """1.2 leaves PricingCurrencyEffectiveCost null on Credit."""
+    """1.2 has no ServiceProviderName/HostProviderName columns to fill."""
 
 
 def _noop_commit_usage(usage: dict, commit_id: str, contract_id: str, effective_str: str) -> None:
@@ -105,7 +103,5 @@ V12 = VersionAdapter(
     commitment_identity_keys=_COMMITMENT_IDENTITY_KEYS,
     emits_split_allocation=False,
     fill_version_identity=_noop_identity,
-    on_tax_row=_noop_tax,
-    on_credit_row=_noop_credit,
     on_commit_usage=_noop_commit_usage,
 )

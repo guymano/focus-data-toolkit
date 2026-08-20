@@ -45,14 +45,16 @@ def contract_applied(
     applied_unit: str,
 ) -> str:
     """FOCUS 1.3 ``ContractApplied`` JSON: a top-level ``Elements`` array linking a Cost
-    and Usage row to the Contract Commitment dataset via ``ContractCommitmentID``. The
-    applied cost/quantity are emitted as JSON numbers."""
+    and Usage row to the Contract Commitment dataset via ``ContractCommitmentId``. The
+    identifier keys use the canonical ``Id`` casing of FOCUS erratum #3 (the 1.3.0.1
+    rule model), not the legacy pre-erratum ``ID`` casing. The applied cost/quantity
+    are emitted as JSON numbers."""
     return dumps_object(
         {
             "Elements": [
                 {
-                    "ContractID": contract_id,
-                    "ContractCommitmentID": commit_id,
+                    "ContractId": contract_id,
+                    "ContractCommitmentId": commit_id,
                     "ContractCommitmentAppliedCost": applied_cost,
                     "ContractCommitmentAppliedQuantity": applied_qty,
                     "ContractCommitmentAppliedUnit": applied_unit,

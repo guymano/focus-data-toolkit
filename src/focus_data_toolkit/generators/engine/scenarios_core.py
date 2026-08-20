@@ -28,6 +28,7 @@ from focus_data_toolkit.generators.engine.determinism import (
     PRIVATE_RATE,
     QTY_Q,
     contract_id_for,
+    exact_cost,
     hexid,
     iso,
     period,
@@ -65,6 +66,9 @@ def base_row(rng: random.Random, profile, adapter) -> tuple[dict[str, str], RowC
     row["BillingPeriodStart"] = iso(BILLING_START)
     row["BillingPeriodEnd"] = iso(BILLING_END)
     row["BillingCurrency"] = "USD"
+    # Multi-currency generator: PricingCurrency is never null in either version
+    # (set_currency overrides it for priced rows; Tax/Credit keep this USD default).
+    row["PricingCurrency"] = "USD"
     adapter.fill_version_identity(row, profile)
     env_key, cost_center_key, owner_key = profile.tag_keys
     row["Tags"] = json.dumps(
@@ -119,8 +123,8 @@ def usage_row(rng: random.Random, i: int, remaining: int, profile, adapter) -> d
     jitter = Decimal(rng.uniform(0.97, 1.03))
     list_unit = q(spec.unit_price_usd * jitter, PRICE_Q)
     contracted_unit = q(list_unit * PRIVATE_RATE, PRICE_Q)
-    list_cost = q(list_unit * quantity, COST_Q)
-    contracted_cost = q(contracted_unit * quantity, COST_Q)
+    list_cost = exact_cost(list_unit, quantity)
+    contracted_cost = exact_cost(contracted_unit, quantity)
 
     row["ChargeCategory"] = "Usage"
     row["ChargeFrequency"] = "Usage-Based"
@@ -182,7 +186,9 @@ def tax_row(rng: random.Random, i: int, remaining: int, profile, adapter) -> dic
     row["EffectiveCost"] = amount_str
     row["ListCost"] = amount_str
     row["ContractedCost"] = amount_str
-    adapter.on_tax_row(row, amount_str)
+    # Tax is priced in the billing currency (USD default from base_row), so the
+    # pricing-currency effective cost mirrors EffectiveCost in both versions.
+    row["PricingCurrencyEffectiveCost"] = amount_str
     return row
 
 
@@ -199,7 +205,8 @@ def credit_row(rng: random.Random, i: int, remaining: int, profile, adapter) -> 
     row["EffectiveCost"] = negative
     row["ListCost"] = negative
     row["ContractedCost"] = negative
-    adapter.on_credit_row(row, negative)
+    # Same-currency mirror as on Tax rows (USD default from base_row).
+    row["PricingCurrencyEffectiveCost"] = negative
     return row
 
 
@@ -220,8 +227,8 @@ def split_allocation_row(rng: random.Random, i: int, remaining: int, profile, ad
     jitter = Decimal(rng.uniform(0.97, 1.03))
     list_unit = q(spec.unit_price_usd * jitter, PRICE_Q)
     contracted_unit = q(list_unit * PRIVATE_RATE, PRICE_Q)
-    list_cost = q(list_unit * quantity, COST_Q)
-    contracted_cost = q(contracted_unit * quantity, COST_Q)
+    list_cost = exact_cost(list_unit, quantity)
+    contracted_cost = exact_cost(contracted_unit, quantity)
 
     row["ChargeCategory"] = "Usage"
     row["ChargeFrequency"] = "Usage-Based"
@@ -351,18 +358,24 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
         usage["SkuMeter"] = spec.sku_meter
         usage["SkuPriceId"] = profile.sku_price_id(rng)
         usage["SkuPriceDetails"] = sku_price_details(dict(spec.sku_details))
-        list_cost = q(list_unit, COST_Q)
-        effective = q(commit_unit_price, COST_Q)
+        hour = Decimal("1.0000")
+        # Three prices kept apart: the negotiated (contracted) rate excludes the
+        # commitment discount, which shows only between ContractedCost and
+        # EffectiveCost — so EffectiveCost < ContractedCost <= ListCost on Used rows.
+        contracted_unit = q(list_unit * PRIVATE_RATE, PRICE_Q)
+        list_cost = exact_cost(list_unit, hour)
+        contracted_cost = exact_cost(contracted_unit, hour)
+        effective = exact_cost(commit_unit_price, hour)
         usage["ChargeCategory"] = "Usage"
         usage["ChargeFrequency"] = "Usage-Based"
         usage["ChargeDescription"] = f"{spec.name} committed usage"
         usage["PricingCategory"] = "Committed"
         usage["BilledCost"] = "0.000000"  # covered by the upfront purchase
-        usage["EffectiveCost"] = s(effective)  # amortised, < ListCost
+        usage["EffectiveCost"] = s(effective)  # amortised commitment rate
         usage["ListCost"] = s(list_cost)
-        usage["ContractedCost"] = s(effective)
+        usage["ContractedCost"] = s(contracted_cost)
         usage["ListUnitPrice"] = s(list_unit)
-        usage["ContractedUnitPrice"] = s(commit_unit_price)
+        usage["ContractedUnitPrice"] = s(contracted_unit)
         usage["PricingQuantity"] = "1.0000"
         usage["PricingUnit"] = "Hours"
         usage["ConsumedQuantity"] = "1.0000"
@@ -375,6 +388,6 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
         usage["CommitmentDiscountQuantity"] = s(effective) if spend_based else "1.0000"
         usage["CommitmentDiscountUnit"] = commit_unit
         adapter.on_commit_usage(usage, commit_id, contract_id, s(effective))
-        set_currency(usage, "USD", list_unit, commit_unit_price, effective)
+        set_currency(usage, "USD", list_unit, contracted_unit, effective)
         rows.append(usage)
     return rows

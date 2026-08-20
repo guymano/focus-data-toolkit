@@ -66,6 +66,20 @@ def q(value: Decimal, quant: Decimal) -> Decimal:
     return value.quantize(quant, rounding=ROUND_HALF_UP)
 
 
+def exact_cost(unit_price: Decimal, quantity: Decimal) -> Decimal:
+    """Exact product of already-quantised factors (Decimal multiplication never rounds).
+
+    Costs must satisfy ``cost == unit_price * quantity`` under exact Decimal equality
+    (FOCUS cost arithmetic) — so the *factors* are quantised (``PRICE_Q`` × ``QTY_Q``,
+    a <= 14-decimal product), never the product. The product is display-trimmed to
+    ``COST_Q`` only when that loses nothing, so typical values still render at 6
+    decimals while genuinely small unit prices keep their full precision.
+    """
+    product = unit_price * quantity
+    trimmed = product.quantize(COST_Q)
+    return trimmed if trimmed == product else product
+
+
 def s(value: Decimal) -> str:
     """Render a Decimal as fixed-point text (never scientific notation)."""
     return format(value, "f")
@@ -111,7 +125,14 @@ def set_currency(
     effective_cost: Decimal,
 ) -> None:
     row["PricingCurrency"] = pricing_currency
-    fx = EUR_PER_USD if pricing_currency == "EUR" else Decimal("1")
+    if pricing_currency == "USD":
+        # Same currency as billing: the pricing-currency columns are exact mirrors of
+        # the USD amounts (quantising here would break exact cost arithmetic).
+        row["PricingCurrencyListUnitPrice"] = s(list_unit)
+        row["PricingCurrencyContractedUnitPrice"] = s(contracted_unit)
+        row["PricingCurrencyEffectiveCost"] = s(effective_cost)
+        return
+    fx = EUR_PER_USD
     row["PricingCurrencyListUnitPrice"] = s(q(list_unit * fx, PRICE_Q))
     row["PricingCurrencyContractedUnitPrice"] = s(q(contracted_unit * fx, PRICE_Q))
     row["PricingCurrencyEffectiveCost"] = s(q(effective_cost * fx, COST_Q))

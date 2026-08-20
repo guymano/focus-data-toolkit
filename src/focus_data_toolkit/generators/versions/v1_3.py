@@ -115,17 +115,6 @@ _COMMITMENT_IDENTITY_KEYS: tuple[str, ...] = (
 def _fill_identity(row: dict, profile: ProviderProfile) -> None:
     row["ServiceProviderName"] = profile.service_provider_name
     row["HostProviderName"] = profile.host_provider_name
-    # Multi-currency generator: PricingCurrency is never null (_set_currency overrides it for
-    # priced rows; Tax/Credit keep this USD default).
-    row["PricingCurrency"] = "USD"
-
-
-def _on_tax(row: dict, amount_str: str) -> None:
-    row["PricingCurrencyEffectiveCost"] = amount_str
-
-
-def _on_credit(row: dict, negative_str: str) -> None:
-    row["PricingCurrencyEffectiveCost"] = negative_str
 
 
 def _on_commit_usage(usage: dict, commit_id: str, contract_id: str, effective_str: str) -> None:
@@ -148,7 +137,5 @@ V13 = VersionAdapter(
     commitment_identity_keys=_COMMITMENT_IDENTITY_KEYS,
     emits_split_allocation=True,
     fill_version_identity=_fill_identity,
-    on_tax_row=_on_tax,
-    on_credit_row=_on_credit,
     on_commit_usage=_on_commit_usage,
 )

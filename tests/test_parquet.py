@@ -57,12 +57,12 @@ def test_decimals_stored_as_decimal128_never_float(tmp_path):
 
 
 def test_scale_overflow_raises_with_line_number(tmp_path):
-    # 13 fractional digits exceeds the default decimal128 scale (12) -> must raise, not round.
+    # 15 fractional digits exceeds the default decimal128 scale (14) -> must raise, not round.
     path = tmp_path / "of.parquet"
     with pytest.raises(MalformedRecordError) as excinfo:
         with ParquetRowWriter(path, DatasetSchema(_CU, ("BilledCost",))) as w:
             w.write({"BilledCost": "1.0"})
-            w.write({"BilledCost": "0.0000000000005"})
+            w.write({"BilledCost": "0.000000000000005"})
     assert excinfo.value.line_number == 2
 
 
@@ -102,7 +102,8 @@ def test_file_metadata_is_written(tmp_path):
 
 
 def test_unit_price_columns_use_higher_scale():
-    assert decimal_precision_scale("BilledCost") == (38, 12)
+    # Default scale 14 holds exact unit-price (10 dp) x quantity (4 dp) cost products.
+    assert decimal_precision_scale("BilledCost") == (38, 14)
     assert decimal_precision_scale("ContractedUnitPrice") == (38, 16)
 
 

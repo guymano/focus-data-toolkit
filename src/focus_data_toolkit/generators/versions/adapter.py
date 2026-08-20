@@ -36,6 +36,4 @@ class VersionAdapter:
     emits_split_allocation: bool
     # Per-version field hooks (no-ops in 1.2):
     fill_version_identity: Callable[[dict, ProviderProfile], None]  # (row, profile)
-    on_tax_row: Callable[[dict, str], None]  # (row, amount_str)
-    on_credit_row: Callable[[dict, str], None]  # (row, negative_str)
     on_commit_usage: Callable[[dict, str, str, str], None]  # (usage, commit_id, contract_id, effective_str)
