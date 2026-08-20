@@ -4,6 +4,7 @@ Codes are **stable** identifiers — once assigned they are never renumbered or 
 downstream tooling can key on them across releases. Namespaces:
 
 * ``FDT-DET-*``   — schema / version detection
+* ``FDT-CA-*``    — ContractApplied parsing / migration normalizations
 * ``FDT-CROSS-*`` — inter-dataset referential integrity & reconciliation
 * ``FDT-ALLOC-*`` — split cost allocation
 * ``FDT-CORR-*``  — corrections / credits / billing lifecycle
@@ -36,6 +37,9 @@ CATALOG: dict[str, CodeSpec] = dict([
     _s("FDT-DET-002", Severity.ERROR, "ambiguous schema (multiple candidate versions/datasets)"),
     _s("FDT-DET-003", Severity.ERROR, "forced version incompatible with the header"),
     _s("FDT-DET-004", Severity.WARNING, "unknown non-x_ columns present in the source"),
+    # --- ContractApplied parsing / migration --------------------------------------
+    _s("FDT-CA-001", Severity.WARNING,
+       "legacy FOCUS 1.3 ContractApplied identifier casing normalized (erratum #3)"),
     # --- multi-provider / context ------------------------------------------------
     _s("FDT-CTX-001", Severity.WARNING, "source carries multiple provider contexts"),
     _s("FDT-CTX-002", Severity.WARNING, "source carries multiple invoice issuers"),

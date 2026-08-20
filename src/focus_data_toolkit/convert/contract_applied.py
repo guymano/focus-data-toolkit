@@ -2,11 +2,14 @@
 
 ``ContractApplied`` (FOCUS Cost and Usage, JSON Object Format) links a usage row to
 the Contract Commitment dataset. Its structure is a top-level ``Elements`` array of
-objects. The identifier keys are **cased differently** across versions
-(``contractapplied.md`` @ ``v1.3`` vs ``v1.4``):
-
-* 1.3: ``ContractID`` / ``ContractCommitmentID`` (uppercase ``ID``)
-* 1.4: ``ContractId`` / ``ContractCommitmentId``
+objects. The identifier keys are ``ContractId`` / ``ContractCommitmentId`` in both
+versions: the published 1.3 column text carried the uppercase ``ContractID`` /
+``ContractCommitmentID`` casing, but FOCUS erratum #3 (the 1.3.0.1 rule model)
+corrected it to the ``Id`` casing that 1.4 kept. Parsing a 1.3 value therefore
+accepts **both** casings — canonical ``…Id`` per the erratum, and legacy ``…ID``
+for files produced against the pre-erratum text — while serialization emits only
+the canonical casing. Callers can observe legacy-cased input via the
+``legacy_sink`` parameter (it is a compatibility normalization, not conformance).
 
 The three metric keys — ``ContractCommitmentAppliedCost``,
 ``ContractCommitmentAppliedQuantity``, ``ContractCommitmentAppliedUnit`` — are stable
@@ -38,9 +41,15 @@ _METRIC_UNIT = "ContractCommitmentAppliedUnit"
 _METRICS = (_METRIC_COST, _METRIC_QTY, _METRIC_UNIT)
 _NUMERIC_METRIC_KEYS = frozenset({_METRIC_COST, _METRIC_QTY})
 
-_ID_KEYS = {
-    "1.3": {"contract": "ContractID", "commitment": "ContractCommitmentID"},
-    "1.4": {"contract": "ContractId", "commitment": "ContractCommitmentId"},
+# Accepted identifier casings per version, canonical first. 1.3 also accepts the
+# legacy uppercase-``ID`` casing of the pre-erratum published text (see the module
+# docstring); serialization always uses the canonical (first) casing.
+_ID_KEYS: dict[str, dict[str, tuple[str, ...]]] = {
+    "1.3": {
+        "contract": ("ContractId", "ContractID"),
+        "commitment": ("ContractCommitmentId", "ContractCommitmentID"),
+    },
+    "1.4": {"contract": ("ContractId",), "commitment": ("ContractCommitmentId",)},
 }
 # The 1.4 ContractAppliedObjectSchema restricts each element to one metric branch.
 _EXCLUSIVE_METRICS_VERSIONS = frozenset({"1.4"})
@@ -95,19 +104,45 @@ def _numeric_text(value: object, key: str) -> str:
     raise ContractAppliedError(f"{key} must be a JSON number, got {value!r}")
 
 
+def _resolve_id(
+    obj: dict, accepted: tuple[str, ...], index: int, legacy_sink: set[str] | None
+) -> str:
+    """Return the identifier under one of ``accepted`` casings (canonical first).
+
+    Both casings in one element is ambiguous and rejected; a legacy (non-canonical)
+    casing is accepted and recorded in ``legacy_sink`` so callers can surface the
+    normalization.
+    """
+    present = [key for key in accepted if key in obj]
+    if len(present) > 1:
+        raise ContractAppliedError(
+            f"Elements[{index}] carries both {present[0]!r} and {present[1]!r}; "
+            "use only the canonical casing"
+        )
+    key = present[0] if present else accepted[0]
+    if present and key != accepted[0] and legacy_sink is not None:
+        legacy_sink.add(key)
+    return _require_str(obj.get(key), key)
+
+
 def _parse_element(
-    obj: object, ids: dict[str, str], index: int, *, exclusive_metrics: bool
+    obj: object,
+    ids: dict[str, tuple[str, ...]],
+    index: int,
+    *,
+    exclusive_metrics: bool,
+    legacy_sink: set[str] | None,
 ) -> ContractAppliedElement:
     if not isinstance(obj, dict):
         raise ContractAppliedError(f"Elements[{index}] must be an object")
-    focus_keys = {ids["contract"], ids["commitment"], *_METRICS}
+    focus_keys = {*ids["contract"], *ids["commitment"], *_METRICS}
     for key in obj:
         if key not in focus_keys and not key.startswith("x_"):
             raise ContractAppliedError(
                 f"Elements[{index}] custom key {key!r} must be prefixed with 'x_'"
             )
-    contract_id = _require_str(obj.get(ids["contract"]), ids["contract"])
-    commitment_id = _require_str(obj.get(ids["commitment"]), ids["commitment"])
+    contract_id = _resolve_id(obj, ids["contract"], index, legacy_sink)
+    commitment_id = _resolve_id(obj, ids["commitment"], index, legacy_sink)
     cost = obj.get(_METRIC_COST)
     qty = obj.get(_METRIC_QTY)
     unit = obj.get(_METRIC_UNIT)
@@ -134,8 +169,15 @@ def _parse_element(
     )
 
 
-def parse(text: str, *, version: str = "1.4") -> ContractApplied:
-    """Parse and validate a ContractApplied JSON string for ``version``."""
+def parse(
+    text: str, *, version: str = "1.4", legacy_sink: set[str] | None = None
+) -> ContractApplied:
+    """Parse and validate a ContractApplied JSON string for ``version``.
+
+    ``legacy_sink`` (optional) collects the legacy pre-erratum identifier casings
+    (``ContractID`` / ``ContractCommitmentID``) encountered in a 1.3 value, so the
+    caller can report the normalization; parsing itself accepts them.
+    """
     if version not in _ID_KEYS:
         raise ContractAppliedError(f"unsupported ContractApplied version {version!r}")
     try:
@@ -160,7 +202,7 @@ def parse(text: str, *, version: str = "1.4") -> ContractApplied:
     exclusive = version in _EXCLUSIVE_METRICS_VERSIONS
     return ContractApplied(
         elements=tuple(
-            _parse_element(e, ids, i, exclusive_metrics=exclusive)
+            _parse_element(e, ids, i, exclusive_metrics=exclusive, legacy_sink=legacy_sink)
             for i, e in enumerate(elements)
         ),
         custom={k: v for k, v in obj.items() if k.startswith("x_")},
@@ -185,8 +227,8 @@ def to_json(ca: ContractApplied, *, version: str = "1.4") -> str:
                 "one (ContractAppliedObjectSchema oneOf)"
             )
         obj: dict[str, object] = {
-            ids["contract"]: el.contract_id,
-            ids["commitment"]: el.contract_commitment_id,
+            ids["contract"][0]: el.contract_id,
+            ids["commitment"][0]: el.contract_commitment_id,
         }
         if el.applied_cost is not None:
             obj[_METRIC_COST] = el.applied_cost
@@ -221,13 +263,14 @@ def _to_1_4_exclusive(el: ContractAppliedElement) -> ContractAppliedElement:
     )
 
 
-def migrate_1_3_to_1_4(text: str) -> str:
+def migrate_1_3_to_1_4(text: str, *, legacy_sink: set[str] | None = None) -> str:
     """Migrate a FOCUS 1.3 ContractApplied JSON string to the 1.4 schema.
 
-    Re-cases the identifier keys and enforces the 1.4 metric exclusivity (both-branch
-    1.3 elements keep cost; quantity/unit move to ``x_`` custom keys, losslessly).
+    Normalizes any legacy pre-erratum identifier casing (recorded in ``legacy_sink``
+    when provided) and enforces the 1.4 metric exclusivity (both-branch 1.3 elements
+    keep cost; quantity/unit move to ``x_`` custom keys, losslessly).
     """
-    ca = parse(text, version="1.3")
+    ca = parse(text, version="1.3", legacy_sink=legacy_sink)
     ca = ContractApplied(
         elements=tuple(_to_1_4_exclusive(el) for el in ca.elements),
         custom=ca.custom,

@@ -40,6 +40,7 @@ from focus_data_toolkit.convert.contract_commitment import (
 )
 from focus_data_toolkit.convert.contract_commitment import convert_contract_commitment
 from focus_data_toolkit.convert.cost_and_usage import (
+    contract_applied_legacy_diagnostic,
     convert_cost_and_usage,
     cost_and_usage_provenance,
 )
@@ -454,8 +455,10 @@ def convert_to_focus_1_4(
 
     linked = bool(id_mapping)
     cu_counters = LineageCounters()
+    ca_legacy: set[str] = set()
     cu_rows = convert_cost_and_usage(
-        cau_rows, version, invoice_detail_ids=id_mapping, counters=cu_counters
+        cau_rows, version, invoice_detail_ids=id_mapping, counters=cu_counters,
+        legacy_keys=ca_legacy,
     )
     lineage_counts["Cost and Usage"] = cu_counters
     cu_prov = cost_and_usage_provenance(source_cols, version, invoice_detail_linked=linked)
@@ -491,6 +494,10 @@ def convert_to_focus_1_4(
         "Invoice Detail": True,
     }
     row_counts = {name: len(built_rows[name] or []) for name in FOCUS_1_4_DATASETS}
+
+    legacy_diag = contract_applied_legacy_diagnostic(ca_legacy)
+    if legacy_diag is not None:
+        diagnostics.append(legacy_diag)
 
     _entries, manifest, produced_output_files = assemble_manifest(
         version=version,

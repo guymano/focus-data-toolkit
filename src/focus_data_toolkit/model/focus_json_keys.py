@@ -55,10 +55,16 @@ INVOICE_DETAIL_GRAIN_KEYS: frozenset[str] = frozenset(
 
 # --- JSON-Object columns with a top-level ``Elements`` array --------------- #
 
-# ContractApplied element keys. The identifier keys changed casing between
-# versions (contractapplied.md @ v1.3 vs v1.4); the three metric keys are stable.
+# ContractApplied element keys. The published 1.3 column text carried the
+# uppercase ``ContractID``/``ContractCommitmentID`` identifier casing; FOCUS
+# erratum #3 (the 1.3.0.1 rule model) corrected it to the ``Id`` casing that 1.4
+# kept. The 1.3 registry therefore lists both: the canonical erratum casing plus
+# the legacy pre-erratum casing still found in older files. The three metric keys
+# are stable across versions.
 CONTRACT_APPLIED_ELEMENT_KEYS_1_3: frozenset[str] = frozenset(
     {
+        "ContractId",
+        "ContractCommitmentId",
         "ContractID",
         "ContractCommitmentID",
         "ContractCommitmentAppliedCost",
