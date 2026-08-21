@@ -54,8 +54,13 @@ def contract_applied_element(
     quantity in its native unit alone — which also keeps the quantity branch intact
     through the FOCUS 1.4 ``oneOf`` migration.
     """
-    if not applied_cost and not applied_qty:
-        raise ValueError("a ContractApplied element needs a cost or a quantity")
+    if bool(applied_cost) == bool(applied_qty):
+        raise ValueError(
+            "a ContractApplied element applies exactly one metric branch: "
+            "a cost (spend commitment) XOR a quantity (usage commitment)"
+        )
+    if bool(applied_qty) != bool(applied_unit):
+        raise ValueError("an applied quantity and its unit go together")
     return {
         "ContractId": contract_id,
         "ContractCommitmentId": commit_id,

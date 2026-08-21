@@ -29,6 +29,10 @@ from focus_data_toolkit.generators import PROVIDERS, get_generator
 
 GOLDEN = Path(__file__).parent / "fixtures" / "golden" / "compatibility_golden"
 
+# Same grid as the conftest `source_tables` fixture, for the credits variant.
+_ROWS = 100
+_SEEDS = {"1.2": 1202, "1.3": 1302}
+
 D = Decimal
 
 
@@ -43,7 +47,9 @@ def _golden_rows(name: str) -> list[dict[str, str]]:
 
 @pytest.fixture(scope="session")
 def conformance_tables(source_tables):
-    """{(source, provider, version): (cau, cc_or_None)} over generated + golden data."""
+    """{(source, provider, version): (cau, cc_or_None)} over generated, golden and
+    credits-enabled data — every check runs against all three, so the Credit rows
+    (absent from the default fixture and the rows100 goldens) are exercised too."""
     tables = {}
     for provider in PROVIDERS:
         for version in ("1.2", "1.3"):
@@ -56,18 +62,45 @@ def conformance_tables(source_tables):
                 else None
             )
             tables[("golden", provider, version)] = (cau, cc)
+            module = get_generator(provider, version)
+            credit_cau = list(
+                csv.DictReader(
+                    io.StringIO(
+                        module.generate_csv_bytes(
+                            _ROWS, _SEEDS[version], include_credits=True
+                        ).decode("utf-8")
+                    )
+                )
+            )
+            credit_cc = (
+                list(
+                    csv.DictReader(
+                        io.StringIO(
+                            module.generate_contract_commitment_csv_bytes(
+                                _ROWS, _SEEDS[version]
+                            ).decode("utf-8")
+                        )
+                    )
+                )
+                if version == "1.3"
+                else None
+            )
+            tables[("credits", provider, version)] = (credit_cau, credit_cc)
     return tables
 
 
+_SOURCES = ("generated", "golden", "credits")
+
+
 def _params():
-    for source in ("generated", "golden"):
+    for source in _SOURCES:
         for provider in PROVIDERS:
             for version in ("1.2", "1.3"):
                 yield pytest.param(source, provider, version, id=f"{source}-{provider}-{version}")
 
 
 def _params_1_3():
-    for source in ("generated", "golden"):
+    for source in _SOURCES:
         for provider in PROVIDERS:
             yield pytest.param(source, provider, id=f"{source}-{provider}")
 
@@ -306,6 +339,22 @@ def test_pricing_quantity_unit_pairing(conformance_tables, source, provider, ver
             assert not r["PricingQuantity"]
 
 
+@pytest.mark.parametrize(
+    ("provider", "version"),
+    [(p, v) for p in PROVIDERS for v in ("1.2", "1.3")],
+)
+def test_credit_rows_are_exercised(conformance_tables, provider, version):
+    # The credits variant must genuinely produce Credit rows (the default fixture and
+    # the rows100 goldens carry none), with negative amounts and the same-currency
+    # PricingCurrencyEffectiveCost mirror.
+    cau, _ = conformance_tables[("credits", provider, version)]
+    credits = [r for r in cau if r["ChargeCategory"] == "Credit"]
+    assert credits, "include_credits=True must emit Credit rows"
+    for r in credits:
+        assert D(r["BilledCost"]) < 0
+        assert D(r["PricingCurrencyEffectiveCost"]) == D(r["EffectiveCost"]) < 0
+
+
 @matrix
 def test_pricing_currency_on_tax_and_credit(conformance_tables, source, provider, version):
     # Toolkit port of the 1.3 behaviour into 1.2 (review item 4): Tax/Credit rows are
@@ -468,6 +517,38 @@ def test_cross_file_contract_applied_integrity(conformance_tables, source, provi
     for r in cc:
         contracts[r["ContractId"]].add(r["ContractCommitmentId"])
     assert any(len(ids) > 1 for ids in contracts.values())  # [U-37]
+
+
+@matrix_1_3
+def test_applied_metrics_match_the_commitment_category_and_unit(
+    conformance_tables, source, provider
+):
+    # Cross-dataset coherence: an element applied to a Usage-category commitment
+    # carries a quantity in exactly the commitment's own ContractCommitmentUnit
+    # (applying GB-Months or Requests to an Hours commitment would make its progress
+    # unmeasurable), and an element applied to a Spend-category commitment carries a
+    # cost. Every Usage commitment must actually receive such applications.
+    cau, cc = conformance_tables[(source, provider, "1.3")]
+    assert cc
+    commitments = {r["ContractCommitmentId"]: r for r in cc}
+    usage_applied: set[str] = set()
+    for r in cau:
+        if not r["ContractApplied"]:
+            continue
+        for element in parse_contract_applied(r["ContractApplied"], version="1.3").elements:
+            commitment = commitments[element.contract_commitment_id]
+            if commitment["ContractCommitmentCategory"] == "Usage":
+                assert element.applied_quantity is not None
+                assert element.applied_unit == commitment["ContractCommitmentUnit"], (
+                    element.contract_commitment_id,
+                    element.applied_unit,
+                )
+                usage_applied.add(element.contract_commitment_id)
+            else:
+                assert element.applied_cost is not None
+    assert usage_applied >= {
+        r["ContractCommitmentId"] for r in cc if r["ContractCommitmentCategory"] == "Usage"
+    }
 
 
 # --------------------------------------------------------------------------- #

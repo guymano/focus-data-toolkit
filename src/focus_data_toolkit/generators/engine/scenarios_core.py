@@ -144,10 +144,11 @@ def usage_row(rng: random.Random, i: int, remaining: int, profile, adapter) -> d
     )
     # The negotiated contract terms (rate card / minimum spend / usage commitment) are
     # what the PRIVATE_RATE contracted price *is*: every on-demand usage row is priced
-    # under the negotiated rate card, its spend counts toward the contracted minimum
-    # and its usage toward the usage commitment. The 1.3 adapter links the row to those
-    # terms via ContractApplied; 1.2 has no such column.
-    adapter.on_negotiated_usage(row, profile)
+    # under the negotiated rate card and its spend counts toward the contracted
+    # minimum, while only usage of the commitment-eligible service — measured in the
+    # usage commitment's own unit — counts toward that commitment. The 1.3 adapter
+    # links the row to those terms via ContractApplied; 1.2 has no such column.
+    adapter.on_negotiated_usage(row, profile, spec)
     return row
 
 
@@ -289,6 +290,11 @@ def split_allocation_group_rows(
             separators=(",", ":"),
         )
         set_currency(row, "USD", list_unit, contracted_unit, contracted_cost)
+        # The shared host is ordinary on-demand usage of the commitment-eligible
+        # compute service: the negotiated terms apply to it like to any other
+        # Standard usage row (and its Hours usage counts toward the usage
+        # commitment), which also keeps those terms structurally reachable.
+        adapter.on_negotiated_usage(row, profile, spec)
         rows.append(row)
     return rows
 

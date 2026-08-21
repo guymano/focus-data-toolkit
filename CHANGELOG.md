@@ -100,7 +100,12 @@ policy.
   terms per provider (minimum spend, negotiated rate card, usage commitment) share one
   multi-commitment `ContractId` and are reachable from Cost and Usage **exclusively**
   through `ContractApplied` — the FOCUS-defined dataset relationship — never via
-  `CommitmentDiscountId` equality; on-demand 1.3 usage rows reference them.
+  `CommitmentDiscountId` equality. On-demand 1.3 usage rows reference them with
+  cross-dataset unit coherence: the rate card and minimum spend apply a cost on every
+  row (unit-agnostic), while the usage commitment — contracted in Hours — receives
+  quantities only from usage of the commitment-eligible compute service, measured in
+  that same unit (an element applied to a Usage-category commitment always matches
+  its `ContractCommitmentUnit`).
 - **Split Cost Allocation rows are coherent groups.** One shared host charge is fully
   allocated to 2-3 distinct workloads in a single charge period: `AllocatedRatio`
   values sum to exactly 1 and every cost column conserves the host amount exactly

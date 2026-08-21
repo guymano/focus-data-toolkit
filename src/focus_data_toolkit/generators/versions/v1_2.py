@@ -96,7 +96,7 @@ def _noop_commit_usage(
     """1.2 has no ContractApplied column."""
 
 
-def _noop_negotiated_usage(row: dict, profile: object) -> None:
+def _noop_negotiated_usage(row: dict, profile: object, spec: object) -> None:
     """1.2 has no ContractApplied column, so negotiated terms are not linkable."""
 
 

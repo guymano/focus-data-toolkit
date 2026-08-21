@@ -39,6 +39,7 @@ class VersionAdapter:
     # (row, commit_id, contract_id, applied_cost, applied_qty, applied_unit) — qty/unit are
     # empty for spend commitments (a spend commitment applies a cost alone).
     on_commit_usage: Callable[[dict, str, str, str, str, str], None]
-    # (row, profile) — link eligible on-demand usage to the negotiated (non-discount)
-    # contract terms via ContractApplied.
-    on_negotiated_usage: Callable[[dict, ProviderProfile], None]
+    # (row, profile, spec) — link on-demand usage to the negotiated (non-discount)
+    # contract terms via ContractApplied; the usage commitment applies only to
+    # commitment-eligible services (whose usage is measured in the commitment's unit).
+    on_negotiated_usage: Callable[[dict, ProviderProfile, object], None]

@@ -143,29 +143,35 @@ def _on_commit_usage(
     )
 
 
-def _on_negotiated_usage(row: dict, profile: ProviderProfile) -> None:
-    # Eligible on-demand usage is linked to the three negotiated (non-discount) contract
-    # terms: the negotiated rate card explains the ContractedCost, the spend counts
-    # toward the contracted minimum, and the consumed quantity counts toward the usage
-    # commitment. These commitments are reachable ONLY through ContractApplied (they
-    # are not CommitmentDiscountIds) — the FOCUS-defined dataset relationship.
+def _on_negotiated_usage(row: dict, profile: ProviderProfile, spec) -> None:
+    # On-demand usage is linked to the negotiated (non-discount) contract terms: the
+    # negotiated rate card explains the ContractedCost and the spend counts toward the
+    # contracted minimum on every row (cost applications are unit-agnostic). The usage
+    # commitment is different: it is contracted in a specific unit (Hours), so only
+    # usage of the commitment-eligible service — whose consumption is measured in that
+    # same unit — applies a quantity to it; applying GB-Months or Requests to an Hours
+    # commitment would make the commitment's progress unmeasurable. These commitments
+    # are reachable ONLY through ContractApplied (they are not CommitmentDiscountIds)
+    # — the FOCUS-defined dataset relationship.
     contract = negotiated_contract_id(profile.key)
-    row["ContractApplied"] = contract_applied(
-        [
-            contract_applied_element(
-                negotiated_commitment_id("RATECARD", profile.key), contract, row["ContractedCost"]
-            ),
-            contract_applied_element(
-                negotiated_commitment_id("MINSPEND", profile.key), contract, row["ContractedCost"]
-            ),
+    elements = [
+        contract_applied_element(
+            negotiated_commitment_id("RATECARD", profile.key), contract, row["ContractedCost"]
+        ),
+        contract_applied_element(
+            negotiated_commitment_id("MINSPEND", profile.key), contract, row["ContractedCost"]
+        ),
+    ]
+    if spec.commitment_eligible:
+        elements.append(
             contract_applied_element(
                 negotiated_commitment_id("USAGEMIN", profile.key),
                 contract,
                 applied_qty=row["ConsumedQuantity"],
                 applied_unit=row["ConsumedUnit"],
-            ),
-        ]
-    )
+            )
+        )
+    row["ContractApplied"] = contract_applied(elements)
 
 
 V13 = VersionAdapter(
