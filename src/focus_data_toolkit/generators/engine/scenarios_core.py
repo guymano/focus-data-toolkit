@@ -376,24 +376,26 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
         purchase["ListCost"] = s(fee)
         purchase["ContractedCost"] = s(fee)
         if spend_based:
-            # A spend commitment is one unit of committed spend per period; the
-            # discount quantity is the committed amount in the billing currency.
-            purchase["ListUnitPrice"] = s(fee)
-            purchase["ContractedUnitPrice"] = s(fee)
-            purchase["PricingQuantity"] = "1"
-            purchase["PricingUnit"] = "Units"
+            # A spend commitment prices a monetary block: the quantity IS the committed
+            # spend in the pricing currency at a unit price of 1.00 (FOCUS spend-based
+            # Purchase modelling), and the discount quantity is the same amount.
+            purchase["ListUnitPrice"] = "1"
+            purchase["ContractedUnitPrice"] = "1"
+            purchase["PricingQuantity"] = s(fee)
+            purchase["PricingUnit"] = "USD"
             purchase["CommitmentDiscountQuantity"] = s(fee)
             adapter.on_commit_usage(purchase, commit_id, contract_id, s(fee), "", "")
-            set_currency(purchase, "USD", fee, fee, Decimal("0"))
+            set_currency(purchase, "USD", Decimal("1"), Decimal("1"), Decimal("0"))
         else:
             # A usage commitment purchases the committed capacity at the commitment
-            # rate; the discount quantity is that capacity in its native unit.
+            # rate; the discount quantity is that capacity in its native unit. The
+            # ContractApplied element carries the quantity branch (usage semantics).
             purchase["ListUnitPrice"] = s(commit_unit_price)
             purchase["ContractedUnitPrice"] = s(commit_unit_price)
             purchase["PricingQuantity"] = s(capacity)
             purchase["PricingUnit"] = "Hours"
             purchase["CommitmentDiscountQuantity"] = s(capacity)
-            adapter.on_commit_usage(purchase, commit_id, contract_id, s(fee), s(capacity), "Hours")
+            adapter.on_commit_usage(purchase, commit_id, contract_id, "", s(capacity), "Hours")
             set_currency(purchase, "USD", commit_unit_price, commit_unit_price, Decimal("0"))
         rows.append(purchase)
 
@@ -448,9 +450,9 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
             if spend_based:
                 adapter.on_commit_usage(usage, commit_id, contract_id, s(effective), "", "")
             else:
-                adapter.on_commit_usage(
-                    usage, commit_id, contract_id, s(effective), s(used_qty), "Hours"
-                )
+                # Usage commitments apply the measured quantity, not a cost (the
+                # quantity branch survives the 1.4 oneOf conversion unchanged).
+                adapter.on_commit_usage(usage, commit_id, contract_id, "", s(used_qty), "Hours")
             set_currency(usage, "USD", list_unit, contracted_unit, effective)
             rows.append(usage)
 
@@ -467,20 +469,28 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
         unused["PricingCategory"] = "Committed"
         unused["BilledCost"] = "0"
         unused["EffectiveCost"] = s(wasted_effective)
-        unused["ListCost"] = s(exact_cost(list_unit, waste))
-        unused["ContractedCost"] = s(exact_cost(contracted_unit, waste))
-        unused["ListUnitPrice"] = s(list_unit)
-        unused["ContractedUnitPrice"] = s(contracted_unit)
-        unused["PricingQuantity"] = s(waste)
-        unused["PricingUnit"] = "Hours"
-        unused["CommitmentDiscountStatus"] = "Unused"
-        unused["CommitmentDiscountQuantity"] = s(wasted_effective) if spend_based else s(waste)
         if spend_based:
+            # The unused part of a spend commitment is a monetary block too: the
+            # quantity is the unused committed spend in USD at a unit price of 1.00.
+            unused["ListCost"] = s(wasted_effective)
+            unused["ContractedCost"] = s(wasted_effective)
+            unused["ListUnitPrice"] = "1"
+            unused["ContractedUnitPrice"] = "1"
+            unused["PricingQuantity"] = s(wasted_effective)
+            unused["PricingUnit"] = "USD"
+            unused["CommitmentDiscountQuantity"] = s(wasted_effective)
             adapter.on_commit_usage(unused, commit_id, contract_id, s(wasted_effective), "", "")
+            set_currency(unused, "USD", Decimal("1"), Decimal("1"), wasted_effective)
         else:
-            adapter.on_commit_usage(
-                unused, commit_id, contract_id, s(wasted_effective), s(waste), "Hours"
-            )
-        set_currency(unused, "USD", list_unit, contracted_unit, wasted_effective)
+            unused["ListCost"] = s(exact_cost(list_unit, waste))
+            unused["ContractedCost"] = s(exact_cost(contracted_unit, waste))
+            unused["ListUnitPrice"] = s(list_unit)
+            unused["ContractedUnitPrice"] = s(contracted_unit)
+            unused["PricingQuantity"] = s(waste)
+            unused["PricingUnit"] = "Hours"
+            unused["CommitmentDiscountQuantity"] = s(waste)
+            adapter.on_commit_usage(unused, commit_id, contract_id, "", s(waste), "Hours")
+            set_currency(unused, "USD", list_unit, contracted_unit, wasted_effective)
+        unused["CommitmentDiscountStatus"] = "Unused"
         rows.append(unused)
     return rows

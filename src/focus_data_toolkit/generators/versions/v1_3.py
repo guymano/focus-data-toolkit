@@ -136,8 +136,8 @@ def _on_commit_usage(
     # every commitment row — the recurring Purchase (whose ResourceId is the
     # commitment, per rule CAU-ContractAppliedObject-O-039-C) and the Used and Unused
     # usage rows alike (an Unused row is still a charge tied to the commitment).
-    # Spend commitments apply a cost alone; usage commitments also carry the measured
-    # quantity in its native unit.
+    # Spend commitments apply a cost alone; usage commitments apply the measured
+    # quantity in its native unit alone (the branch survives the 1.4 oneOf migration).
     usage["ContractApplied"] = contract_applied(
         [contract_applied_element(commit_id, contract_id, applied_cost, applied_qty, applied_unit)]
     )
@@ -161,9 +161,8 @@ def _on_negotiated_usage(row: dict, profile: ProviderProfile) -> None:
             contract_applied_element(
                 negotiated_commitment_id("USAGEMIN", profile.key),
                 contract,
-                row["ContractedCost"],
-                row["ConsumedQuantity"],
-                row["ConsumedUnit"],
+                applied_qty=row["ConsumedQuantity"],
+                applied_unit=row["ConsumedUnit"],
             ),
         ]
     )

@@ -40,7 +40,7 @@ def allocated_method_details(
 def contract_applied_element(
     commit_id: str,
     contract_id: str,
-    applied_cost: str,
+    applied_cost: str = "",
     applied_qty: str = "",
     applied_unit: str = "",
 ) -> dict[str, str | None]:
@@ -49,14 +49,17 @@ def contract_applied_element(
     The identifier keys use the canonical ``Id`` casing of FOCUS erratum #3 (the
     1.3.0.1 rule model), not the legacy pre-erratum ``ID`` casing. Per that rule
     model (``CAU-ContractAppliedObject-O-007-M``) every element carries **all five**
-    key-value pairs; a spend commitment applies a cost alone, so its quantity/unit
-    are explicit JSON nulls, while a usage commitment carries the measured quantity
-    in its native unit.
+    key-value pairs, one metric branch populated and the other explicit JSON nulls:
+    a spend commitment applies a cost alone; a usage commitment applies the measured
+    quantity in its native unit alone — which also keeps the quantity branch intact
+    through the FOCUS 1.4 ``oneOf`` migration.
     """
+    if not applied_cost and not applied_qty:
+        raise ValueError("a ContractApplied element needs a cost or a quantity")
     return {
         "ContractId": contract_id,
         "ContractCommitmentId": commit_id,
-        "ContractCommitmentAppliedCost": applied_cost,
+        "ContractCommitmentAppliedCost": applied_cost or None,
         "ContractCommitmentAppliedQuantity": applied_qty or None,
         "ContractCommitmentAppliedUnit": applied_unit or None,
     }

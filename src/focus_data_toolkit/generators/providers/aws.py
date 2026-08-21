@@ -144,7 +144,8 @@ def _purchase_sku_id(rng: random.Random) -> str:
 
 
 def _purchase_sku_details(spend_based: bool) -> str:
-    return json.dumps({"x_PurchaseTerm": "1yr", "x_PaymentOption": "AllUpfront"}, separators=(",", ":"))
+    # NoUpfront: the commitment fee recurs per charge period (see commitment_group).
+    return json.dumps({"x_PurchaseTerm": "1yr", "x_PaymentOption": "NoUpfront"}, separators=(",", ":"))
 
 
 AWS = ProviderProfile(
@@ -175,9 +176,9 @@ AWS = ProviderProfile(
         commit_resource_name=_commit_resource_name,
         purchase_sku_id=_purchase_sku_id,
         purchase_sku_details=_purchase_sku_details,
-        purchase_description=lambda commit_type: f"{commit_type} commitment purchase (all upfront)",
+        purchase_description=lambda commit_type: f"{commit_type} commitment purchase (no upfront)",
         commit_name=lambda spend_based: (
-            "ComputeSavingsPlan-1yr-AllUpfront" if spend_based else "EC2ReservedInstance-1yr-AllUpfront"
+            "ComputeSavingsPlan-1yr-NoUpfront" if spend_based else "EC2ReservedInstance-1yr-NoUpfront"
         ),
         commit_type=lambda spend_based: "Savings Plan" if spend_based else "Reserved Instance",
         commit_category=lambda spend_based: "Spend" if spend_based else "Usage",

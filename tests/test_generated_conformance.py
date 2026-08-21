@@ -224,6 +224,69 @@ def test_commitment_discount_quantity_and_unit(conformance_tables, source, provi
         )
 
 
+@matrix
+def test_spend_commitment_rows_price_a_monetary_block(conformance_tables, source, provider, version):
+    # A spend commitment prices a block of committed spend: on its Purchase and
+    # Unused rows PricingUnit is the currency, the unit prices are exactly 1.00 and
+    # the priced quantity IS the committed/unused spend (== CommitmentDiscountQuantity).
+    # Used rows deliberately keep the consuming resource's native pricing instead.
+    cau, _ = conformance_tables[(source, provider, version)]
+    rows = [
+        r
+        for r in _commitment_rows(cau)
+        if r["CommitmentDiscountCategory"] == "Spend"
+        and (r["ChargeCategory"] == "Purchase" or r["CommitmentDiscountStatus"] == "Unused")
+    ]
+    assert rows, "expected spend commitment Purchase/Unused rows"
+    for r in rows:
+        assert r["PricingUnit"] == "USD"
+        assert D(r["ListUnitPrice"]) == 1
+        assert D(r["ContractedUnitPrice"]) == 1
+        assert D(r["PricingQuantity"]) == D(r["CommitmentDiscountQuantity"])
+        assert D(r["ListCost"]) == D(r["PricingQuantity"]) == D(r["ContractedCost"])
+
+
+@matrix
+def test_recurring_purchases_carry_no_upfront_metadata(conformance_tables, source, provider, version):
+    # The per-charge-period model is a recurring, no-upfront fee: no Purchase row may
+    # describe itself as all-upfront in its description, SKU details or discount name.
+    cau, _ = conformance_tables[(source, provider, version)]
+    purchases = [r for r in _commitment_rows(cau) if r["ChargeCategory"] == "Purchase"]
+    assert purchases
+    for r in purchases:
+        assert r["ChargeFrequency"] == "Recurring"
+        blob = " ".join(
+            (r["ChargeDescription"], r["SkuPriceDetails"], r["CommitmentDiscountName"], r["SkuId"])
+        ).lower()
+        assert "allupfront" not in blob and "all upfront" not in blob
+        details = json.loads(r["SkuPriceDetails"]) if r["SkuPriceDetails"] else {}
+        if "x_PaymentOption" in details:
+            assert details["x_PaymentOption"] == "NoUpfront"
+
+
+@matrix
+def test_resource_type_present_wherever_resource_id_is(conformance_tables, source, provider, version):
+    # Pins the data side of validator rule ResourceType-C-005-C ("MUST NOT be null
+    # when ResourceId is not null"): the engine flags null-ResourceId rows by
+    # mis-applying the condition, but no generated row genuinely violates the rule.
+    cau, _ = conformance_tables[(source, provider, version)]
+    for r in cau:
+        if r["ResourceId"]:
+            assert r["ResourceType"], r["ResourceId"]
+
+
+@matrix
+def test_commitment_discount_status_only_on_commitment_usage(
+    conformance_tables, source, provider, version
+):
+    # Pins the data side of the CommitmentDiscountStatus-C-003/004-C branch pair:
+    # the status is set exactly on commitment Usage rows, null everywhere else.
+    cau, _ = conformance_tables[(source, provider, version)]
+    for r in cau:
+        expected = bool(r["CommitmentDiscountId"]) and r["ChargeCategory"] == "Usage"
+        assert bool(r["CommitmentDiscountStatus"]) == expected
+
+
 # --------------------------------------------------------------------------- #
 # Pricing nullability and currency
 # --------------------------------------------------------------------------- #
@@ -316,8 +379,9 @@ def test_contract_applied_structure_and_casing(conformance_tables, source, provi
 @matrix_1_3
 def test_contract_applied_on_all_commitment_usage_rows(conformance_tables, source, provider):
     # Used and Unused rows alike are charges tied to the commitment, so both carry
-    # ContractApplied (spend commitments apply a cost alone; usage commitments also
-    # carry quantity + native unit).
+    # ContractApplied, with one metric branch per category: a spend commitment
+    # applies a cost alone, a usage commitment applies the measured quantity in its
+    # native unit alone (so the quantity branch survives the 1.4 oneOf migration).
     cau, _ = conformance_tables[(source, provider, "1.3")]
     rows = [r for r in _commitment_rows(cau) if r["ChargeCategory"] == "Usage"]
     assert rows
@@ -325,12 +389,37 @@ def test_contract_applied_on_all_commitment_usage_rows(conformance_tables, sourc
         ca = parse_contract_applied(r["ContractApplied"], version="1.3")
         (element,) = ca.elements
         assert element.contract_commitment_id == r["CommitmentDiscountId"]
-        assert element.applied_cost is not None
-        assert D(element.applied_cost) == D(r["EffectiveCost"])
         if r["CommitmentDiscountCategory"] == "Spend":
+            assert element.applied_cost is not None
+            assert D(element.applied_cost) == D(r["EffectiveCost"])
             assert element.applied_quantity is None and element.applied_unit is None
         else:
+            assert element.applied_cost is None
             assert element.applied_quantity is not None and element.applied_unit is not None
+            assert D(element.applied_quantity) == D(r["PricingQuantity"])
+
+
+@matrix_1_3
+def test_contract_applied_on_commitment_purchase_rows(conformance_tables, source, provider):
+    # The recurring Purchase is a charge tied to the commitment too: it carries
+    # ContractApplied whose ContractCommitmentId equals ResourceId (rule
+    # CAU-ContractAppliedObject-O-039-C), with the same one-branch-per-category
+    # semantics — committed spend applies the fee, committed capacity the quantity.
+    cau, _ = conformance_tables[(source, provider, "1.3")]
+    purchases = [r for r in _commitment_rows(cau) if r["ChargeCategory"] == "Purchase"]
+    assert purchases
+    for r in purchases:
+        ca = parse_contract_applied(r["ContractApplied"], version="1.3")
+        (element,) = ca.elements
+        assert element.contract_commitment_id == r["ResourceId"] == r["CommitmentDiscountId"]
+        if r["CommitmentDiscountCategory"] == "Spend":
+            assert element.applied_cost is not None
+            assert D(element.applied_cost) == D(r["BilledCost"])
+            assert element.applied_quantity is None
+        else:
+            assert element.applied_cost is None
+            assert element.applied_quantity is not None
+            assert D(element.applied_quantity) == D(r["PricingQuantity"])
 
 
 @matrix_1_3
