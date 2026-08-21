@@ -22,10 +22,35 @@ from collections.abc import Iterable, Mapping
 
 from focus_data_toolkit.convert.contract_applied import migrate_1_3_to_1_4
 from focus_data_toolkit.convert.invoice_detail import GrainKey, invoice_detail_grain_key
+from focus_data_toolkit.errors import Diagnostic, Severity
 from focus_data_toolkit.model import dataset_columns
 from focus_data_toolkit.provenance import ColumnRule, Lineage, LineageCounters
 
 DATASET = "Cost and Usage"
+
+
+def contract_applied_legacy_diagnostic(legacy_keys: set[str]) -> Diagnostic | None:
+    """Build the ``FDT-CA-001`` diagnostic when legacy 1.3 casing was normalized.
+
+    Accepting the pre-erratum ``ContractID``/``ContractCommitmentID`` casing is a
+    compatibility normalization, never silent equivalence: the encounter is surfaced
+    so callers do not mistake a merely tolerated file for a conformant one. Returns
+    ``None`` when no legacy casing was seen. Shared by the eager and streaming
+    pipelines so both manifests stay identical.
+    """
+    if not legacy_keys:
+        return None
+    return Diagnostic(
+        code="FDT-CA-001",
+        severity=Severity.WARNING,
+        message=(
+            "legacy FOCUS 1.3 ContractApplied identifier casing normalized "
+            f"({', '.join(sorted(legacy_keys))} -> canonical Id casing per "
+            "FOCUS 1.3 erratum #3)"
+        ),
+        datasets=(DATASET,),
+        column="ContractApplied",
+    )
 
 # 1.2 -> 1.3/1.4 participant-entity derivations. Both columns derive from
 # ProviderName: FOCUS 1.3 replaced ProviderName with ServiceProviderName, and the
@@ -94,18 +119,22 @@ def cost_and_usage_provenance(
     return rules
 
 
-def _convert_contract_applied(raw: str | None, source_version: str) -> str:
+def _convert_contract_applied(
+    raw: str | None, source_version: str, legacy_keys: set[str] | None = None
+) -> str:
     """Migrate a source ``ContractApplied`` JSON to the FOCUS 1.4 schema.
 
-    1.4 re-cases the identifier keys (``ContractID``->``ContractId``,
-    ``ContractCommitmentID``->``ContractCommitmentId``). A 1.2 source has no
-    ``ContractApplied`` column, so the value is empty there. Raises
+    Enforces 1.4 metric exclusivity and normalizes any legacy pre-erratum 1.3
+    identifier casing (``ContractID``/``ContractCommitmentID`` -> the canonical
+    ``ContractId``/``ContractCommitmentId``), recording the encountered legacy keys
+    in ``legacy_keys`` so the pipeline can surface the normalization. A 1.2 source
+    has no ``ContractApplied`` column, so the value is empty there. Raises
     ``ContractAppliedError`` (a ``ValueError``) on a structurally invalid source value.
     """
     text = (raw or "").strip()
     if not text or source_version != "1.3":
         return text
-    return migrate_1_3_to_1_4(text)
+    return migrate_1_3_to_1_4(text, legacy_sink=legacy_keys)
 
 
 def convert_cost_and_usage_row(
@@ -115,19 +144,21 @@ def convert_cost_and_usage_row(
     detail_id: str = "",
     target: tuple[str, ...] | None = None,
     counters: LineageCounters | None = None,
+    legacy_keys: set[str] | None = None,
 ) -> dict[str, str]:
     """Convert one source row to the FOCUS 1.4 Cost and Usage shape (pure function).
 
     ``detail_id`` is the already-resolved ``InvoiceDetailId`` back-link (empty in strict mode
     or for rows with no invoice). Shared by the eager and streaming pipelines so both produce
     identical output. ``counters`` (optional) records the per-value lineage of columns whose
-    rule varies by row (the pricing-currency backfill pair).
+    rule varies by row (the pricing-currency backfill pair); ``legacy_keys`` (optional)
+    collects legacy pre-erratum ``ContractApplied`` identifier casings that were normalized.
     """
     columns = target if target is not None else dataset_columns(DATASET)
     converted: dict[str, str] = {}
     for col in columns:
         if col == "ContractApplied":
-            converted[col] = _convert_contract_applied(row.get(col), source_version)
+            converted[col] = _convert_contract_applied(row.get(col), source_version, legacy_keys)
         elif col in row:
             converted[col] = row[col]
         elif source_version == "1.2" and col in _DERIVED_FROM_1_2:
@@ -158,6 +189,7 @@ def convert_cost_and_usage(
     *,
     invoice_detail_ids: dict[GrainKey, str] | None = None,
     counters: LineageCounters | None = None,
+    legacy_keys: set[str] | None = None,
 ) -> list[dict[str, str]]:
     """Return ``rows`` reshaped to the FOCUS 1.4 Cost and Usage column set.
 
@@ -174,6 +206,7 @@ def convert_cost_and_usage(
             detail_id=ids.get(invoice_detail_grain_key(row), ""),
             target=target,
             counters=counters,
+            legacy_keys=legacy_keys,
         )
         for row in rows
     ]

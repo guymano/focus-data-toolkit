@@ -18,7 +18,9 @@ from focus_data_toolkit.convert.contract_applied import (
     to_json,
 )
 
-# A valid FOCUS 1.3 ContractApplied (uppercase ID keys; metrics are JSON numbers).
+# A valid FOCUS 1.3 ContractApplied in the legacy pre-erratum uppercase-ID casing
+# (metrics are JSON numbers). FOCUS erratum #3 corrected the identifier keys to the
+# Id casing; the legacy casing must stay parseable for files produced before it.
 # 1.3 permits cost AND quantity+unit simultaneously; 1.4's oneOf does not.
 VALID_1_3_BOTH = (
     '{"Elements":[{"ContractID":"CONTRACT-1","ContractCommitmentID":"sp-1",'
@@ -127,8 +129,8 @@ def test_to_json_1_4_refuses_both_branches():
         ('{"Elements":{}}', "'Elements' array"),
         ('{"x_Foo":1}', "'Elements' array"),
         ('{"Elements":[1]}', "must be an object"),
-        ('{"Elements":[{"ContractCommitmentID":"c","ContractCommitmentAppliedCost":1}]}', "ContractID"),
-        ('{"Elements":[{"ContractID":"c","ContractCommitmentAppliedCost":1}]}', "ContractCommitmentID"),
+        ('{"Elements":[{"ContractCommitmentID":"c","ContractCommitmentAppliedCost":1}]}', "ContractId"),
+        ('{"Elements":[{"ContractID":"c","ContractCommitmentAppliedCost":1}]}', "ContractCommitmentId"),
         ('{"Elements":[{"ContractID":"c","ContractCommitmentID":"x"}]}', "must provide"),
         (
             '{"Elements":[{"ContractID":"c","ContractCommitmentID":"x",'
@@ -167,3 +169,60 @@ def test_parse_rejects_duplicate_keys():
     )
     with pytest.raises(ContractAppliedError, match="duplicate JSON key"):
         parse(dup, version="1.3")
+
+
+# --- FOCUS erratum #3: canonical Id casing in 1.3 ---------------------------------
+
+VALID_1_3_CANONICAL = (
+    '{"Elements":[{"ContractId":"CONTRACT-1","ContractCommitmentId":"sp-1",'
+    '"ContractCommitmentAppliedCost":0.0641}]}'
+)
+
+
+def test_parse_1_3_accepts_canonical_erratum_casing():
+    sink: set[str] = set()
+    ca = parse(VALID_1_3_CANONICAL, version="1.3", legacy_sink=sink)
+    el = ca.elements[0]
+    assert el.contract_id == "CONTRACT-1"
+    assert el.contract_commitment_id == "sp-1"
+    assert sink == set()  # canonical casing is not a legacy encounter
+
+
+def test_parse_1_3_records_legacy_casing_in_sink():
+    sink: set[str] = set()
+    parse(VALID_1_3_COST_ONLY, version="1.3", legacy_sink=sink)
+    assert sink == {"ContractID", "ContractCommitmentID"}
+
+
+def test_parse_1_3_rejects_mixed_casing_in_one_element():
+    ambiguous = (
+        '{"Elements":[{"ContractId":"c","ContractID":"d","ContractCommitmentId":"x",'
+        '"ContractCommitmentAppliedCost":1}]}'
+    )
+    with pytest.raises(ContractAppliedError, match="only the canonical casing"):
+        parse(ambiguous, version="1.3")
+
+
+def test_parse_1_4_rejects_legacy_casing():
+    # 1.4 never had the uppercase casing; there it is a plain unknown custom key.
+    with pytest.raises(ContractAppliedError, match="must be prefixed with 'x_'"):
+        parse(VALID_1_3_COST_ONLY, version="1.4")
+
+
+def test_to_json_1_3_emits_canonical_casing():
+    ca = parse(VALID_1_3_COST_ONLY, version="1.3")
+    out = to_json(ca, version="1.3")
+    assert '"ContractId":"CONTRACT-1"' in out
+    assert '"ContractCommitmentId":"sp-1"' in out
+    assert "ContractID" not in out and "ContractCommitmentID" not in out
+
+
+def test_migrate_normalizes_legacy_casing_and_reports_it():
+    sink: set[str] = set()
+    out = migrate_1_3_to_1_4(VALID_1_3_COST_ONLY, legacy_sink=sink)
+    assert '"ContractId":"CONTRACT-1"' in out
+    assert sink == {"ContractID", "ContractCommitmentID"}
+    # Canonical input migrates identically, with nothing to report.
+    sink.clear()
+    assert migrate_1_3_to_1_4(VALID_1_3_CANONICAL, legacy_sink=sink) == out
+    assert sink == set()

@@ -22,7 +22,7 @@ _BUILDERS: dict[str, _Builder] = {
     "credit": scenarios_core.credit_row,
     "tax": scenarios_core.tax_row,
     "purchase": scenarios_core.standalone_purchase_row,
-    "split": scenarios_core.split_allocation_row,
+    "split": scenarios_core.split_allocation_group_rows,
     "commitment": scenarios_core.commitment_group,
 }
 

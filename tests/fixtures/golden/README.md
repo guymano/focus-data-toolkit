@@ -17,9 +17,13 @@ Usage dataset over a small `(rows, seed)` grid (including an `include_credits` v
 byte-reproducible for an *identical toolkit version* (see `docs/versioning.md`, added in P2-D).
 A legitimate change (e.g. a new service, a FOCUS-conformance fix) requires:
 
-1. regenerating the affected fixture(s),
+1. regenerating the affected fixture(s) — `python scripts/regenerate_golden_fixtures.py`
+   replays the exact grid asserted by `tests/test_generator_golden.py`,
 2. a `CHANGELOG.md` entry describing the output change, and
-3. justification that the new bytes are correct.
+3. justification that the new bytes are correct — `tests/test_generated_conformance.py`
+   runs the ported upstream FOCUS-Sample-Data conformance catalogue against both fresh
+   generation and the committed `rows100_seed42` fixtures, so the committed bytes are
+   proven conformant, not merely reproducible.
 
 ## `correctness_migration/`
 

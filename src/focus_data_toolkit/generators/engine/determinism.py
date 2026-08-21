@@ -20,6 +20,7 @@ BILLING_END = datetime(2026, 6, 1, tzinfo=UTC)
 PERIOD_DAYS = 28
 PERIOD_HOURS = PERIOD_DAYS * 24
 COMMIT_TERM_DAYS = 365  # 1-year commitment / contract term
+CONTRACT_LEAD_DAYS = 90  # the contract period encloses the commitment period by this margin
 
 # --------------------------------------------------------------------------- #
 # Rounding quanta and commercial rates (single source of truth)
@@ -66,6 +67,20 @@ def q(value: Decimal, quant: Decimal) -> Decimal:
     return value.quantize(quant, rounding=ROUND_HALF_UP)
 
 
+def exact_cost(unit_price: Decimal, quantity: Decimal) -> Decimal:
+    """Exact product of already-quantised factors (Decimal multiplication never rounds).
+
+    Costs must satisfy ``cost == unit_price * quantity`` under exact Decimal equality
+    (FOCUS cost arithmetic) — so the *factors* are quantised (``PRICE_Q`` × ``QTY_Q``,
+    a <= 14-decimal product), never the product. The product is display-trimmed to
+    ``COST_Q`` only when that loses nothing, so typical values still render at 6
+    decimals while genuinely small unit prices keep their full precision.
+    """
+    product = unit_price * quantity
+    trimmed = product.quantize(COST_Q)
+    return trimmed if trimmed == product else product
+
+
 def s(value: Decimal) -> str:
     """Render a Decimal as fixed-point text (never scientific notation)."""
     return format(value, "f")
@@ -103,6 +118,26 @@ def contract_id_for(commit_id: str) -> str:
     return f"CONTRACT-{commit_id.rsplit('/', 1)[-1][:12]}"
 
 
+# Negotiated contract terms that are NOT commitment discounts (minimum spend, negotiated
+# rate card, usage commitment). They live in the Contract Commitment dataset and are
+# reachable from Cost and Usage exclusively through ``ContractApplied`` — never via
+# ``CommitmentDiscountId`` — which is the FOCUS-defined relationship between the two
+# datasets. Ids are RNG-free so the Cost and Usage rows (which reference them) and the
+# Contract Commitment dataset (which defines them) agree without sharing state.
+NEGOTIATED_TERM_KINDS: tuple[str, ...] = ("MINSPEND", "RATECARD", "USAGEMIN")
+
+
+def negotiated_contract_id(profile_key: str) -> str:
+    """The one negotiated contract per provider (a multi-commitment ContractId)."""
+    return f"CONTRACT-NEGOTIATED-{profile_key.upper()}"
+
+
+def negotiated_commitment_id(kind: str, profile_key: str) -> str:
+    if kind not in NEGOTIATED_TERM_KINDS:
+        raise ValueError(f"unknown negotiated term kind {kind!r}")
+    return f"CC-{kind}-{profile_key.upper()}"
+
+
 def set_currency(
     row: dict[str, str],
     pricing_currency: str,
@@ -111,7 +146,14 @@ def set_currency(
     effective_cost: Decimal,
 ) -> None:
     row["PricingCurrency"] = pricing_currency
-    fx = EUR_PER_USD if pricing_currency == "EUR" else Decimal("1")
+    if pricing_currency == "USD":
+        # Same currency as billing: the pricing-currency columns are exact mirrors of
+        # the USD amounts (quantising here would break exact cost arithmetic).
+        row["PricingCurrencyListUnitPrice"] = s(list_unit)
+        row["PricingCurrencyContractedUnitPrice"] = s(contracted_unit)
+        row["PricingCurrencyEffectiveCost"] = s(effective_cost)
+        return
+    fx = EUR_PER_USD
     row["PricingCurrencyListUnitPrice"] = s(q(list_unit * fx, PRICE_Q))
     row["PricingCurrencyContractedUnitPrice"] = s(q(contracted_unit * fx, PRICE_Q))
     row["PricingCurrencyEffectiveCost"] = s(q(effective_cost * fx, COST_Q))

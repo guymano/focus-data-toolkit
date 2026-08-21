@@ -104,4 +104,11 @@ def test_fake_provider_generates_and_is_deterministic(fake_registered, version, 
 def test_fake_provider_needed_no_new_module(fake_registered):
     # The fake provider is a value, registered in-process: proof the engine is provider-agnostic.
     cc = _rows(get_generator("fake", "1.3").generate_contract_commitment_csv_bytes(120, 4))
-    assert all(row["ContractCommitmentId"].startswith("fake-commit-") for row in cc)
+    discount = [row for row in cc if not row["ContractCommitmentId"].startswith("CC-")]
+    assert discount and all(
+        row["ContractCommitmentId"].startswith("fake-commit-") for row in discount
+    )
+    # The provider-agnostic negotiated terms derive their ids from the profile key.
+    assert {r["ContractCommitmentId"] for r in cc if r["ContractCommitmentId"].startswith("CC-")} == {
+        "CC-MINSPEND-FAKE", "CC-RATECARD-FAKE", "CC-USAGEMIN-FAKE"
+    }

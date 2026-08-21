@@ -9,8 +9,58 @@ policy.
 
 ## [Unreleased]
 
+> The generator changes below are a **deliberate reproducibility break** (every golden
+> fixture regenerated once): the next release must be a **minor** version (0.12.0).
+
+### Fixed
+
+- **Exact cost arithmetic in the generators.** Costs are now exact products of their
+  factors: the unit price (10 dp) and quantity (4 dp) are quantised, never the product,
+  so `ListCost == ListUnitPrice × PricingQuantity` and `ContractedCost ==
+  ContractedUnitPrice × PricingQuantity` hold under exact `Decimal` equality on every
+  priced row (previously ~46% of usage rows carried a ≤ 5e-7 rounding delta). Products
+  are display-trimmed to 6 decimals only when lossless. The Parquet decimal registry
+  default widens from `(38, 12)` to `(38, 14)` to hold these products exactly.
+- **Three prices kept apart on commitment-covered usage.** `ContractedUnitPrice` now
+  carries only the negotiated rate; the commitment discount shows only between
+  `ContractedCost` and `EffectiveCost`, giving the strict `EffectiveCost <
+  ContractedCost ≤ ListCost` ordering on Used rows (previously the commitment rate was
+  folded into the contracted price and `ContractedCost == EffectiveCost`).
+- **FOCUS erratum #3 `ContractApplied` casing.** The 1.3 generators emit the canonical
+  `ContractId` / `ContractCommitmentId` element keys of the 1.3.0.1 rule model, and the
+  1.3 parser accepts **both** casings — legacy pre-erratum `ContractID` /
+  `ContractCommitmentID` input is normalized and surfaced once per conversion as the
+  new catalogued `FDT-CA-001` warning (compatibility is never silent equivalence; mixed
+  casings in one element are rejected as ambiguous). `to_json(..., version="1.3")` emits
+  the canonical casing. Supersedes the 0.2.0 note that recorded the uppercase casing as
+  the fix.
+- **Full 1.2 billing identity on commitment groups.** 1.2 commitment usage rows now copy
+  all seven identity keys from the purchase (as 1.3 already did), so each
+  `BillingAccountId` maps to exactly one `BillingAccountName` and one `InvoiceId`
+  (previously name and invoice diverged within every 1.2 commitment group).
+- **`PricingCurrency` on 1.2 Tax/Credit rows.** Tax and Credit rows carry
+  `PricingCurrency` and `PricingCurrencyEffectiveCost` in 1.2 as in 1.3, and
+  same-currency pricing columns are exact mirrors instead of re-quantised views.
+
 ### Added
 
+- **Generated-data conformance suite** (`tests/test_generated_conformance.py`): the
+  upstream FOCUS-Sample-Data checker catalogue (24 assertions per provider for 1.2,
+  36-37 for 1.3) ported onto the toolkit's generators and run against both fresh
+  generation and the committed golden fixtures — exact `Decimal` equality throughout.
+- **Official-validator CI gate** (`scripts/validate_official_samples.py` + the
+  `official-validation` job in `ci.yml`): the nine generated outputs (3 providers ×
+  1.2 Cost and Usage, × 1.3 Cost and Usage + Contract Commitment) are validated by the
+  official FinOps `focus-validator`, pinned to `2.2.1`, with
+  `--applicability-criteria ALL` so the conditional rules for the capabilities these
+  datasets exercise run too, offline via the packaged / SHA-256-pinned release rule
+  models. Each `(version, provider, dataset)` run is compared against its **exact**
+  expected artifact set — per-rule justifications printed on every run, each claim
+  pinned by a data-side conformance test; an unexpected failure *or* a stale
+  allowlist entry (an expected artifact that stops failing) breaks the build. The
+  1.3 Contract Commitment dataset validates with zero artifacts.
+- **`scripts/regenerate_golden_fixtures.py`**: replays the exact golden grid of
+  `tests/test_generator_golden.py`, replacing the ad-hoc regeneration procedure.
 - **CI: `dependency-review` job** in `.github/workflows/security.yml` (PR-only, informational).
   Now that the repository Dependency Graph is enabled, `actions/dependency-review-action` gates a
   PR's dependency **diff** against the GitHub Advisory database and fails on a HIGH+ vulnerability.
@@ -22,6 +72,46 @@ policy.
 
 ### Changed
 
+- **Commitment discounts are modelled per charge period and reconcile exactly.** Each
+  commitment now emits whole per-period blocks: a `Recurring` Purchase row
+  (`BilledCost` = the per-period fee, `EffectiveCost` = 0, explicit
+  `CommitmentDiscountQuantity`/`Unit` — committed spend in USD or capacity in the
+  native unit), Used rows for consumed capacity, and one `Unused` row absorbing the
+  use-it-or-lose-it remainder — so `sum(Usage.EffectiveCost) ==
+  sum(Purchase.BilledCost)` holds under exact equality per charge period and per
+  billing period (previously one One-Time all-upfront purchase with a handful of
+  covered hours and no reconciliation). The provider terms are `NoUpfront`
+  accordingly (payment-option metadata, SKU names and purchase descriptions — a
+  recurring fee contradicts all-upfront). Spend commitments price a **monetary
+  block** on their Purchase and Unused rows: `PricingUnit` is the currency, the
+  unit prices are exactly 1.00 and the priced quantity is the committed/unused
+  spend itself (Used rows keep the consuming resource's native pricing).
+  `ContractApplied` is attached to every 1.3 commitment row — Purchase
+  (`ContractCommitmentId == ResourceId` per rule `O-039-C`), Used and Unused alike
+  — with all five element keys always present (rule `O-007-M`) and exactly one
+  metric branch per category: a spend commitment applies a cost alone, a usage
+  commitment applies the measured quantity in its native unit alone, so the
+  quantity branch survives the 1.4 `oneOf` migration instead of being demoted to
+  `x_` custom keys.
+- **The Contract Commitment dataset carries term totals and negotiated terms.** Costs
+  and quantities are the 1-year term totals; Spend commitments leave quantity/unit
+  empty while Usage commitments carry a real quantity in its native unit; the contract
+  period encloses the commitment period by 90 days. Three negotiated non-discount
+  terms per provider (minimum spend, negotiated rate card, usage commitment) share one
+  multi-commitment `ContractId` and are reachable from Cost and Usage **exclusively**
+  through `ContractApplied` — the FOCUS-defined dataset relationship — never via
+  `CommitmentDiscountId` equality. On-demand 1.3 usage rows reference them with
+  cross-dataset unit coherence: the rate card and minimum spend apply a cost on every
+  row (unit-agnostic), while the usage commitment — contracted in Hours — receives
+  quantities only from usage of the commitment-eligible compute service, measured in
+  that same unit (an element applied to a Usage-category commitment always matches
+  its `ContractCommitmentUnit`).
+- **Split Cost Allocation rows are coherent groups.** One shared host charge is fully
+  allocated to 2-3 distinct workloads in a single charge period: `AllocatedRatio`
+  values sum to exactly 1 and every cost column conserves the host amount exactly
+  (quantity shares absorb the residue; each row's costs stay exact unit-price ×
+  quantity products). The residue arithmetic is shared with
+  `generators/scenarios.py` via the new `generators/engine/allocation_math` module.
 - **Docs: `docs/runner.md` rewritten as a step-by-step guide, and several claims corrected** (no
   runtime code changed). The page now walks a newcomer from `docker pull` to a validated FOCUS 1.4
   output — prerequisites, a mount-free first run, directory setup, a six-step walkthrough with the

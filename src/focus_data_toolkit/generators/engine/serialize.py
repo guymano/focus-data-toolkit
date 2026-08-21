@@ -10,17 +10,46 @@ import argparse
 import csv
 import io
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 
 from focus_data_toolkit.generators.engine.determinism import (
+    BILLING_START,
     COMMIT_TERM_DAYS,
+    COMMIT_TERM_HOURS,
+    CONTRACT_LEAD_DAYS,
+    QTY_Q,
     contract_id_for,
     iso,
+    negotiated_commitment_id,
+    negotiated_contract_id,
     parse_iso,
+    q,
+    s,
 )
 from focus_data_toolkit.generators.engine.ladder import generate_rows
 
 DEFAULT_ROWS = 1000
+
+# Negotiated contract terms that are NOT commitment discounts: (kind, category, type,
+# description, term cost, term quantity, unit). Spend terms carry a cost with no
+# quantity/unit; the usage term carries a real measured quantity in its native unit.
+# They share one multi-commitment ContractId per provider and are reachable from Cost
+# and Usage exclusively through ``ContractApplied`` (see the 1.3 adapter).
+_NEGOTIATED_TERMS: tuple[tuple[str, str, str, str, str, str, str], ...] = (
+    (
+        "MINSPEND", "Spend", "Minimum Spend",
+        "Contracted minimum spend across eligible services", "120000", "", "",
+    ),
+    (
+        "RATECARD", "Spend", "Negotiated Rate Card",
+        "Negotiated rate card applied to eligible on-demand usage", "250000", "", "",
+    ),
+    (
+        "USAGEMIN", "Usage", "Usage Commitment",
+        "Contracted minimum usage across eligible services", "150000", "100000.0000", "Hours",
+    ),
+)
 
 
 def generate_csv_bytes(
@@ -51,8 +80,18 @@ def generate_contract_commitment_rows(
 ) -> list[dict[str, str]]:
     """Return the Contract Commitment dataset for the same (rows, seed).
 
-    Each commitment Purchase row yields exactly one Contract Commitment row, so
-    ``ContractCommitmentId`` == ``CommitmentDiscountId`` is a verifiable foreign key.
+    Each commitment discount yields exactly one Contract Commitment row (its recurring
+    Purchase rows collapse to the first one), so ``ContractCommitmentId`` ==
+    ``CommitmentDiscountId`` is a verifiable foreign key for the discount rows. Costs
+    and quantities are the **term totals** (per-period fee/capacity x the hourly
+    periods of the 1-year term); Spend commitments carry a cost with no quantity/unit,
+    Usage commitments a quantity in the native unit plus the cost. The contract period
+    encloses the commitment period by ``CONTRACT_LEAD_DAYS`` on both sides.
+
+    The dataset also carries the provider's negotiated (non-discount) contract terms —
+    minimum spend, negotiated rate card, usage commitment — under one shared
+    multi-commitment ``ContractId``. Those are reachable from Cost and Usage
+    exclusively through ``ContractApplied``, never via ``CommitmentDiscountId``.
     """
     if adapter.contract_commitment_columns is None:
         raise ValueError(f"FOCUS {adapter.version} has no Contract Commitment dataset")
@@ -67,22 +106,55 @@ def generate_contract_commitment_rows(
         if commit_id in seen:
             continue
         seen.add(commit_id)
+        spend_based = cu["CommitmentDiscountCategory"] == "Spend"
+        # The first Purchase row of the commitment: its charge period opens the
+        # commitment period, its BilledCost is the per-period fee.
+        term_cost = Decimal(cu["BilledCost"]) * COMMIT_TERM_HOURS
         period_start = parse_iso(cu["ChargePeriodStart"])
         period_end = period_start + timedelta(days=COMMIT_TERM_DAYS)
-        contract_id = contract_id_for(commit_id)
         row = {name: "" for name in adapter.contract_commitment_columns}
         row["ContractCommitmentId"] = commit_id
         row["ContractCommitmentType"] = cu["CommitmentDiscountType"]
         row["ContractCommitmentCategory"] = cu["CommitmentDiscountCategory"]
-        row["ContractCommitmentCost"] = cu["BilledCost"]  # the upfront commitment cost
-        row["ContractCommitmentQuantity"] = cu["CommitmentDiscountQuantity"]
-        row["ContractCommitmentUnit"] = cu["CommitmentDiscountUnit"]
+        row["ContractCommitmentCost"] = s(term_cost)
+        if not spend_based:
+            # Four decimals so a CSV loader types the (integral) quantity as Decimal.
+            row["ContractCommitmentQuantity"] = s(
+                q(Decimal(cu["CommitmentDiscountQuantity"]) * COMMIT_TERM_HOURS, QTY_Q)
+            )
+            row["ContractCommitmentUnit"] = cu["CommitmentDiscountUnit"]
         row["ContractCommitmentDescription"] = cu["CommitmentDiscountName"]
         row["ContractCommitmentPeriodStart"] = iso(period_start)
         row["ContractCommitmentPeriodEnd"] = iso(period_end)
+        row["ContractId"] = contract_id_for(commit_id)
+        row["ContractPeriodStart"] = iso(period_start - timedelta(days=CONTRACT_LEAD_DAYS))
+        row["ContractPeriodEnd"] = iso(period_end + timedelta(days=CONTRACT_LEAD_DAYS))
+        row["BillingCurrency"] = "USD"
+        out.append(row)
+    out.extend(_negotiated_rows(profile, adapter))
+    return out
+
+
+def _negotiated_rows(profile, adapter) -> list[dict[str, str]]:
+    """The three negotiated (non-discount) contract terms, RNG-free and deterministic."""
+    contract_id = negotiated_contract_id(profile.key)
+    period_start = BILLING_START
+    period_end = period_start + timedelta(days=COMMIT_TERM_DAYS)
+    out: list[dict[str, str]] = []
+    for kind, category, type_, description, cost, quantity, unit in _NEGOTIATED_TERMS:
+        row = {name: "" for name in adapter.contract_commitment_columns}
+        row["ContractCommitmentId"] = negotiated_commitment_id(kind, profile.key)
+        row["ContractCommitmentType"] = type_
+        row["ContractCommitmentCategory"] = category
+        row["ContractCommitmentCost"] = cost
+        row["ContractCommitmentQuantity"] = quantity
+        row["ContractCommitmentUnit"] = unit
+        row["ContractCommitmentDescription"] = description
+        row["ContractCommitmentPeriodStart"] = iso(period_start)
+        row["ContractCommitmentPeriodEnd"] = iso(period_end)
         row["ContractId"] = contract_id
-        row["ContractPeriodStart"] = iso(period_start)
-        row["ContractPeriodEnd"] = iso(period_end)
+        row["ContractPeriodStart"] = iso(period_start - timedelta(days=CONTRACT_LEAD_DAYS))
+        row["ContractPeriodEnd"] = iso(period_end + timedelta(days=CONTRACT_LEAD_DAYS))
         row["BillingCurrency"] = "USD"
         out.append(row)
     return out

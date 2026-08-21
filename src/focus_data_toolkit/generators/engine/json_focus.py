@@ -37,27 +37,41 @@ def allocated_method_details(
     return dumps_object({"Elements": list(elements)}, numeric_keys=numeric_keys)
 
 
-def contract_applied(
+def contract_applied_element(
     commit_id: str,
     contract_id: str,
-    applied_cost: str,
-    applied_qty: str,
-    applied_unit: str,
-) -> str:
+    applied_cost: str = "",
+    applied_qty: str = "",
+    applied_unit: str = "",
+) -> dict[str, str | None]:
+    """One ``ContractApplied`` element linking a row to a Contract Commitment.
+
+    The identifier keys use the canonical ``Id`` casing of FOCUS erratum #3 (the
+    1.3.0.1 rule model), not the legacy pre-erratum ``ID`` casing. Per that rule
+    model (``CAU-ContractAppliedObject-O-007-M``) every element carries **all five**
+    key-value pairs, one metric branch populated and the other explicit JSON nulls:
+    a spend commitment applies a cost alone; a usage commitment applies the measured
+    quantity in its native unit alone — which also keeps the quantity branch intact
+    through the FOCUS 1.4 ``oneOf`` migration.
+    """
+    if bool(applied_cost) == bool(applied_qty):
+        raise ValueError(
+            "a ContractApplied element applies exactly one metric branch: "
+            "a cost (spend commitment) XOR a quantity (usage commitment)"
+        )
+    if bool(applied_qty) != bool(applied_unit):
+        raise ValueError("an applied quantity and its unit go together")
+    return {
+        "ContractId": contract_id,
+        "ContractCommitmentId": commit_id,
+        "ContractCommitmentAppliedCost": applied_cost or None,
+        "ContractCommitmentAppliedQuantity": applied_qty or None,
+        "ContractCommitmentAppliedUnit": applied_unit or None,
+    }
+
+
+def contract_applied(elements: Sequence[Mapping[str, object]]) -> str:
     """FOCUS 1.3 ``ContractApplied`` JSON: a top-level ``Elements`` array linking a Cost
-    and Usage row to the Contract Commitment dataset via ``ContractCommitmentID``. The
+    and Usage row to the Contract Commitment dataset via ``ContractCommitmentId``. The
     applied cost/quantity are emitted as JSON numbers."""
-    return dumps_object(
-        {
-            "Elements": [
-                {
-                    "ContractID": contract_id,
-                    "ContractCommitmentID": commit_id,
-                    "ContractCommitmentAppliedCost": applied_cost,
-                    "ContractCommitmentAppliedQuantity": applied_qty,
-                    "ContractCommitmentAppliedUnit": applied_unit,
-                }
-            ]
-        },
-        numeric_keys=CONTRACT_APPLIED_NUMERIC_KEYS,
-    )
+    return dumps_object({"Elements": list(elements)}, numeric_keys=CONTRACT_APPLIED_NUMERIC_KEYS)

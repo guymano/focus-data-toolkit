@@ -22,10 +22,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from decimal import Decimal
 
+from focus_data_toolkit.generators.engine.allocation_math import residue_ratios, residue_shares
 from focus_data_toolkit.generators.engine.json_focus import allocated_method_details
 from focus_data_toolkit.lifecycle import DatasetInstance
 
-_RATIO_QUANTUM = Decimal("0.000001")
 _COST_QUANTUM = Decimal("0.000001")
 
 
@@ -53,22 +53,10 @@ def split_allocation_group(
     if total == 0:
         raise ValueError("allocation weights sum to zero; cannot form ratios")
 
-    ratios: list[Decimal] = []
-    costs: list[Decimal] = []
-    acc_ratio = Decimal(0)
-    acc_cost = Decimal(0)
-    last = len(decimal_weights) - 1
-    for i, w in enumerate(decimal_weights):
-        if i < last:
-            ratio = (w / total).quantize(_RATIO_QUANTUM)
-            cost = (origin * w / total).quantize(_COST_QUANTUM)
-            acc_ratio += ratio
-            acc_cost += cost
-        else:  # last consumer absorbs the residue so both sums stay exact
-            ratio = Decimal(1) - acc_ratio
-            cost = origin - acc_cost
-        ratios.append(ratio)
-        costs.append(cost)
+    # Single-source residue arithmetic (shared with the CSV generators): the last
+    # consumer absorbs both residues so ratios sum to exactly 1 and costs to the origin.
+    ratios = residue_ratios(decimal_weights)
+    costs = residue_shares(origin, [w / total for w in decimal_weights], _COST_QUANTUM)
 
     return [
         {

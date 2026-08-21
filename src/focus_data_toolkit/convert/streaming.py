@@ -51,6 +51,7 @@ from focus_data_toolkit.convert.contract_commitment import (
 )
 from focus_data_toolkit.convert.contract_commitment import convert_contract_commitment
 from focus_data_toolkit.convert.cost_and_usage import (
+    contract_applied_legacy_diagnostic,
     convert_cost_and_usage_row,
     cost_and_usage_provenance,
 )
@@ -615,6 +616,7 @@ def convert_files(
         provider_seen: dict[tuple[str, str], ProviderContext] = {}
         billing_seen: dict[tuple, BillingContext] = {}
         cu_counters = LineageCounters()
+        ca_legacy: set[str] = set()
         cu_count = 0
 
         tr_unit, tr_total = _progress_totals(reader, progress)
@@ -642,7 +644,7 @@ def convert_files(
                 cu_writer.write(
                     convert_cost_and_usage_row(
                         row, version, detail_id=detail_id, target=cu_columns,
-                        counters=cu_counters,
+                        counters=cu_counters, legacy_keys=ca_legacy,
                     )
                 )
                 cu_count += 1
@@ -811,6 +813,9 @@ def convert_files(
             "Billing Period": True,
             "Invoice Detail": True,
         }
+        legacy_diag = contract_applied_legacy_diagnostic(ca_legacy)
+        if legacy_diag is not None:
+            diagnostics.append(legacy_diag)
         entries, manifest, produced_output_files = assemble_manifest(
             version=version,
             mode=mode,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 
 import pytest
 
@@ -62,9 +63,27 @@ def test_contract_commitment_join_key(provider):
     cc = _rows(module.generate_contract_commitment_csv_bytes(150, 11))
     purchase_ids = {r["CommitmentDiscountId"] for r in cu if r["ChargeCategory"] == "Purchase" and r["CommitmentDiscountId"]}
     commitment_ids = {r["ContractCommitmentId"] for r in cc}
-    assert commitment_ids, "expected at least one commitment"
-    # Every Contract Commitment row is joinable to a Cost and Usage purchase, and vice versa.
-    assert commitment_ids == purchase_ids
+    assert purchase_ids, "expected at least one commitment discount"
+    # Every commitment discount joins to a Contract Commitment row on
+    # ContractCommitmentId == CommitmentDiscountId ...
+    assert purchase_ids <= commitment_ids
+    # ... and the dataset also carries negotiated (non-discount) terms, reachable from
+    # Cost and Usage exclusively through ContractApplied (the FOCUS-defined
+    # relationship), never via CommitmentDiscountId equality.
+    negotiated = commitment_ids - purchase_ids
+    assert negotiated, "expected negotiated non-discount commitments"
+    referenced = {
+        element["ContractCommitmentId"]
+        for r in cu
+        if r["ContractApplied"]
+        for element in json.loads(r["ContractApplied"])["Elements"]
+    }
+    assert negotiated <= referenced
+    # At least one ContractId carries multiple commitments.
+    by_contract: dict[str, set[str]] = {}
+    for r in cc:
+        by_contract.setdefault(r["ContractId"], set()).add(r["ContractCommitmentId"])
+    assert any(len(ids) > 1 for ids in by_contract.values())
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
