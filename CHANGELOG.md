@@ -51,9 +51,14 @@ policy.
 - **Official-validator CI gate** (`scripts/validate_official_samples.py` + the
   `official-validation` job in `ci.yml`): the nine generated outputs (3 providers ×
   1.2 Cost and Usage, × 1.3 Cost and Usage + Contract Commitment) are validated by the
-  official FinOps `focus-validator`, pinned to `2.2.1`, offline via the packaged /
-  release rule models. Known validator-side artifacts are explicitly allowlisted with
-  per-rule justifications and printed on every run; any other failure breaks the build.
+  official FinOps `focus-validator`, pinned to `2.2.1`, with
+  `--applicability-criteria ALL` so the conditional rules for the capabilities these
+  datasets exercise run too, offline via the packaged / SHA-256-pinned release rule
+  models. Each `(version, provider, dataset)` run is compared against its **exact**
+  expected artifact set — per-rule justifications printed on every run, each claim
+  pinned by a data-side conformance test; an unexpected failure *or* a stale
+  allowlist entry (an expected artifact that stops failing) breaks the build. The
+  1.3 Contract Commitment dataset validates with zero artifacts.
 - **`scripts/regenerate_golden_fixtures.py`**: replays the exact golden grid of
   `tests/test_generator_golden.py`, replacing the ad-hoc regeneration procedure.
 - **CI: `dependency-review` job** in `.github/workflows/security.yml` (PR-only, informational).
@@ -75,10 +80,19 @@ policy.
   use-it-or-lose-it remainder — so `sum(Usage.EffectiveCost) ==
   sum(Purchase.BilledCost)` holds under exact equality per charge period and per
   billing period (previously one One-Time all-upfront purchase with a handful of
-  covered hours and no reconciliation). `ContractApplied` is attached to every 1.3
-  commitment row — Purchase (`ContractCommitmentId == ResourceId` per rule
-  `O-039-C`), Used and Unused alike — with all five element keys always present
-  (nulls for a spend commitment's quantity/unit, per rule `O-007-M`).
+  covered hours and no reconciliation). The provider terms are `NoUpfront`
+  accordingly (payment-option metadata, SKU names and purchase descriptions — a
+  recurring fee contradicts all-upfront). Spend commitments price a **monetary
+  block** on their Purchase and Unused rows: `PricingUnit` is the currency, the
+  unit prices are exactly 1.00 and the priced quantity is the committed/unused
+  spend itself (Used rows keep the consuming resource's native pricing).
+  `ContractApplied` is attached to every 1.3 commitment row — Purchase
+  (`ContractCommitmentId == ResourceId` per rule `O-039-C`), Used and Unused alike
+  — with all five element keys always present (rule `O-007-M`) and exactly one
+  metric branch per category: a spend commitment applies a cost alone, a usage
+  commitment applies the measured quantity in its native unit alone, so the
+  quantity branch survives the 1.4 `oneOf` migration instead of being demoted to
+  `x_` custom keys.
 - **The Contract Commitment dataset carries term totals and negotiated terms.** Costs
   and quantities are the 1-year term totals; Spend commitments leave quantity/unit
   empty while Usage commitments carry a real quantity in its native unit; the contract

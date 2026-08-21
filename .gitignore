@@ -12,3 +12,5 @@ dist/
 htmlcov/
 coverage.xml
 out/
+# Log files the official focus-validator writes into the working directory.
+focus_validator*.log
