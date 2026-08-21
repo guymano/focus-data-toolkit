@@ -20,7 +20,7 @@ the source is either left empty (**strict** mode) or filled only as a clearly-la
 | Interface | Best for | Get started |
 |---|---|---|
 | **Studio** | FinOps users who prefer a UI | `pip install "focus-data-toolkit[studio]"` → `focus-toolkit ui` |
-| **Runner** | Automation & large volumes | `docker run --rm ghcr.io/guymano/focus-data-toolkit:0.11.0 version` |
+| **Runner** | Automation & large volumes | `docker run --rm ghcr.io/guymano/focus-data-toolkit:0.12.0 version` |
 | **CLI & SDK** | Engineers & scripts | `pip install focus-data-toolkit` → `focus-toolkit --help` |
 
 All three drive the **same core**, so their outputs are byte-for-byte identical — same datasets,
@@ -52,7 +52,7 @@ The core is **standard-library only** (Python ≥ 3.11). Optional features live 
 ```bash
 pipx install focus-data-toolkit                        # isolated CLI
 uv tool install focus-data-toolkit                     # or with uv
-docker pull ghcr.io/guymano/focus-data-toolkit:0.11.0  # container (Runner)
+docker pull ghcr.io/guymano/focus-data-toolkit:0.12.0  # container (Runner)
 ```
 
 ## Quickstart
