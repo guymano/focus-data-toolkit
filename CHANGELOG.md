@@ -9,8 +9,14 @@ policy.
 
 ## [Unreleased]
 
-> The generator changes below are a **deliberate reproducibility break** (every golden
-> fixture regenerated once): the next release must be a **minor** version (0.12.0).
+## [0.12.0] — 2026-08-21
+
+Back-ports the reviewed FOCUS-Sample-Data conformance fixes into the generator engine.
+
+> This release carries a **deliberate reproducibility break**: every golden fixture was
+> regenerated once, so synthetic output bytes differ from `0.11.0` for identical generation
+> parameters. That is a new byte baseline, not a regression — see
+> [docs/versioning.md](docs/versioning.md); pin an exact version if you need byte stability.
 
 ### Fixed
 
@@ -688,7 +694,8 @@ conformance defects.
 
 <!-- Reference links. 0.2.0/0.3.0 were pre-release development milestones and were never tagged
      or published, so only the first public release (0.9.0) has a tag link. -->
-[Unreleased]: https://github.com/guymano/focus-data-toolkit/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/guymano/focus-data-toolkit/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.11.0rc1...v0.11.0
 [0.11.0rc1]: https://github.com/guymano/focus-data-toolkit/compare/v0.9.0...v0.11.0rc1
 [0.9.0]: https://github.com/guymano/focus-data-toolkit/releases/tag/v0.9.0

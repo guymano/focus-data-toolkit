@@ -6,7 +6,7 @@ same manifests, diagnostics, checksums and exit codes, with **no FOCUS logic dup
 **batch-only**: there is no HTTP server; status is conveyed by the exit code, the logs, the
 `focus_1_4_manifest.json` and the produced files.
 
-Image: `ghcr.io/guymano/focus-data-toolkit`. Tags: **immutable** `<version>` (e.g. `0.11.0`) and
+Image: `ghcr.io/guymano/focus-data-toolkit`. Tags: **immutable** `<version>` (e.g. `0.12.0`) and
 `sha-<full-commit>`; plus a **rolling** `<major>.<minor>` alias (e.g. `0.11`) that advances with
 each patch. Pin to `<version>` or a digest for reproducibility; use `<major>.<minor>` to follow
 patches. No `latest` tag is published.
@@ -32,15 +32,15 @@ you mount and writes the files you ask for.
 ## Get the image and prove it works
 
 ```bash
-docker pull ghcr.io/guymano/focus-data-toolkit:0.11.0
+docker pull ghcr.io/guymano/focus-data-toolkit:0.12.0
 ```
 
 Now run something that touches nothing on your machine — no mounts, no volumes. If this fails, the
 problem is your Docker installation, not your data or your arguments.
 
 ```console
-$ docker run --rm ghcr.io/guymano/focus-data-toolkit:0.11.0 version
-focus-data-toolkit 0.11.0
+$ docker run --rm ghcr.io/guymano/focus-data-toolkit:0.12.0 version
+focus-data-toolkit 0.12.0
   python 3.12.x
   parquet: available
 ```
@@ -82,7 +82,7 @@ The walkthrough uses bind mounts with `--user`, so you can open the results in y
 > ```powershell
 > docker run --rm `
 >   -v "${PWD}/input:/input:ro" -v "${PWD}/output:/output" -v "${PWD}/work:/work" `
->   ghcr.io/guymano/focus-data-toolkit:0.11.0 `
+>   ghcr.io/guymano/focus-data-toolkit:0.12.0 `
 >   convert --cost-and-usage /input/gen/focus_1_3_cost_and_usage_aws.csv --out /output/result
 > ```
 
@@ -96,7 +96,7 @@ No FOCUS export to hand? Generate one. This is the only step that mounts `/input
 
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/input:/input" \
-  ghcr.io/guymano/focus-data-toolkit:0.11.0 \
+  ghcr.io/guymano/focus-data-toolkit:0.12.0 \
   generate --provider aws --focus-version 1.3 --rows 1000 --out /input/gen
 ```
 
@@ -116,7 +116,7 @@ Before converting anything, confirm the container can see your file. `detect` wr
 this is a zero-risk probe of your `:ro` mount:
 
 ```console
-$ docker run --rm -v "$PWD/input:/input:ro" ghcr.io/guymano/focus-data-toolkit:0.11.0 \
+$ docker run --rm -v "$PWD/input:/input:ro" ghcr.io/guymano/focus-data-toolkit:0.12.0 \
     detect /input/gen/focus_1_3_cost_and_usage_aws.csv
 /input/gen/focus_1_3_cost_and_usage_aws.csv: dataset=Cost and Usage version=1.3 confidence=HIGH (score 1.000)
 ```
@@ -132,7 +132,7 @@ This is the step that matters. Mount all three directories:
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" \
   -v "$PWD/input:/input:ro" -v "$PWD/output:/output" -v "$PWD/work:/work" \
-  ghcr.io/guymano/focus-data-toolkit:0.11.0 \
+  ghcr.io/guymano/focus-data-toolkit:0.12.0 \
   convert --cost-and-usage /input/gen/focus_1_3_cost_and_usage_aws.csv --out /output/result
 echo $?
 ```
@@ -161,14 +161,14 @@ Two variants worth knowing — same mounts, so only the trailing subcommand diff
 # `synthetic_` prefix, and stderr carries one WARNING line.
 docker run --rm --user "$(id -u):$(id -g)" \
   -v "$PWD/input:/input:ro" -v "$PWD/output:/output" -v "$PWD/work:/work" \
-  ghcr.io/guymano/focus-data-toolkit:0.11.0 \
+  ghcr.io/guymano/focus-data-toolkit:0.12.0 \
   convert --cost-and-usage /input/gen/focus_1_3_cost_and_usage_aws.csv \
     --out /output/synthetic --mode synthetic
 
 # Bounded-memory streaming to partitioned Parquet — the large-file path.
 docker run --rm --user "$(id -u):$(id -g)" \
   -v "$PWD/input:/input:ro" -v "$PWD/output:/output" -v "$PWD/work:/work" \
-  ghcr.io/guymano/focus-data-toolkit:0.11.0 \
+  ghcr.io/guymano/focus-data-toolkit:0.12.0 \
   convert --cost-and-usage /input/gen/focus_1_3_cost_and_usage_aws.csv \
     --out /output/parquet --stream --output-format parquet \
     --partition-by BillingCurrency --compression zstd --progress
@@ -208,7 +208,7 @@ Lint a single file, then check the datasets against each other as a bundle:
 
 ```console
 $ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/output:/output:ro" -v "$PWD/work:/work" \
-    ghcr.io/guymano/focus-data-toolkit:0.11.0 validate-bundle --directory /output/result
+    ghcr.io/guymano/focus-data-toolkit:0.12.0 validate-bundle --directory /output/result
 validated: Cost and Usage
 bundle validation: OK (not_executable=1)
 NOT_EXECUTABLE FDT-BUNDLE-001: Cost and Usage ContractApplied references cannot be checked: the Contract Commitment dataset is absent from the bundle
@@ -247,7 +247,7 @@ Sweep the output side:
 
 ```console
 $ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/output:/output" \
-    ghcr.io/guymano/focus-data-toolkit:0.11.0 clean --out /output/result
+    ghcr.io/guymano/focus-data-toolkit:0.12.0 clean --out /output/result
 nothing to clean
 ```
 
@@ -270,7 +270,7 @@ Map your host user onto that uid instead:
 ```bash
 podman run --rm --userns=keep-id:uid=65532,gid=65532 \
   -v "$PWD/input:/input:ro" -v "$PWD/output:/output" -v "$PWD/work:/work" \
-  ghcr.io/guymano/focus-data-toolkit:0.11.0 \
+  ghcr.io/guymano/focus-data-toolkit:0.12.0 \
   convert --cost-and-usage /input/gen/focus_1_3_cost_and_usage_aws.csv --out /output/result
 ```
 
@@ -300,7 +300,7 @@ failed job while genuine failures (1, 2, 5, 130) still do.
       -v "$GITHUB_WORKSPACE/input:/input:ro" \
       -v "$GITHUB_WORKSPACE/out:/output" \
       -v "$GITHUB_WORKSPACE/work:/work" \
-      ghcr.io/guymano/focus-data-toolkit:0.11.0 \
+      ghcr.io/guymano/focus-data-toolkit:0.12.0 \
       convert --cost-and-usage /input/cost_and_usage.csv --out /output/focus-1.4 \
         --stream --output-format parquet --compression zstd \
         --exit-policy pipeline --progress
@@ -326,7 +326,7 @@ spec:
       securityContext: { runAsNonRoot: true, runAsUser: 65532, fsGroup: 65532 }
       containers:
         - name: focus-toolkit
-          image: ghcr.io/guymano/focus-data-toolkit:0.11.0
+          image: ghcr.io/guymano/focus-data-toolkit:0.12.0
           args: ["convert", "--cost-and-usage=/input/cost_and_usage.csv",
                  "--out=/output/focus-1.4", "--stream", "--output-format=parquet",
                  "--partition-by=BillingCurrency", "--exit-policy=pipeline"]
@@ -375,7 +375,7 @@ spec:
 # One physical line per entry; wrapped here for readability.
 17 3 * * * /usr/bin/docker run --rm --user 1000:1000
   -v /srv/focus/input:/input:ro -v /srv/focus/output:/output -v /srv/focus/work:/work
-  ghcr.io/guymano/focus-data-toolkit:0.11.0
+  ghcr.io/guymano/focus-data-toolkit:0.12.0
   convert --cost-and-usage /input/cost_and_usage.csv --out /output/nightly
     --stream --exit-policy pipeline --on-exists version >> /var/log/focus-toolkit.log 2>&1
 ```
@@ -390,7 +390,7 @@ Killed runs need two companion sweeps, not one — `clean` only ever looks at `-
 ```bash
 # Weekly: output-side staging left by a killed run.
 0 4 * * 0 /usr/bin/docker run --rm --user 1000:1000 -v /srv/focus/output:/output
-  ghcr.io/guymano/focus-data-toolkit:0.11.0 clean --out /output/nightly
+  ghcr.io/guymano/focus-data-toolkit:0.12.0 clean --out /output/nightly
     >> /var/log/focus-toolkit.log 2>&1
 
 # Weekly: streaming scratch orphaned under the work mount (nothing in the CLI sweeps this).
@@ -539,11 +539,11 @@ GitHub Release nor pushed to the registry, so it is not something you can pull a
 separate artifact.) Verify the signature and the provenance, for example:
 
 ```bash
-cosign verify ghcr.io/guymano/focus-data-toolkit:0.11.0 \
+cosign verify ghcr.io/guymano/focus-data-toolkit:0.12.0 \
   --certificate-identity-regexp '^https://github.com/guymano/focus-data-toolkit' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
-gh attestation verify oci://ghcr.io/guymano/focus-data-toolkit:0.11.0 --repo guymano/focus-data-toolkit
+gh attestation verify oci://ghcr.io/guymano/focus-data-toolkit:0.12.0 --repo guymano/focus-data-toolkit
 ```
 
 ## Operational prerequisites (owner-only)
