@@ -87,8 +87,8 @@ fixes; there are no long-term-support branches yet.
 
 | Version    | Supported                                                   |
 | ---------- | ----------------------------------------------------------- |
-| `0.11.x`   | ✅ Current line — security fixes land here.                 |
-| `< 0.11.0` | ❌ Superseded pre-1.0 releases / snapshots; upgrade to 0.11.x. |
+| `0.12.x`   | ✅ Current line — security fixes land here.                 |
+| `< 0.12.0` | ❌ Superseded pre-1.0 releases / snapshots; upgrade to 0.12.x. |
 
 When `1.0.0` is released, this table will be updated with the then-current
 support policy.

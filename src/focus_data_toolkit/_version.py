@@ -5,4 +5,4 @@ Kept deliberately import-free so the build backend can read
 without importing the package (which would pull in optional/runtime modules at build time).
 """
 
-__version__ = "0.11.0"
+__version__ = "0.12.0"
