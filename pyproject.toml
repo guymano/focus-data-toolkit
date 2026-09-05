@@ -135,6 +135,9 @@ exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "@overload"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The console entry point (used by CI) must resolve the repository audit scripts
+# just like `python -m pytest`, which already includes the working directory.
+pythonpath = ["."]
 # Heavy scale/performance and build/install tests are excluded from the default run;
 # run them explicitly with `pytest -m slow` / `pytest -m packaging`.
 addopts = "-m 'not slow and not packaging'"
