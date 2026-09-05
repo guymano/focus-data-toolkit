@@ -18,11 +18,29 @@ import os
 import shutil
 import subprocess
 import sys
+from importlib import metadata
 from pathlib import Path
 
 
 class OfficialValidatorNotInstalled(RuntimeError):
     """Raised when the official focus-validator is not available."""
+
+
+TESTED_VALIDATOR_VERSION = "2.2.1"
+
+
+def _console_arguments(args: tuple[str, ...]) -> bool:
+    for index, arg in enumerate(args):
+        flag, equals, inline = arg.partition("=")
+        if flag == "--output-type":
+            value = inline if equals else args[index + 1] if index + 1 < len(args) else ""
+            if value != "console":
+                return False
+        elif flag.startswith("--output-"):
+            # The wrapper needs the complete console report on stdout, including
+            # when argparse would accept an abbreviated output option.
+            return False
+    return True
 
 
 def _executable() -> str:
@@ -51,9 +69,14 @@ def run_official_validator(
 ) -> int:
     """Run the official validator; a complete report with zero FAIL is required for zero.
 
-    Captured output is printed to the console. ``focus_version`` selects the rule
-    model (e.g. ``1.2.0.1``); pass-through flags go in ``extra_args``.
+    Output is captured and printed after completion. The parser is tested against
+    2.2.1 console output; other output modes/destinations are rejected (exit 2).
+    ``focus_version`` selects the rule model (e.g. ``1.2.0.1``).
     """
+    if not _console_arguments(extra_args):
+        print("--official requires console output on stdout (tested with focus-validator 2.2.1); "
+              "remove conflicting output flags", file=sys.stderr)
+        return 2
     cmd = [
         _executable(),
         "--data-file", str(Path(data_file).resolve()),
@@ -64,7 +87,14 @@ def run_official_validator(
     # no fixture-specific exceptions: only a complete report with no FAIL succeeds.
     from focus_data_toolkit.official_report import parse_report
 
-    cmd += ["--show-violations"]
+    cmd += ["--output-type", "console", "--show-violations"]
+    try:
+        installed = metadata.version("focus-validator")
+    except metadata.PackageNotFoundError:
+        installed = "unknown (executable found outside this Python environment)"
+    if installed != TESTED_VALIDATOR_VERSION:
+        print(f"Warning: official console parser tested with focus-validator {TESTED_VALIDATOR_VERSION}; "
+              f"installed version is {installed}. Report-format compatibility is not guaranteed.", file=sys.stderr)
     # 2.2.1 resolves its currency resource relative to site-packages. Resolve the
     # input before changing cwd, and force UTF-8 on Windows as well as POSIX.
     spec = importlib.util.find_spec("focus_validator")
@@ -82,6 +112,6 @@ def run_official_validator(
     try:
         report = parse_report(proc.stdout)
     except ValueError as exc:
-        print(str(exc), file=sys.stderr)
+        print(f"{exc}; expected complete focus-validator 2.2.1 console output", file=sys.stderr)
         return 1
     return 1 if report["failed"] else 0

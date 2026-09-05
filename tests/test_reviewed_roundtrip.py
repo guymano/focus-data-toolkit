@@ -51,12 +51,13 @@ def test_exact_migration_and_parquet(tmp_path, provider, version):
                     assert D(value) == D(dst[key])
 
 
-def test_cli_bundle_matches_individual_apis():
+@pytest.mark.parametrize("credits", [False, True])
+def test_cli_bundle_matches_individual_apis(credits):
     for provider in ("aws", "azure", "gcp"):
         m = get_generator(provider, "1.3")
-        cau, cc = generate_bundle_csv_bytes(1000, 42, profile=m.PROFILE, adapter=m.ADAPTER)
-        assert cau == m.generate_csv_bytes(1000, 42)
-        assert cc == m.generate_contract_commitment_csv_bytes(1000, 42)
+        cau, cc = generate_bundle_csv_bytes(1000, 42, profile=m.PROFILE, adapter=m.ADAPTER, include_credits=credits)
+        assert cau == m.generate_csv_bytes(1000, 42, include_credits=credits)
+        assert cc == m.generate_contract_commitment_csv_bytes(1000, 42, include_credits=credits)
 
 
 @pytest.mark.skipif(__import__("sys").platform == "win32", reason="streaming supported on POSIX")

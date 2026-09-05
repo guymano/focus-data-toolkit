@@ -22,6 +22,9 @@ NAMESPACES = {"AmazonEC2": "ec2", "AmazonS3": "s3", "AmazonRDS": "rds",
               "AWSLambda": "lambda", "AmazonVPC": "ec2", "AmazonCloudWatch": "cloudwatch",
               "AmazonDynamoDB": "dynamodb", "AWSGlue": "glue"}
 COMPUTE = {"aws": "AmazonEC2", "azure": "Virtual Machines", "gcp": "Compute Engine"}
+# Independent expected fees: providers/{aws,azure,gcp}._SERVICES[0].unit_price_usd
+# times engine.determinism.COMMIT_RATE times 500. Keep literals here so the audit
+# detects an unintended pricing change instead of recomputing the same mistake.
 FEE = {"aws": D("32.016"), "azure": D("64.032"), "gcp": D("44.689")}
 SKU_KEYS = {"StorageClass", "Redundancy", "CoreCount", "MemorySize", "InstanceType",
             "InstanceSeries", "OperatingSystem", "DiskType", "DiskSpace", "DiskMaxIops",

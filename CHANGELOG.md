@@ -717,7 +717,7 @@ conformance defects.
 <!-- Reference links. 0.2.0/0.3.0 were pre-release development milestones and were never tagged
      or published, so only the first public release (0.9.0) has a tag link. -->
 [Unreleased]: https://github.com/guymano/focus-data-toolkit/compare/v0.12.0...HEAD
-[0.13.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.12.0...HEAD
+[0.13.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.11.0rc1...v0.11.0
 [0.11.0rc1]: https://github.com/guymano/focus-data-toolkit/compare/v0.9.0...v0.11.0rc1

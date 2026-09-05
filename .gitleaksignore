@@ -1,5 +1,0 @@
-# False positive: the source_manifest SHA-256 of model/focus_json_keys.py in the
-# reviewed official baseline is file provenance, not an API key. Verified by
-# recomputing that source file's LF-normalized SHA-256. Suppress only this exact
-# historical finding; other findings and future changes remain scanned.
-35665ec2cdb23cd9256073b20f2b348754afc36a:tests/fixtures/official/generator_validation/baseline.json:generic-api-key:35849

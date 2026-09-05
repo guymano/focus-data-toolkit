@@ -1,0 +1,17 @@
+title = "FOCUS toolkit secret scanning"
+
+[extend]
+useDefault = true
+
+# A source file named focus_json_keys.py triggers the generic key heuristic.
+# Match both the exact evidence file AND the complete source-hash entry. This
+# survives squash/rebase and line-number changes without excluding other content.
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Recorded SHA-256 of focus_json_keys.py, not a credential"
+condition = "AND"
+paths = ['''^tests/fixtures/official/generator_validation/baseline\.json$''']
+regexTarget = "line"
+regexes = ['''^\s*"src/focus_data_toolkit/model/focus_json_keys\.py":\s*"[a-f0-9]{64}"[,]?\s*$''']

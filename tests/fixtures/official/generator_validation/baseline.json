@@ -4110,7 +4110,7 @@
         "skipped": 210,
         "total": 578
       },
-      "report_sha256": "b0df5f50b9e9c6486ae7e01c52367ac51f20cddf7818a9464bb82924c61733b4",
+      "report_sha256": "708120fa031c718652ed3f87d6b32157255f6af4a50723815b7231a3a0598a60",
       "statistics": {
         "billed_cost": "18857.124623679033750",
         "commitment_billed_cost": "5826.912000",
@@ -4590,7 +4590,7 @@
         "skipped": 38,
         "total": 114
       },
-      "report_sha256": "8069df87fbe4f63c6ff63038388a3bcb7ab33b94e53ce083eef31b952ea89b44",
+      "report_sha256": "ffb86fc309ea5b9ad84dff923c951dffbcd00a7f4aed8894086457e8a6b91b07",
       "statistics": {
         "rows": 75
       }
@@ -12491,7 +12491,7 @@
         "skipped": 297,
         "total": 764
       },
-      "report_sha256": "e96a97d82c7008c21988d8af21b29e65a504a3477d2d0e2a8f8c306aab90daaf",
+      "report_sha256": "4c1ed747e0c792188954683a293636fa280031c46d8e3764aadc2adefe8b7d55",
       "statistics": {
         "billed_cost": "18554.856257624590813",
         "commitment_billed_cost": "4610.304000",
@@ -16209,7 +16209,7 @@
         "skipped": 210,
         "total": 578
       },
-      "report_sha256": "4476130469241da8c92f47ca7ac1ce94550175339ae104ad4023ea10fdc26651",
+      "report_sha256": "dbff73eded6a580cf45849c8217b9b9b37d901d64b7d1084f324f2d3bc7e24d1",
       "statistics": {
         "billed_cost": "49321.108200244240000",
         "commitment_billed_cost": "11653.824000",
@@ -16689,7 +16689,7 @@
         "skipped": 38,
         "total": 114
       },
-      "report_sha256": "5e0831807f0b0bf0262140d59183c811c94471a809c19c61983846eb411e46ff",
+      "report_sha256": "fc511484c00f9db8cf63050f8cdfcc397d4618e02c4821eafbc8728542812505",
       "statistics": {
         "rows": 67
       }
@@ -24146,7 +24146,7 @@
         "skipped": 297,
         "total": 764
       },
-      "report_sha256": "c3b1e7f4a0bd286c7183e9cc17de4ab53ebdf71b7beb5b2b9a0d0f7162a782a8",
+      "report_sha256": "98ba5a5de6eb1f8b28942d871823801d73ff964145b79522ce24f6fe4c823dd2",
       "statistics": {
         "billed_cost": "44516.766247198048000",
         "commitment_billed_cost": "8196.096000",
@@ -27864,7 +27864,7 @@
         "skipped": 210,
         "total": 578
       },
-      "report_sha256": "8a75f6bb9c520a06ce5fa06fe0c3e3ba5bc0f660ebd5fba8aa3ede4f9b691b67",
+      "report_sha256": "6ae96a46c000b26c1bf1643f84cf111435521a870ee6f6f45d91098ad27c3ff0",
       "statistics": {
         "billed_cost": "31758.210633880783500",
         "commitment_billed_cost": "7418.374000",
@@ -28344,7 +28344,7 @@
         "skipped": 38,
         "total": 114
       },
-      "report_sha256": "59e26799bf49015f6d7a97f72a44c59e296c295208147f9e9dc927f9ef1bd635",
+      "report_sha256": "3da9f87a1d500b10820a0217c672587e2012f1fdd74577a9f6edfea5655af545",
       "statistics": {
         "rows": 77
       }
@@ -35801,7 +35801,7 @@
         "skipped": 297,
         "total": 764
       },
-      "report_sha256": "ff31c9bd89e8b4085f1a0d1efa732e593cea5b602c7e7e04fe0655a5ec275cef",
+      "report_sha256": "72b661dbbc0753ee09dd3a8cdb7c43b787728c29dfce730216f654baa3022b99",
       "statistics": {
         "billed_cost": "21535.602792935027500",
         "commitment_billed_cost": "6613.972000",
@@ -35816,20 +35816,21 @@
     }
   },
   "sources": {
-    "scripts/sample_audit.py": "860d8f34e93f8db319629d51dce41edcc2be2a3bdbbd2dca0a57070ae243dca4",
-    "scripts/validate_official_samples.py": "b92360f51ac4d9f8d6d0957a8863580bd149b58f78c799e2ecde36bc5949e875",
+    "scripts/__init__.py": "dc64bd78882fe4e2c4118c25d993ef301249a49c656e776deca81c8dad3b1888",
+    "scripts/sample_audit.py": "75beb05d2ecd7106e99510e04b7376deb5a99ab1c9604a7998e70b7d42c33a38",
+    "scripts/validate_official_samples.py": "e0a3b31461c81ffadb8c936b63f3f3b6bb386b72e62396937f999d8de1ae1b0a",
     "src/focus_data_toolkit/_version.py": "c1c036ca83d38b32675071141c56b06876c3a1cf55095aa616fbd895f9f5849a",
     "src/focus_data_toolkit/focus_json.py": "141586673b1501986357727b439b1fd00e586bb58a0dfb0309edda38c7ebae31",
     "src/focus_data_toolkit/generators/__init__.py": "e791fb98aa0175f93245f8cbd1cdd20acbf0e3ab197770ac10170f3c94ef0d32",
     "src/focus_data_toolkit/generators/_shim.py": "15d82f9ef827c213c395b51177a5b13accaf225d242261176923c9ae0235e445",
     "src/focus_data_toolkit/generators/engine/__init__.py": "28c27f7485dfd484e11bcf9e965fbd035fea0b087c6dc402fbc3a4f0db5aeab2",
     "src/focus_data_toolkit/generators/engine/allocation_math.py": "e4695818b8be5e88129f9ae6d57d6add87d379d37dd0badd8eb6c084ad4020ec",
-    "src/focus_data_toolkit/generators/engine/context.py": "15652e41abf7c5127b25daa73778c1351b96d6b2a939defed464958b09917227",
-    "src/focus_data_toolkit/generators/engine/determinism.py": "9398e34fca2d02635a804de7028f78a6f4a3984ff86f36ce6d93f191eaa76f4b",
+    "src/focus_data_toolkit/generators/engine/context.py": "3502919b306d5c25ea869db2999647e84f8fec84b77e81eafcda9431846cc45c",
+    "src/focus_data_toolkit/generators/engine/determinism.py": "569e2fe516708bb05b31298501e4a29dda7ef9201072ba9625eae582cd1c26c8",
     "src/focus_data_toolkit/generators/engine/json_focus.py": "849d0f213a7ab828f989444e8434c7cc6e8bc310a04c5caff86320df1b0f0aa0",
-    "src/focus_data_toolkit/generators/engine/ladder.py": "546162d2b8ffc16c29dc16a96062613534bc2d6b63c6905a8755232d11c1847f",
-    "src/focus_data_toolkit/generators/engine/scenarios_core.py": "cc0d85cfa195b9ef1eb9b9bf53921a5e34fe1e2e2e925600ccc63aab13c4edb6",
-    "src/focus_data_toolkit/generators/engine/serialize.py": "211725bd637badce274a2cbb7245b98f0deb486fbd36f5b4dfb84c16c8dbeeda",
+    "src/focus_data_toolkit/generators/engine/ladder.py": "0feaaf95d024393fbea95712556fb89344a19d53c1b3355b8fb84b2f4a6e95af",
+    "src/focus_data_toolkit/generators/engine/scenarios_core.py": "6b7279f2498051fe56ee6caaf45b2e45b8579224c07325d04dd32ff1a3a9e649",
+    "src/focus_data_toolkit/generators/engine/serialize.py": "7e6416d9cafa2bcdbb2b57a0046ef5d9cf61716e42ff9da564a2947485f11ec6",
     "src/focus_data_toolkit/generators/generate_aws_focus_1_2.py": "2e98e4a469ef346955e3e6e1c8707800685b83a69ce926a6aef279fe8147956e",
     "src/focus_data_toolkit/generators/generate_aws_focus_1_3.py": "d3febfee834b93113b30f6730acace169ddc3988abcc6904ef04be592e2fd9b0",
     "src/focus_data_toolkit/generators/generate_azure_focus_1_2.py": "38562fea964e234a8c3c45b08572b93acd4211168344028072d957bed9d6ff2a",
@@ -35837,10 +35838,10 @@
     "src/focus_data_toolkit/generators/generate_gcp_focus_1_2.py": "10a2331ed895dbcddeb90445f698a2e429c852b8458520ad57f9e4677794936f",
     "src/focus_data_toolkit/generators/generate_gcp_focus_1_3.py": "434bf0f1d4b1aacfd81cbe43be5587abf5a27ecbbe15540223bd3e59ed8ee7a6",
     "src/focus_data_toolkit/generators/providers/__init__.py": "d161231f73691cad21165d75c1eb2150f487f400d03c4dbe604f2833b9922a72",
-    "src/focus_data_toolkit/generators/providers/aws.py": "b5653de2c9ea907870bded92c56b92139cdbce4d57808e1dfccbdf667c5555ef",
-    "src/focus_data_toolkit/generators/providers/azure.py": "519edac02434558112e826a68b78ce6e31333b13e223d5bd8f1771fe63c073e0",
-    "src/focus_data_toolkit/generators/providers/gcp.py": "30a93384248d4210b02e441eb208704a30a7e70d96300c7028b0fc68f717b8d2",
-    "src/focus_data_toolkit/generators/providers/profile.py": "dca5223734c0336d3ac577c1893b24f6cdd5a9266300d98e8933326b7319adf5",
+    "src/focus_data_toolkit/generators/providers/aws.py": "82e030f50e8eb3966005c6bf66b689f2bbce543d35f7c240f70c1b62315824d7",
+    "src/focus_data_toolkit/generators/providers/azure.py": "335b8785803446df2fde782e752409beb1f4a4e56e0d542b2b4af0e3373f2be7",
+    "src/focus_data_toolkit/generators/providers/gcp.py": "66e53a32269e7571173f2e48e01117538209d859530c21c624a5fbaf079c0186",
+    "src/focus_data_toolkit/generators/providers/profile.py": "91a7b334b12b4c5c5632057e3f6c33afb9cbc7a906ec245c928f6ddb61fb8108",
     "src/focus_data_toolkit/generators/scenarios.py": "c453ec43b6d873dec2791ac2fda7cddddc9040859b9b3276a3be79fef14c7738",
     "src/focus_data_toolkit/generators/versions/__init__.py": "b5c880faa15b57355b08a1a104ae5c85b2fb9ed7d08ba9bcd651d8ffe24cafb6",
     "src/focus_data_toolkit/generators/versions/adapter.py": "ebb133b018389515799befa681d77ad89e64665280a306af3f252483f706cb3d",

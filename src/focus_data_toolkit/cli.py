@@ -896,7 +896,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="declare a FOCUS applicability condition the source supports (repeatable)",
     )
     val.add_argument(
-        "--official", action="store_true", help="run the official FinOps focus-validator instead"
+        "--official", action="store_true", help="run the official FinOps focus-validator; "
+        "console output shown after completion (tested with 2.2.1)"
     )
     val.add_argument(
         "--focus-version", help="rule-model version for --official (e.g. 1.2.0.1)"

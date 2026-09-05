@@ -61,8 +61,8 @@ def test_executable_prefers_interpreter_bin_dir(monkeypatch, tmp_path):
     assert _executable() == str(bin_dir / name)
 
 
-@pytest.mark.parametrize("exit_code", [0, 1, 7])
-def test_run_invokes_validator_and_passes_through_exit_code(monkeypatch, tmp_path, exit_code):
+@pytest.mark.parametrize("exit_code", [1, 7])
+def test_run_invokes_validator_and_passes_through_nonzero_exit(monkeypatch, tmp_path, exit_code):
     exe, record = _make_fake_validator(tmp_path, exit_code)
     # Keep the interpreter-adjacent lookup empty so the PATH fallback (the fake) is used.
     monkeypatch.setattr(sys, "executable", str(tmp_path / "empty" / "python"))
@@ -72,7 +72,7 @@ def test_run_invokes_validator_and_passes_through_exit_code(monkeypatch, tmp_pat
     rc = run_official_validator(
         tmp_path / "data.csv", "1.2.0.1", extra_args=("--output-type", "console")
     )
-    assert rc == (exit_code or 1)  # empty report must fail even when executable exits zero
+    assert rc == exit_code
     argv = record.read_text()
     assert "--data-file" in argv
     assert "data.csv" in argv

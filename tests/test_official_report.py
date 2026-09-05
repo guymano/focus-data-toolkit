@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import copy
 import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -90,3 +92,55 @@ def test_model_resource_and_parameter_changes_are_rejected():
     for key in expected:
         with pytest.raises(ValueError):
             compare({**expected, key: "modified"}, expected)
+
+
+def test_parse_real_archived_console_report():
+    path = Path(__file__).parent / "fixtures/official/generator_validation/aws_1.3_ContractCommitment.log"
+    report = parse_report(path.read_text(encoding="utf-8"))
+    assert {k: report[k] for k in ("total", "passed", "failed", "skipped")} == {
+        "total": 114, "passed": 76, "failed": 0, "skipped": 38,
+    }
+    assert len(report["rules"]) == 114
+
+
+@pytest.mark.parametrize("args", [
+    ("--output-type", "unittest"), ("--output-type=web",), ("--output-type", "json"),
+    ("--output-type",), ("--output-destination", "report.txt"),
+])
+def test_reject_conflicting_output_before_launch(monkeypatch, tmp_path, capsys, args):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("must reject before launch"))
+    assert run_official_validator(tmp_path / "sample.csv", "1.3.0.1", extra_args=args) == 2
+    assert "requires console output" in capsys.readouterr().err
+
+
+def test_warn_on_untested_validator_version(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr("focus_data_toolkit.official_validator._executable", lambda: "fake")
+    monkeypatch.setattr("focus_data_toolkit.official_validator.metadata.version", lambda _: "9.9.9")
+    good = "Total: 1 | Pass: 1 | Fail: 0 | Skipped: 0\n[PASS] A-001: PASS (violations=0)"
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: SimpleNamespace(stdout=good, stderr="", returncode=0))
+    assert run_official_validator(tmp_path / "sample.csv", "1.3.0.1") == 0
+    assert "installed version is 9.9.9" in capsys.readouterr().err
+
+
+def test_importing_audit_scripts_does_not_mutate_sys_path():
+    code = ("import sys; before = sys.path.copy(); "
+            "import scripts.validate_official_samples, scripts.describe_generated_samples; "
+            "assert sys.path == before")
+    subprocess.run([sys.executable, "-c", code], cwd=Path(__file__).parents[1], check=True)
+
+
+def test_archived_stderr_is_checked(monkeypatch, tmp_path):
+    import json
+
+    import scripts.validate_official_samples as gate
+
+    original = json.loads((gate.EVIDENCE / "baseline.json").read_text(encoding="utf-8"))
+    # Keep this test independent of a pending re-record after source changes.
+    original["sources"] = gate.source_manifest()
+    (tmp_path / "baseline.json").write_text(json.dumps(original), encoding="utf-8")
+    name = next(iter(original["runs"]))
+    (tmp_path / f"{name}.log").write_bytes((gate.EVIDENCE / f"{name}.log").read_bytes())
+    (tmp_path / f"{name}.stderr.log").write_text("unexpected diagnostic", encoding="utf-8")
+    monkeypatch.setattr(gate, "EVIDENCE", tmp_path)
+    with pytest.raises(ValueError, match="archived stderr"):
+        gate.main(["--check-existing"])

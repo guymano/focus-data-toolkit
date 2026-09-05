@@ -1,8 +1,8 @@
 """The scenario-selection loop shared by every generator.
 
-Draws exactly one ``rng.random()`` per output position (as the historical generators did) and
-dispatches to a scenario builder via the version adapter's ladder, preserving the original
-``if/elif`` semantics precisely.
+Draws one scenario-selection value per dispatch, then lets the selected scenario consume
+its own draws (including tax source selection). Whole groups advance several row positions.
+The version adapter's first matching threshold preserves the ``if/elif`` semantics.
 """
 
 from __future__ import annotations
@@ -15,16 +15,14 @@ from focus_data_toolkit.generators.engine.context import GenerationContext
 
 DEFAULT_ROWS = 1000
 
-# A builder returns either one row or a whole group of rows; the branch's ``group`` flag
-# (mirrored in the isinstance checks below) says which, so the union is narrowed per call.
+# Generic builders return a row or a whole group; tax and commitment dispatch need
+# generation-local context and are handled explicitly below.
 _Builder = Callable[..., "dict[str, str] | list[dict[str, str]]"]
 
 _BUILDERS: dict[str, _Builder] = {
     "credit": scenarios_core.credit_row,
-    "tax": scenarios_core.tax_row,
     "purchase": scenarios_core.standalone_purchase_row,
     "split": scenarios_core.split_allocation_group_rows,
-    "commitment": scenarios_core.commitment_group,
 }
 
 

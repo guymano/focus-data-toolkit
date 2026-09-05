@@ -14,15 +14,18 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.request
 from importlib import metadata
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "src"))
-sys.path.insert(0, str(REPO))
+if __name__ == "__main__":
+    sys.path.insert(0, str(REPO / "src"))
+    sys.path.insert(0, str(REPO))
 
 from focus_data_toolkit.generators import PROVIDERS, get_generator  # noqa: E402
 from focus_data_toolkit.official_report import model_inventory, parse_report  # noqa: E402
@@ -176,7 +179,7 @@ def source_manifest() -> dict[str, str]:
     paths += [REPO / "src/focus_data_toolkit" / name for name in (
         "focus_json.py", "model/focus_json_keys.py", "official_report.py", "_version.py",
     )]
-    paths += [Path(__file__), REPO / "scripts/sample_audit.py"]
+    paths += [Path(__file__), REPO / "scripts/sample_audit.py", REPO / "scripts/__init__.py"]
     return {p.relative_to(REPO).as_posix(): digest(p.read_bytes().replace(b"\r\n", b"\n"))
             for p in sorted(paths)}
 
@@ -231,6 +234,8 @@ def run_report(path: Path, version: str, dataset: str, cwd: Path) -> tuple[bytes
     path.with_suffix(".stderr.log").write_bytes(proc.stderr)
     if proc.returncode or b"Traceback (most recent call last)" in proc.stderr:
         raise ValueError(f"official validator exited {proc.returncode}: {proc.stderr.decode('utf-8', errors='replace')[-2000:]}")
+    if proc.stderr:
+        raise ValueError(f"unexpected official stderr; inspect {path.with_suffix('.stderr.log')}")
     model_path = cwd / "focus_validator/rules" / f"model-{RULE_MODEL_VERSIONS[version]}.json"
     model = json.loads(model_path.read_text(encoding="utf-8"))
     return proc.stdout, parse_report(proc.stdout.decode("utf-8"), expected_rules=model_inventory(model, dataset))
@@ -286,7 +291,10 @@ def main(argv=None) -> int:
                     "currency_sha256": CURRENCY_HASH, "applicability": "ALL"}
     parameters = {"rows": ROWS, "seeds": {"1.2": 1202, "1.3": 1302}, "include_credits": False}
     if baseline:
-        compare(sources, baseline["sources"])
+        if sources != baseline["sources"]:
+            changed = sorted(k for k in sources.keys() | baseline["sources"].keys()
+                             if sources.get(k) != baseline["sources"].get(k))
+            raise ValueError("generation source provenance differs; review a fresh candidate: " + ", ".join(changed))
         compare(resource_pin, baseline["resources"])
         compare(parameters, baseline["parameters"])
         if set(baseline["runs"]) != {name for name, *_ in files}:
@@ -297,6 +305,8 @@ def main(argv=None) -> int:
             compare({"data_sha256": digest(data), "statistics": stats},
                     {k: expected[k] for k in ("data_sha256", "statistics")})
             raw = (EVIDENCE / f"{name}.log").read_bytes()
+            if (EVIDENCE / f"{name}.stderr.log").read_bytes():
+                raise ValueError(f"{name}: archived stderr must be empty")
             if digest(raw) != expected["report_sha256"]:
                 raise ValueError(f"{name}: archived report hash mismatch")
             compare(parse_report(raw.decode("utf-8")), expected["report"])
@@ -311,8 +321,8 @@ def main(argv=None) -> int:
             raise ValueError("record candidates outside committed evidence")
         destination.mkdir(parents=True, exist_ok=False)
     else:
-        import tempfile
         destination = Path(tempfile.mkdtemp(prefix="focus-official-"))
+    print(f"Reports: {destination} (retained on failure)", flush=True)
     result = {"sources": sources, "resources": resource_pin, "parameters": parameters, "runs": {}}
     for name, version, dataset, data, stats in files:
         path = destination / f"{name}.csv"
@@ -329,7 +339,14 @@ def main(argv=None) -> int:
                     {k: baseline["runs"][name][k] for k in ("data_sha256", "statistics", "report", "failure_evidence")})
         print(f"{name}: PASS={report['passed']} FAIL={report['failed']} SKIPPED={report['skipped']}", flush=True)
     (destination / "baseline.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"Complete reports: {destination}. Known FAIL/SKIPPED are not conformance passes.")
+    if baseline:
+        # This directory was created by mkdtemp in this invocation, never supplied
+        # by the caller. Preserve failed comparisons; remove only successful runs.
+        shutil.rmtree(destination)
+        print("All 9 reports match; temporary comparison files removed.")
+    else:
+        print(f"Complete candidate reports: {destination}")
+    print("Known FAIL/SKIPPED are not conformance passes.")
     return 0
 
 

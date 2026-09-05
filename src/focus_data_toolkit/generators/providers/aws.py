@@ -114,10 +114,6 @@ def _resource_name(rng: random.Random, spec: ServiceSpec) -> str:
     return f"{spec.name_prefix}{hexid(rng, 12)}"
 
 
-def _committed_resource_name(rng: random.Random, spec: ServiceSpec, k: int) -> str:
-    return f"{spec.name_prefix}{k:04d}{hexid(rng, 8)}"
-
-
 def _sku_id(rng: random.Random, spec: ServiceSpec) -> str:
     return f"SKU-{spec.name[:6].upper()}-{hexid(rng, 6)}"
 
@@ -168,7 +164,6 @@ AWS = ProviderProfile(
     sub_accounts=_SUB_ACCOUNTS,
     resource_id=_resource_id,
     resource_name=_resource_name,
-    committed_resource_name=_committed_resource_name,
     sku_id=_sku_id,
     sku_price_id=_sku_price_id,
     allocated_resource_id=_allocated_resource_id,

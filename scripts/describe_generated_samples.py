@@ -7,8 +7,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "src"))
+if __name__ == "__main__":
+    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(ROOT / "src"))
 
 from focus_data_toolkit.generators import PROVIDERS, get_generator  # noqa: E402
 from scripts.sample_audit import audit, statistics  # noqa: E402

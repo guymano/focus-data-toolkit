@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -28,24 +29,31 @@ from focus_data_toolkit.generators.engine.determinism import (
     s,
 )
 from focus_data_toolkit.generators.engine.ladder import generate_rows
+from focus_data_toolkit.generators.providers.profile import ProviderProfile
+from focus_data_toolkit.generators.versions.adapter import VersionAdapter
 
 DEFAULT_ROWS = 1000
 
 
-def generate_bundle_csv_bytes(rows: int, seed: int | None, *, profile, adapter) -> tuple[bytes, bytes | None]:
+def _encode_csv(columns: Sequence[str], rows: Iterable[Mapping[str, str]]) -> bytes:
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=list(columns), lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue().encode("utf-8")
+
+
+def generate_bundle_csv_bytes(
+    rows: int, seed: int | None, *, profile: ProviderProfile, adapter: VersionAdapter,
+    include_credits: bool = False,
+) -> tuple[bytes, bytes | None]:
     """Internal CLI bundle: one generation pass and one contract registry."""
     context = GenerationContext()
-    records = generate_rows(rows, seed, profile=profile, adapter=adapter, context=context)
+    records = generate_rows(rows, seed, profile=profile, adapter=adapter, context=context,
+                            include_credits=include_credits)
 
-    def encode(columns, data):
-        buffer = io.StringIO()
-        writer = csv.DictWriter(buffer, fieldnames=list(columns), lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(data)
-        return buffer.getvalue().encode("utf-8")
-
-    cau = encode(adapter.columns, records)
-    cc = (encode(adapter.contract_commitment_columns, contract_rows(context, profile, adapter))
+    cau = _encode_csv(adapter.columns, records)
+    cc = (_encode_csv(adapter.contract_commitment_columns, contract_rows(context, profile, adapter))
           if adapter.contract_commitment_columns else None)
     return cau, cc
 
@@ -75,18 +83,14 @@ def generate_csv_bytes(
     seed: int | None = None,
     *,
     include_credits: bool = False,
-    profile,
-    adapter,
+    profile: ProviderProfile,
+    adapter: VersionAdapter,
 ) -> bytes:
     """Serialise the Cost and Usage rows to deterministic UTF-8 CSV bytes (LF line endings)."""
     if seed is None:
         seed = adapter.default_seed
-    buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=list(adapter.columns), lineterminator="\n")
-    writer.writeheader()
-    for record in generate_rows(rows, seed, include_credits=include_credits, profile=profile, adapter=adapter):
-        writer.writerow(record)
-    return buffer.getvalue().encode("utf-8")
+    return _encode_csv(adapter.columns, generate_rows(
+        rows, seed, include_credits=include_credits, profile=profile, adapter=adapter))
 
 
 def generate_contract_commitment_rows(
@@ -94,8 +98,8 @@ def generate_contract_commitment_rows(
     seed: int | None = None,
     *,
     include_credits: bool = False,
-    profile,
-    adapter,
+    profile: ProviderProfile,
+    adapter: VersionAdapter,
 ) -> list[dict[str, str]]:
     """Serialize annual terms from the same per-call registry and generation options."""
     if adapter.contract_commitment_columns is None:
@@ -106,8 +110,10 @@ def generate_contract_commitment_rows(
     return contract_rows(context, profile, adapter)
 
 
-def contract_rows(context: GenerationContext, profile, adapter) -> list[dict[str, str]]:
+def contract_rows(context: GenerationContext, profile: ProviderProfile, adapter: VersionAdapter) -> list[dict[str, str]]:
     """Build both parent periods and term totals from the registered purchases."""
+    if adapter.contract_commitment_columns is None:
+        raise ValueError(f"FOCUS {adapter.version} has no Contract Commitment dataset")
     out: list[dict[str, str]] = []
     for commit_id, cu in context.purchases.items():
         spend_based = cu["CommitmentDiscountCategory"] == "Spend"
@@ -146,8 +152,10 @@ def contract_rows(context: GenerationContext, profile, adapter) -> list[dict[str
     return out
 
 
-def _negotiated_rows(profile, adapter) -> list[dict[str, str]]:
+def _negotiated_rows(profile: ProviderProfile, adapter: VersionAdapter) -> list[dict[str, str]]:
     """The three negotiated (non-discount) contract terms, RNG-free and deterministic."""
+    if adapter.contract_commitment_columns is None:
+        raise ValueError(f"FOCUS {adapter.version} has no Contract Commitment dataset")
     contract_id = negotiated_contract_id(profile.key)
     period_start = BILLING_START
     period_end = period_start + timedelta(days=COMMIT_TERM_DAYS)
@@ -176,23 +184,19 @@ def generate_contract_commitment_csv_bytes(
     seed: int | None = None,
     *,
     include_credits: bool = False,
-    profile,
-    adapter,
+    profile: ProviderProfile,
+    adapter: VersionAdapter,
 ) -> bytes:
     """Serialise the Contract Commitment dataset to deterministic UTF-8 CSV bytes (LF)."""
     if seed is None:
         seed = adapter.default_seed
-    buffer = io.StringIO()
-    writer = csv.DictWriter(
-        buffer, fieldnames=list(adapter.contract_commitment_columns), lineterminator="\n"
-    )
-    writer.writeheader()
-    for record in generate_contract_commitment_rows(rows, seed, include_credits=include_credits, profile=profile, adapter=adapter):
-        writer.writerow(record)
-    return buffer.getvalue().encode("utf-8")
+    if adapter.contract_commitment_columns is None:
+        raise ValueError(f"FOCUS {adapter.version} has no Contract Commitment dataset")
+    return _encode_csv(adapter.contract_commitment_columns, generate_contract_commitment_rows(
+        rows, seed, include_credits=include_credits, profile=profile, adapter=adapter))
 
 
-def main(argv: list[str] | None = None, *, profile, adapter) -> int:
+def main(argv: list[str] | None = None, *, profile: ProviderProfile, adapter: VersionAdapter) -> int:
     """``python -m focus_data_toolkit.generators.generate_<provider>_focus_<version>`` entry point."""
     label = f"{profile.provider_name} FOCUS {adapter.version}"
     has_cc = adapter.contract_commitment_columns is not None
@@ -231,5 +235,6 @@ def main(argv: list[str] | None = None, *, profile, adapter) -> int:
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(payload)
+    assert columns is not None
     print(f"Wrote {dataset} ({len(columns)} {label} columns) -> {out}")
     return 0

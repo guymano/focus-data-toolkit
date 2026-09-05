@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from focus_data_toolkit.generators.engine.determinism import stable_id
 from focus_data_toolkit.generators.providers.profile import ResourceRef, RowContext
 
 
@@ -21,8 +22,8 @@ class GenerationContext:
     counts: dict[tuple[str, ...], int] = field(default_factory=dict)
 
     def contract_for(self, row: dict[str, str], commitment_id: str) -> str:
-        from .determinism import stable_id
-
+        if commitment_id in self.contracts:
+            raise ValueError(f"duplicate commitment id in generation: {commitment_id}")
         key = tuple(row[k] for k in (
             "ProviderName", "BillingAccountId", "SubAccountId", "BillingCurrency",
         ))
@@ -32,4 +33,4 @@ class GenerationContext:
         self.contracts[commitment_id] = contract
         return contract
 
-__all__ = ["ResourceRef", "RowContext"]
+__all__ = ["GenerationContext", "ResourceRef", "RowContext"]

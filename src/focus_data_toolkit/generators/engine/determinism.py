@@ -104,11 +104,6 @@ def sku_price_details(spec_sku_details: dict[str, object]) -> str:
     return json.dumps(spec_sku_details, separators=(",", ":"))
 
 
-def contract_id_for(commit_id: str) -> str:
-    """Deterministic parent ContractId for a commitment id (shared by both 1.3 datasets)."""
-    return f"CONTRACT-{commit_id.rsplit('/', 1)[-1][:12]}"
-
-
 # Negotiated contract terms that are NOT commitment discounts (minimum spend, negotiated
 # rate card, usage commitment). They live in the Contract Commitment dataset and are
 # reachable from Cost and Usage exclusively through ``ContractApplied`` — never via
@@ -143,13 +138,11 @@ def set_currency(
         row["PricingCurrencyListUnitPrice"] = s(list_unit)
         row["PricingCurrencyContractedUnitPrice"] = s(contracted_unit)
         row["PricingCurrencyEffectiveCost"] = s(effective_cost)
-        set_sku_ids(row)
         return
     fx = EUR_PER_USD
     row["PricingCurrencyListUnitPrice"] = s(q(list_unit * fx, PRICE_Q))
     row["PricingCurrencyContractedUnitPrice"] = s(q(contracted_unit * fx, PRICE_Q))
     row["PricingCurrencyEffectiveCost"] = s(exact_cost(effective_cost, fx))
-    set_sku_ids(row)
 
 
 def stable_id(prefix: str, values: object) -> str:
@@ -160,7 +153,11 @@ def stable_id(prefix: str, values: object) -> str:
 
 def set_sku_ids(row: dict[str, str]) -> None:
     """Identify the offer, then its list price; negotiated terms do not change a SKU."""
+    if not row.get("SkuPriceDetails"):
+        raise ValueError("SKU identity requires a populated SkuPriceDetails JSON object")
     details = json.loads(row["SkuPriceDetails"])
+    if not isinstance(details, dict):
+        raise ValueError("SKU identity requires a SkuPriceDetails JSON object")
     for key in details:
         if key.startswith("x_") and key[2:] in FOCUS_SKU_PRICE_KEYS:
             raise ValueError(f"Use FOCUS property {key[2:]}")

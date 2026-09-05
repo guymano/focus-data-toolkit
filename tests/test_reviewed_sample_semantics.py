@@ -4,12 +4,14 @@ from __future__ import annotations
 import copy
 import json
 import random
+import re
 from decimal import Decimal
 
 import pytest
 
 from focus_data_toolkit.generators import get_generator
 from focus_data_toolkit.generators.engine import scenarios_core
+from focus_data_toolkit.generators.engine.context import GenerationContext
 from scripts.sample_audit import audit, statistics
 
 
@@ -32,9 +34,10 @@ def test_independent_matrix(provider, version, credits, seed):
 def test_builders_own_their_budget(budget):
     m = get_generator("aws", "1.3")
     for builder in (scenarios_core.commitment_group, scenarios_core.split_allocation_group_rows):
-        rows = builder(random.Random(42), 0, budget, m.PROFILE, m.ADAPTER)
+        extra = (GenerationContext(),) if builder is scenarios_core.commitment_group else ()
+        rows = builder(random.Random(42), 0, budget, m.PROFILE, m.ADAPTER, *extra)
         assert len(rows) <= budget
-    assert len(scenarios_core.commitment_group(random.Random(42), 0, budget, m.PROFILE, m.ADAPTER)) % 4 == 0
+    assert len(scenarios_core.commitment_group(random.Random(42), 0, budget, m.PROFILE, m.ADAPTER, GenerationContext())) % 4 == 0
 
 
 def test_scheduler_refuses_an_oversized_group(monkeypatch):
@@ -107,3 +110,41 @@ def test_default_contract_mix_and_parent_groups(reference):
     discounts = [c for c in contracts if not c["ContractCommitmentId"].startswith("CC-")]
     parents = [c["ContractId"] for c in discounts]
     assert max(parents.count(p) for p in parents) == 3
+
+
+def test_duplicate_commitment_is_rejected_without_mutating_registry():
+    context = GenerationContext()
+    identity = {k: "synthetic" for k in (
+        "ProviderName", "BillingAccountId", "SubAccountId", "BillingCurrency")}
+    parent = context.contract_for(identity, "same-id")
+    before = copy.deepcopy(context)
+    with pytest.raises(ValueError, match="duplicate commitment"):
+        context.contract_for(identity, "same-id")
+    assert context == before
+    assert context.contracts["same-id"] == parent
+
+
+def test_currency_does_not_change_sku_and_missing_details_are_actionable():
+    from focus_data_toolkit.generators.engine.determinism import set_currency, set_sku_ids
+    row = {"SkuId": "keep", "SkuPriceId": "keep-price"}
+    set_currency(row, "USD", Decimal(1), Decimal(1), Decimal(1))
+    assert row["SkuId"] == "keep" and row["SkuPriceId"] == "keep-price"
+    with pytest.raises(ValueError, match="SkuPriceDetails JSON object"):
+        set_sku_ids(row)
+
+
+@pytest.mark.parametrize("provider", ["aws", "azure", "gcp"])
+def test_tax_on_allocated_share_keeps_record_lineage(provider):
+    rows = get_generator(provider, "1.3").generate_rows(1000)
+    allocated_taxes = []
+    for tax in rows:
+        if tax["ChargeCategory"] != "Tax":
+            continue
+        match = re.search(r"usage record (\d+):", tax["ChargeDescription"])
+        assert match
+        source = rows[int(match[1]) - 1]
+        if source["AllocatedMethodId"]:
+            allocated_taxes.append(tax)
+            assert Decimal(tax["BilledCost"]) == Decimal(source["BilledCost"]) / 10
+            assert not any(v for k, v in tax.items() if k.startswith("Allocated"))
+    assert allocated_taxes

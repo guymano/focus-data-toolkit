@@ -28,7 +28,6 @@ from focus_data_toolkit.generators.engine.determinism import (
     PRICE_Q,
     PRIVATE_RATE,
     QTY_Q,
-    contract_id_for,
     exact_cost,
     hexid,
     iso,
@@ -36,6 +35,7 @@ from focus_data_toolkit.generators.engine.determinism import (
     q,
     s,
     set_currency,
+    set_sku_ids,
     sku_price_details,
     stable_id,
 )
@@ -104,6 +104,8 @@ def _set_resource_sku(
     row["ResourceId"] = profile.resource_id(ref)
     row["ResourceName"] = resource_name
     row["ResourceType"] = spec.resource_type
+    # Preserve legacy RNG draws in the established seeded byte baseline.
+    # Stable offer identity is assigned explicitly after the currency fields.
     row["SkuId"] = profile.sku_id(rng, spec)
     row["SkuMeter"] = spec.sku_meter
     row["SkuPriceId"] = profile.sku_price_id(rng)
@@ -145,6 +147,7 @@ def usage_row(rng: random.Random, i: int, remaining: int, profile, adapter) -> d
     set_currency(
         row, "EUR" if rng.random() < 0.10 else "USD", list_unit, contracted_unit, contracted_cost
     )
+    set_sku_ids(row)
     # Only selected ordinary usage receives the version-specific negotiated term.
     if selected:
         adapter.on_negotiated_usage(row, profile, spec)
@@ -161,6 +164,7 @@ def standalone_purchase_row(rng: random.Random, i: int, remaining: int, profile,
     _set_resource_sku(rng, row, spec, ctx, region_id, region_name, resource_name, profile)
 
     offer = stable_id("", [profile.key, spec.name, region_id, "subscription"])
+    # Hash-derived subscription fee: 20.00 through 800.00 USD, inclusive.
     amount = Decimal(2000 + int(offer[:8], 16) % 78001) / 100
     row["SkuMeter"] = "Subscription"
     row["SkuPriceDetails"] = '{"x_ChargeType":"SubscriptionFee"}'
@@ -177,6 +181,7 @@ def standalone_purchase_row(rng: random.Random, i: int, remaining: int, profile,
     row["PricingQuantity"] = "1"
     row["PricingUnit"] = "Units"
     set_currency(row, "USD", amount, amount, amount)
+    set_sku_ids(row)
     return row
 
 
@@ -294,6 +299,7 @@ def split_allocation_group_rows(
             separators=(",", ":"),
         )
         set_currency(row, "USD", list_unit, contracted_unit, contracted_cost)
+        set_sku_ids(row)
         # Split allocations use public pricing and preserve the shared-host totals.
         rows.append(row)
     if len(rows) > remaining:
@@ -301,7 +307,7 @@ def split_allocation_group_rows(
     return rows
 
 
-def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapter, context: GenerationContext | None = None) -> list[dict[str, str]]:
+def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapter, context: GenerationContext) -> list[dict[str, str]]:
     """Recurring per-charge-period commitment blocks that reconcile exactly.
 
     FOCUS amortises a commitment discount evenly over each charge period of its term
@@ -366,7 +372,7 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
     # Full billing identity of the commitment, reused verbatim by every row of the group so
     # account/invoice grouping and reconciliation stay consistent within the group.
     billing_identity = {key: template[key] for key in adapter.commitment_identity_keys}
-    contract_id = context.contract_for(template, commit_id) if context else contract_id_for(commit_id)
+    contract_id = context.contract_for(template, commit_id)
     fleet_id = "urn:focus-sample:" + profile.key + ":" + region_id + ":" + ctx.sub_id + ":compute-fleet:" + stable_id("", commit_id)
 
     rows: list[dict[str, str]] = []
@@ -397,6 +403,7 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
             purchase["CommitmentDiscountQuantity"] = s(fee)
             adapter.on_commit_usage(purchase, commit_id, contract_id, s(fee), "", "")
             set_currency(purchase, "USD", Decimal("1"), Decimal("1"), Decimal("0"))
+            set_sku_ids(purchase)
         else:
             # A usage commitment purchases the committed capacity at the commitment
             # rate; the discount quantity is that capacity in its native unit. The
@@ -408,9 +415,9 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
             purchase["CommitmentDiscountQuantity"] = s(capacity)
             adapter.on_commit_usage(purchase, commit_id, contract_id, "", s(capacity), "Hours")
             set_currency(purchase, "USD", commit_unit_price, commit_unit_price, Decimal("0"))
+            set_sku_ids(purchase)
         rows.append(purchase)
-        if context is not None:
-            context.purchases.setdefault(commit_id, dict(purchase))
+        context.purchases.setdefault(commit_id, dict(purchase))
 
         consumed = Decimal("0")
         for _k in range(2):
@@ -463,6 +470,7 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
                 # quantity branch survives the 1.4 oneOf conversion unchanged).
                 adapter.on_commit_usage(usage, commit_id, contract_id, "", s(used_qty), "Hours")
             set_currency(usage, "USD", list_unit, contracted_unit, effective)
+            set_sku_ids(usage)
             rows.append(usage)
 
         # Use-it-or-lose-it: the wasted remainder is an Unused usage row charged to the
@@ -490,6 +498,7 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
             unused["CommitmentDiscountQuantity"] = s(wasted_effective)
             adapter.on_commit_usage(unused, commit_id, contract_id, s(wasted_effective), "", "")
             set_currency(unused, "USD", Decimal("1"), Decimal("1"), wasted_effective)
+            set_sku_ids(unused)
         else:
             unused["ListCost"] = s(exact_cost(list_unit, waste))
             unused["ContractedCost"] = s(exact_cost(contracted_unit, waste))
@@ -500,6 +509,7 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
             unused["CommitmentDiscountQuantity"] = s(waste)
             adapter.on_commit_usage(unused, commit_id, contract_id, "", s(waste), "Hours")
             set_currency(unused, "USD", list_unit, contracted_unit, wasted_effective)
+            set_sku_ids(unused)
         unused["CommitmentDiscountStatus"] = "Unused"
         rows.append(unused)
     if len(rows) > remaining:

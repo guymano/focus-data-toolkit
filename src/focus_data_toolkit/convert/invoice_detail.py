@@ -135,14 +135,14 @@ def invoice_detail_row(
     streaming pipelines (which sums in SQLite), which is what makes them provably equivalent.
     """
     issuer, invoice_id, account, currency, period_start, period_end, charge_category = grain_key
+    trimmed_total = billed_total.quantize(_COST_QUANTUM)
     values = {
         "InvoiceDetailId": detail_id,
         "InvoiceId": invoice_id,
         "ReferenceInvoiceId": invoice_id,
         "ChargeCategory": charge_category,
         "BilledCost": format(
-            billed_total.quantize(_COST_QUANTUM)
-            if billed_total.quantize(_COST_QUANTUM) == billed_total else billed_total, "f"
+            trimmed_total if trimmed_total == billed_total else billed_total, "f"
         ),
         "BillingAccountId": account,
         "BillingCurrency": currency,

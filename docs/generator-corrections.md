@@ -38,6 +38,12 @@ header). The tax inherits account, service, period, currencies and tags; each
 taxable monetary column is multiplied from its own source, exactly once. If there
 is no eligible untaxed source, the scheduled tax becomes ordinary usage.
 
+Eligible Standard Usage includes a split-allocation child. In that case the tax
+applies to that child's amount, not the total host charge. The source record
+reference identifies the exact share. Tax rows do not copy `Allocated*` fields:
+they are separate tax charges, not additional members of the source allocation
+group. This intentional sample policy is tested explicitly.
+
 Prices are synthetic public and negotiated rates, not current cloud price lists.
 Offer identity includes provider, service, meter, region, unit and canonical SKU
 properties, excluding seed, account, contract and pricing category. Price identity
@@ -48,7 +54,9 @@ price precision are bounded before multiplication; cost products are not rounded
 Each commitment period contains a purchase, **two partially used fleet records**,
 and unused capacity. Used plus unused capacity is exactly 500; effective costs
 sum to the purchase cost. Fleet URNs and `SyntheticFleetSize: 500` tags explicitly
-describe synthetic aggregation rather than a single cloud machine. The annual
+describe synthetic aggregation rather than a single cloud machine. The fleet-size
+tag deliberately uses the JSON number 500: it is a numeric synthetic measurement,
+not an imitation of a provider's string-valued native tag export. The annual
 capacity commitment is 500 × 8,760 = **4,380,000 machine-hours**, with the existing
 unit price. Spend commitments retain their cost-based metric. All commitment
 periods lie within their annual term, including samples crossing the billing-month
@@ -89,11 +97,18 @@ including PASS becoming SKIPPED with no new FAIL rule.
 [`baseline.json`](../tests/fixtures/official/generator_validation/baseline.json)
 contains generation-source fingerprints (LF-normalized), exact CSV hashes,
 resource versions/hashes, parameters, every rule result and per-failure evidence.
+Source hashes remain a strict gate, including version and audit-script changes.
+Even a source-only edit requires a reviewed new candidate; dataset hashes cover
+the selected fixtures, while source provenance identifies the code used to
+produce and interpret the evidence. Mismatches now list the changed files.
 Each residual failure has its model expression, explanation, a minimal source
 record and independently checked population where the count represents rows.
 Composite failures count expressions instead of rows and are labeled separately.
 Raw stdout/stderr logs are archived beside it; stdout hashes preserve their exact
-original bytes. Live log paths/timing can differ across operating systems, but
+original bytes. The nine archived stderr logs are required to be empty, and the
+offline check verifies this. Successful live comparisons remove their temporary
+files; failed runs retain them for investigation. Candidate directories persist.
+Live log paths/timing can differ across operating systems, but
 the complete semantic inventory must match.
 
 | Dataset | Provider | PASS | FAIL | SKIPPED |
@@ -127,6 +142,10 @@ failure evidence, then explicitly copying its baseline and logs to the fixture
 directory. CI only compares; it never records new expectations. The public
 `validate --official` command shares the report parser, rejects FAIL even when the
 subprocess returns zero, and applies **none** of the sample-only exceptions.
+Its output is buffered until completion. It requires console output on stdout
+and rejects conflicting output flags with exit code 2. An installed validator
+version different from the tested 2.2.1 produces a warning; an incompatible or
+incomplete console report fails with an explanatory message.
 
 ## Statistics and limits
 
