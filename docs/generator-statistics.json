@@ -1,0 +1,77 @@
+{
+  "aws_1.2": {
+    "billed_cost": "18857.124623679033750",
+    "commitment_billed_cost": "5826.912000",
+    "commitment_share": "0.3090032078741794288132899939",
+    "compute_coverage": "0.9996244701943354539595341662",
+    "contract_applied_rows": 0,
+    "effective_cost": "18857.124623679033750",
+    "rows": 1000,
+    "utilization": "0.7020407406593406593406593407",
+    "waste": "0.2979592593406593406593406593"
+  },
+  "aws_1.3": {
+    "billed_cost": "18554.856257624590813",
+    "commitment_billed_cost": "4610.304000",
+    "commitment_share": "0.2484688609810990373610109813",
+    "commitments": 75,
+    "compute_coverage": "0.9926713446624324633475395163",
+    "contract_applied_rows": 626,
+    "contracts": 28,
+    "effective_cost": "18554.856257624590813",
+    "non_discount_terms": 3,
+    "rows": 1000,
+    "utilization": "0.7018307347222222222222222222",
+    "waste": "0.2981692652777777777777777778"
+  },
+  "azure_1.2": {
+    "billed_cost": "49321.108200244240000",
+    "commitment_billed_cost": "11653.824000",
+    "commitment_share": "0.2362847151099149435004291808",
+    "compute_coverage": "0.9994860707128948614490559558",
+    "contract_applied_rows": 0,
+    "effective_cost": "49321.108200244240000",
+    "rows": 1000,
+    "utilization": "0.7052545978021978021978021978",
+    "waste": "0.2947454021978021978021978022"
+  },
+  "azure_1.3": {
+    "billed_cost": "44516.766247198048000",
+    "commitment_billed_cost": "8196.096000",
+    "commitment_share": "0.1841125645669708672631528611",
+    "commitments": 67,
+    "compute_coverage": "0.9920858412453828140790998259",
+    "contract_applied_rows": 596,
+    "contracts": 25,
+    "effective_cost": "44516.766247198048000",
+    "non_discount_terms": 3,
+    "rows": 1000,
+    "utilization": "0.699760265625",
+    "waste": "0.300239734375"
+  },
+  "gcp_1.2": {
+    "billed_cost": "31758.210633880783500",
+    "commitment_billed_cost": "7418.374000",
+    "commitment_share": "0.2335891680271751825377137440",
+    "compute_coverage": "0.9993595790441745620531488744",
+    "contract_applied_rows": 0,
+    "effective_cost": "31758.210633880783500",
+    "rows": 1000,
+    "utilization": "0.6956325204819277108433734940",
+    "waste": "0.3043674795180722891566265060"
+  },
+  "gcp_1.3": {
+    "billed_cost": "21535.602792935027500",
+    "commitment_billed_cost": "6613.972000",
+    "commitment_share": "0.3071180344285408378488339428",
+    "commitments": 77,
+    "compute_coverage": "0.9935304486425862660442853958",
+    "contract_applied_rows": 640,
+    "contracts": 30,
+    "effective_cost": "21535.602792935027500",
+    "non_discount_terms": 3,
+    "rows": 1000,
+    "utilization": "0.6959978932432432432432432432",
+    "waste": "0.3040021067567567567567567568"
+  }
+}

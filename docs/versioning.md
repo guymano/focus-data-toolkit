@@ -62,8 +62,9 @@ an exact version (`focus-data-toolkit==X.Y.Z`).
 The generator test suite pins this contract with golden snapshots under
 `tests/fixtures/golden/`, in two deliberately distinct categories:
 
-- **`compatibility_golden/`** — outputs verified correct against the FOCUS
-  specification. These are a **byte-for-byte** intra-version contract: any diff
+- **`compatibility_golden/`** — reviewed synthetic outputs with executable semantic
+  checks and documented residual official-validator failures. These are a
+  **byte-for-byte** intra-version contract: any diff
   is a deliberate change that must be regenerated in the same PR and noted in the
   changelog.
 - **`correctness_migration/`** — cases that previously produced a **known
@@ -71,6 +72,11 @@ The generator test suite pins this contract with golden snapshots under
   is the spec-correct one. We preserve *valid* behaviour, never *known errors*.
 
 ## FOCUS specification versions
+
+The prepared 0.13.0 release establishes new generator bytes and stable SKU identities.
+Affected monetary Parquet columns widen to `decimal128(38,17)` (21 integer digits);
+values exceeding the precision or scale fail rather than rounding. Existing CSV
+columns remain unchanged. See [the migration evidence](generator-corrections.md).
 
 The toolkit's own version is independent of the FOCUS specification versions it
 supports (generate 1.2/1.3, convert toward 1.4, detect 1.2/1.3/1.4). The FOCUS

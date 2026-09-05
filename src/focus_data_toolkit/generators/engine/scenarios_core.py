@@ -14,7 +14,7 @@ import random
 from decimal import Decimal
 
 from focus_data_toolkit.generators.engine.allocation_math import residue_ratios, residue_shares
-from focus_data_toolkit.generators.engine.context import ResourceRef, RowContext
+from focus_data_toolkit.generators.engine.context import GenerationContext, ResourceRef, RowContext
 from focus_data_toolkit.generators.engine.determinism import (
     BILLING_END,
     BILLING_START,
@@ -22,7 +22,9 @@ from focus_data_toolkit.generators.engine.determinism import (
     COST_CENTERS,
     COST_Q,
     ENVIRONMENTS,
+    FLEET_SIZE,
     OWNERS,
+    PERIOD_HOURS,
     PRICE_Q,
     PRIVATE_RATE,
     QTY_Q,
@@ -35,6 +37,7 @@ from focus_data_toolkit.generators.engine.determinism import (
     s,
     set_currency,
     sku_price_details,
+    stable_id,
 )
 from focus_data_toolkit.generators.engine.json_focus import allocated_method_details
 
@@ -119,9 +122,9 @@ def usage_row(rng: random.Random, i: int, remaining: int, profile, adapter) -> d
         row["AvailabilityZone"] = rng.choice(azs)
 
     quantity = q(Decimal(rng.uniform(float(spec.qty_low), float(spec.qty_high))), QTY_Q)
-    jitter = Decimal(rng.uniform(0.97, 1.03))
-    list_unit = q(spec.unit_price_usd * jitter, PRICE_Q)
-    contracted_unit = q(list_unit * PRIVATE_RATE, PRICE_Q)
+    list_unit = q(spec.unit_price_usd, PRICE_Q)
+    selected = adapter.version == "1.2" or rng.random() < 0.35
+    contracted_unit = q(list_unit * (PRIVATE_RATE if selected else Decimal("1")), PRICE_Q)
     list_cost = exact_cost(list_unit, quantity)
     contracted_cost = exact_cost(contracted_unit, quantity)
 
@@ -142,13 +145,9 @@ def usage_row(rng: random.Random, i: int, remaining: int, profile, adapter) -> d
     set_currency(
         row, "EUR" if rng.random() < 0.10 else "USD", list_unit, contracted_unit, contracted_cost
     )
-    # The negotiated contract terms (rate card / minimum spend / usage commitment) are
-    # what the PRIVATE_RATE contracted price *is*: every on-demand usage row is priced
-    # under the negotiated rate card and its spend counts toward the contracted
-    # minimum, while only usage of the commitment-eligible service — measured in the
-    # usage commitment's own unit — counts toward that commitment. The 1.3 adapter
-    # links the row to those terms via ContractApplied; 1.2 has no such column.
-    adapter.on_negotiated_usage(row, profile, spec)
+    # Only selected ordinary usage receives the version-specific negotiated term.
+    if selected:
+        adapter.on_negotiated_usage(row, profile, spec)
     return row
 
 
@@ -161,40 +160,44 @@ def standalone_purchase_row(rng: random.Random, i: int, remaining: int, profile,
     resource_name = profile.resource_name(rng, spec)
     _set_resource_sku(rng, row, spec, ctx, region_id, region_name, resource_name, profile)
 
-    amount = q(Decimal(rng.uniform(20.0, 800.0)), COST_Q)
+    offer = stable_id("", [profile.key, spec.name, region_id, "subscription"])
+    amount = Decimal(2000 + int(offer[:8], 16) % 78001) / 100
+    row["SkuMeter"] = "Subscription"
+    row["SkuPriceDetails"] = '{"x_ChargeType":"SubscriptionFee"}'
     row["ChargeCategory"] = "Purchase"
     row["ChargeFrequency"] = "Recurring"
     row["ChargeDescription"] = f"{spec.name} subscription fee"
     row["PricingCategory"] = "Standard"
     row["BilledCost"] = s(amount)
-    row["EffectiveCost"] = "0"  # purchase covers future eligible charges
+    row["EffectiveCost"] = s(amount)  # subscription consumed in this period
     row["ListCost"] = s(amount)
     row["ContractedCost"] = s(amount)
     row["ListUnitPrice"] = s(amount)
     row["ContractedUnitPrice"] = s(amount)
     row["PricingQuantity"] = "1"
     row["PricingUnit"] = "Units"
-    set_currency(row, "USD", amount, amount, Decimal("0"))
+    set_currency(row, "USD", amount, amount, amount)
     return row
 
 
-def tax_row(rng: random.Random, i: int, remaining: int, profile, adapter) -> dict[str, str]:
-    spec = rng.choice(profile.services)
-    row, _ = base_row(rng, profile, adapter)
-    row["ChargePeriodStart"], row["ChargePeriodEnd"] = period(i, "daily")
-    _set_service(row, spec)
-    amount = q(Decimal(rng.uniform(0.5, 50.0)), COST_Q)
-    amount_str = s(amount)
+def tax_row(source: dict[str, str], source_number: int, adapter) -> dict[str, str]:
+    """Illustrative 10% tax on one earlier, untaxed Standard Usage data record."""
+    row = {name: "" for name in adapter.columns}
+    for key in (
+        "ProviderName", "PublisherName", "InvoiceIssuerName", "ServiceProviderName",
+        "HostProviderName", "BillingAccountId", "BillingAccountName", "BillingAccountType",
+        "SubAccountId", "SubAccountName", "SubAccountType", "InvoiceId",
+        "BillingPeriodStart", "BillingPeriodEnd", "ChargePeriodStart", "ChargePeriodEnd",
+        "BillingCurrency", "PricingCurrency", "ServiceName", "ServiceCategory",
+        "ServiceSubcategory", "Tags",
+    ):
+        if key in row:
+            row[key] = source[key]
     row["ChargeCategory"] = "Tax"
     row["ChargeFrequency"] = "One-Time"
-    row["ChargeDescription"] = f"Tax for {spec.name}"
-    row["BilledCost"] = amount_str
-    row["EffectiveCost"] = amount_str
-    row["ListCost"] = amount_str
-    row["ContractedCost"] = amount_str
-    # Tax is priced in the billing currency (USD default from base_row), so the
-    # pricing-currency effective cost mirrors EffectiveCost in both versions.
-    row["PricingCurrencyEffectiveCost"] = amount_str
+    row["ChargeDescription"] = f"Synthetic tax 10% on usage record {source_number}: {source['ServiceName']}"
+    for key in ("BilledCost", "EffectiveCost", "ListCost", "ContractedCost", "PricingCurrencyEffectiveCost"):
+        row[key] = s(exact_cost(Decimal(source[key]), Decimal("0.1")))
     return row
 
 
@@ -229,6 +232,8 @@ def split_allocation_group_rows(
     costs are exact unit-price x quantity products, so per-row cost arithmetic and
     per-group conservation hold at once (distributivity).
     """
+    if remaining < 2:
+        return []
     spec = profile.commitment_service  # shared compute host split across workloads
     region_id, region_name, azs = rng.choice(profile.regions)
     host, ctx = base_row(rng, profile, adapter)
@@ -239,9 +244,8 @@ def split_allocation_group_rows(
     host["AvailabilityZone"] = rng.choice(azs)
 
     quantity = q(Decimal(rng.uniform(2.0, 8.0)), QTY_Q)
-    jitter = Decimal(rng.uniform(0.97, 1.03))
-    list_unit = q(spec.unit_price_usd * jitter, PRICE_Q)
-    contracted_unit = q(list_unit * PRIVATE_RATE, PRICE_Q)
+    list_unit = q(spec.unit_price_usd, PRICE_Q)
+    contracted_unit = list_unit
 
     host["ChargeCategory"] = "Usage"
     host["ChargeFrequency"] = "Usage-Based"
@@ -290,16 +294,14 @@ def split_allocation_group_rows(
             separators=(",", ":"),
         )
         set_currency(row, "USD", list_unit, contracted_unit, contracted_cost)
-        # The shared host is ordinary on-demand usage of the commitment-eligible
-        # compute service: the negotiated terms apply to it like to any other
-        # Standard usage row (and its Hours usage counts toward the usage
-        # commitment), which also keeps those terms structurally reachable.
-        adapter.on_negotiated_usage(row, profile, spec)
+        # Split allocations use public pricing and preserve the shared-host totals.
         rows.append(row)
+    if len(rows) > remaining:
+        raise ValueError("group exceeded its row budget")
     return rows
 
 
-def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapter) -> list[dict[str, str]]:
+def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapter, context: GenerationContext | None = None) -> list[dict[str, str]]:
     """Recurring per-charge-period commitment blocks that reconcile exactly.
 
     FOCUS amortises a commitment discount evenly over each charge period of its term
@@ -314,6 +316,8 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
     Commitment dataset re-derives so the two datasets join on
     ``ContractCommitmentId`` == ``CommitmentDiscountId``.
     """
+    if remaining < 4:
+        return []
     spec = profile.commitment_service
     commit = profile.commitment
     region_id, region_name, azs = rng.choice(profile.regions)
@@ -335,7 +339,7 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
     # discount, which shows only between ContractedCost and EffectiveCost — so
     # EffectiveCost < ContractedCost <= ListCost on every Used row.
     contracted_unit = q(list_unit * PRIVATE_RATE, PRICE_Q)
-    capacity = Decimal(rng.randint(2, 4))  # committed hours per charge period
+    capacity = FLEET_SIZE  # machine-equivalent hours per hourly period
     fee = exact_cost(commit_unit_price, capacity)  # the recurring per-period Purchase cost
 
     template, ctx = base_row(rng, profile, adapter)
@@ -362,11 +366,12 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
     # Full billing identity of the commitment, reused verbatim by every row of the group so
     # account/invoice grouping and reconciliation stay consistent within the group.
     billing_identity = {key: template[key] for key in adapter.commitment_identity_keys}
-    contract_id = contract_id_for(commit_id)
+    contract_id = context.contract_for(template, commit_id) if context else contract_id_for(commit_id)
+    fleet_id = "urn:focus-sample:" + profile.key + ":" + region_id + ":" + ctx.sub_id + ":compute-fleet:" + stable_id("", commit_id)
 
     rows: list[dict[str, str]] = []
     n_periods = 2 if remaining >= 8 else 1  # whole 4-row blocks only, never truncated
-    used_index = 0
+    i0 %= PERIOD_HOURS - n_periods + 1  # do not wrap a group before its contract starts
     for p in range(n_periods):
         start, end = period(i0 + p, "hourly")
 
@@ -404,28 +409,26 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
             adapter.on_commit_usage(purchase, commit_id, contract_id, "", s(capacity), "Hours")
             set_currency(purchase, "USD", commit_unit_price, commit_unit_price, Decimal("0"))
         rows.append(purchase)
+        if context is not None:
+            context.purchases.setdefault(commit_id, dict(purchase))
 
         consumed = Decimal("0")
         for _k in range(2):
-            used_qty = q(Decimal(rng.uniform(0.25, float(capacity) / 2 - 0.25)), QTY_Q)
+            used_qty = q(Decimal(rng.uniform(float(capacity) * 0.25, float(capacity) * 0.45)), QTY_Q)
             consumed += used_qty
             usage, _ = base_row(rng, profile, adapter)
             usage.update(billing_identity)
             usage["ChargePeriodStart"] = start
             usage["ChargePeriodEnd"] = end
             _set_service(usage, spec)
-            resource_name = profile.committed_resource_name(rng, spec, used_index)
-            used_index += 1
             usage["RegionId"] = region_id
             usage["RegionName"] = region_name
-            ref = ResourceRef(
-                spec=spec, region_id=region_id, region_name=region_name,
-                billing_id=ctx.billing_id, sub_id=ctx.sub_id, sub_name=ctx.sub_name,
-                resource_name=resource_name,
-            )
-            usage["ResourceId"] = profile.resource_id(ref)
-            usage["ResourceName"] = resource_name
-            usage["ResourceType"] = spec.resource_type
+            usage["ResourceId"] = fleet_id
+            usage["ResourceName"] = "synthetic-compute-fleet"
+            usage["ResourceType"] = "Compute Fleet"
+            tags = json.loads(usage["Tags"])
+            tags["SyntheticFleetSize"] = 500
+            usage["Tags"] = json.dumps(tags, separators=(",", ":"))
             usage["AvailabilityZone"] = az
             usage["SkuId"] = profile.sku_id(rng, spec)
             usage["SkuMeter"] = spec.sku_meter
@@ -499,4 +502,6 @@ def commitment_group(rng: random.Random, i0: int, remaining: int, profile, adapt
             set_currency(unused, "USD", list_unit, contracted_unit, wasted_effective)
         unused["CommitmentDiscountStatus"] = "Unused"
         rows.append(unused)
+    if len(rows) > remaining:
+        raise ValueError("group exceeded its row budget")
     return rows

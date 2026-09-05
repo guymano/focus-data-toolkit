@@ -10,6 +10,12 @@ Generate realistic **FOCUS 1.2 / 1.3** cost and usage data (AWS, Azure, GCP), co
 
 [FOCUS](https://focus.finops.org) is the open standard for cloud cost and usage data. FOCUS 1.4 defines four datasets: Cost and Usage, Contract Commitment, Billing Period, and Invoice Detail. The toolkit is honest by design: any value it cannot derive from your source is left empty (**strict** mode) or filled with clearly labelled assumptions (**synthetic** mode).
 
+The source prepares **0.13.0** with corrected subscriptions, traceable taxes,
+stable offers and partially used fleets of 500 machines. See the
+[generator corrections and validation evidence](docs/generator-corrections.md)
+for the new byte baseline and sample assumptions. The Docker examples below
+continue to pin the previously released 0.12.0 image.
+
 ## Three ways to use it
 
 | Interface | Best for | Get started |

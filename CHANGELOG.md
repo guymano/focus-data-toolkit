@@ -9,6 +9,28 @@ policy.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-09-05
+
+Prepared in source; publishing is a separate release step.
+
+- Correct period-subscription effective costs and derive illustrative 10% taxes
+  from earlier untaxed usage with exact amount and currency lineage.
+- Stabilize offer/SKU/price identities and public prices; correct recognized storage
+  properties, AWS namespaces and owning subaccounts, including allocations.
+- Model partially used fleets of 500 machines, exact annual capacity and complete
+  budget-aware groups. Add targeted 1.3 negotiated contracts, shared contract parents
+  and a common generation registry; Contract Commitment APIs accept `include_credits`.
+- Omit inapplicable ContractApplied metric properties while retaining legacy input
+  compatibility. Preserve exact invoice aggregates and widen affected Parquet cost
+  columns to `decimal128(38,17)` without silent rounding.
+- Replace FAIL-only official gating with complete inventories, violation counts,
+  resource/source/data fingerprints, archived reports and separately reviewed
+  candidate evidence. Public `validate --official` now rejects false-green exits.
+- **New byte baseline:** regenerated provider goldens, archived before examples,
+  independent corruption tests and reproducible statistics. See
+  [generator corrections](docs/generator-corrections.md) for assumptions, residual
+  official failures and the deliberate differences from upstream PRs 6 and 7.
+
 ## [0.12.0] — 2026-08-21
 
 Back-ports the reviewed FOCUS-Sample-Data conformance fixes into the generator engine.
@@ -695,6 +717,7 @@ conformance defects.
 <!-- Reference links. 0.2.0/0.3.0 were pre-release development milestones and were never tagged
      or published, so only the first public release (0.9.0) has a tag link. -->
 [Unreleased]: https://github.com/guymano/focus-data-toolkit/compare/v0.12.0...HEAD
+[0.13.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.12.0...HEAD
 [0.12.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.11.0rc1...v0.11.0
 [0.11.0rc1]: https://github.com/guymano/focus-data-toolkit/compare/v0.9.0...v0.11.0rc1

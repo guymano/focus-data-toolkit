@@ -46,6 +46,17 @@ documentation page it was authored against.
 
 3. Optional dependency: the official FinOps FOCUS validator
 -----------------------------------------------------------
+The source test evidence at tests/fixtures/official/generator_validation includes
+rule expressions from the FOCUS 1.2.0.1 and 1.3.0.1 models (FinOps Foundation,
+CC-BY-4.0, source and license links in section 2 above) and captured validator
+results. Model expressions are reproduced without modification; surrounding
+explanations and synthetic example records are authored by this project.
+
+Generator corrections adapt the behavior examined in FOCUS-Sample-Data PRs 6/7,
+at commits e14921a3ba8d5f75a7b899d878e372999482ba9a and
+99917010b27f7c0ca3586f8e0daab7e1c8103dac. See docs/generator-corrections.md for
+source links and the deliberate semantic adaptations.
+
 The optional `[validator]` extra installs `focus-validator` from PyPI, which is
 published by the FinOps Foundation under its own license. It is not vendored or
 redistributed by this project; it is resolved by your package manager on

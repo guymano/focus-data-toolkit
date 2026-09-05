@@ -49,6 +49,8 @@ pytest -m packaging                        # build + install a wheel/sdist (need
 
 python scripts/check_pinned_actions.py     # every GitHub Action is SHA/digest pinned
 python scripts/verify_model_provenance.py  # the embedded FOCUS model matches its provenance
+python scripts/describe_generated_samples.py # independently audited sample statistics
+python scripts/validate_official_samples.py --check-existing # archived reports + provenance
 ```
 
 A PR is expected to be green on lint, types, and the default test suite, and to
@@ -63,7 +65,8 @@ identical toolkit version and identical parameters (`provider`, `focus_version`,
 - Keep generator draws in a fixed order; do not introduce a clock, real RNG, or
   environment-dependent behaviour into generation/conversion.
 - Golden snapshots live in `tests/fixtures/golden/`:
-  - `compatibility_golden/` — outputs verified correct against the FOCUS spec.
+  - `compatibility_golden/` — reviewed synthetic outputs with executable semantic checks
+    and documented residual official-model/validator failures.
     These are a **byte-for-byte** intra-version contract.
   - `correctness_migration/` — cases with a *known* prior defect: the old output
     is archived for comparison, and the **new** output is the spec-correct one.
@@ -73,6 +76,11 @@ identical toolkit version and identical parameters (`provider`, `focus_version`,
   promised within an exact version — see [docs/versioning.md](docs/versioning.md).
 - If a diff changes a snapshot you did **not** intend to touch, treat it as a
   regression and investigate before updating the fixture.
+
+Generator changes also require a fresh official-validation **candidate**, review
+of every changed rule/state/count and explicit evidence promotion. See
+[generator corrections](docs/generator-corrections.md). A successful reference
+comparison does not certify complete FOCUS conformance.
 
 ## Changing the embedded FOCUS model
 

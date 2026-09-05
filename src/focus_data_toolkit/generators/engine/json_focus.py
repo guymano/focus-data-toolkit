@@ -47,12 +47,9 @@ def contract_applied_element(
     """One ``ContractApplied`` element linking a row to a Contract Commitment.
 
     The identifier keys use the canonical ``Id`` casing of FOCUS erratum #3 (the
-    1.3.0.1 rule model), not the legacy pre-erratum ``ID`` casing. Per that rule
-    model (``CAU-ContractAppliedObject-O-007-M``) every element carries **all five**
-    key-value pairs, one metric branch populated and the other explicit JSON nulls:
-    a spend commitment applies a cost alone; a usage commitment applies the measured
-    quantity in its native unit alone — which also keeps the quantity branch intact
-    through the FOCUS 1.4 ``oneOf`` migration.
+    1.3.0.1 rule model). Emit only the applicable metric branch. The published
+    mandatory-five-properties rule conflicts with optionalProperties; this is
+    documented as an upstream model issue, never hidden with artificial nulls.
     """
     if bool(applied_cost) == bool(applied_qty):
         raise ValueError(
@@ -61,13 +58,17 @@ def contract_applied_element(
         )
     if bool(applied_qty) != bool(applied_unit):
         raise ValueError("an applied quantity and its unit go together")
-    return {
+    element: dict[str, str | None] = {
         "ContractId": contract_id,
         "ContractCommitmentId": commit_id,
-        "ContractCommitmentAppliedCost": applied_cost or None,
-        "ContractCommitmentAppliedQuantity": applied_qty or None,
-        "ContractCommitmentAppliedUnit": applied_unit or None,
     }
+    if applied_cost:
+        element["ContractCommitmentAppliedCost"] = applied_cost
+    else:
+        element["ContractCommitmentAppliedQuantity"] = applied_qty
+        element["ContractCommitmentAppliedUnit"] = applied_unit
+    return element
+
 
 
 def contract_applied(elements: Sequence[Mapping[str, object]]) -> str:

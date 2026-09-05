@@ -140,7 +140,10 @@ def invoice_detail_row(
         "InvoiceId": invoice_id,
         "ReferenceInvoiceId": invoice_id,
         "ChargeCategory": charge_category,
-        "BilledCost": str(billed_total.quantize(_COST_QUANTUM)),
+        "BilledCost": format(
+            billed_total.quantize(_COST_QUANTUM)
+            if billed_total.quantize(_COST_QUANTUM) == billed_total else billed_total, "f"
+        ),
         "BillingAccountId": account,
         "BillingCurrency": currency,
         "BillingPeriodStart": period_start,

@@ -144,34 +144,18 @@ def _on_commit_usage(
 
 
 def _on_negotiated_usage(row: dict, profile: ProviderProfile, spec) -> None:
-    # On-demand usage is linked to the negotiated (non-discount) contract terms: the
-    # negotiated rate card explains the ContractedCost and the spend counts toward the
-    # contracted minimum on every row (cost applications are unit-agnostic). The usage
-    # commitment is different: it is contracted in a specific unit (Hours), so only
-    # usage of the commitment-eligible service — whose consumption is measured in that
-    # same unit — applies a quantity to it; applying GB-Months or Requests to an Hours
-    # commitment would make the commitment's progress unmeasurable. These commitments
-    # are reachable ONLY through ContractApplied (they are not CommitmentDiscountIds)
-    # — the FOCUS-defined dataset relationship.
     contract = negotiated_contract_id(profile.key)
-    elements = [
-        contract_applied_element(
-            negotiated_commitment_id("RATECARD", profile.key), contract, row["ContractedCost"]
-        ),
-        contract_applied_element(
-            negotiated_commitment_id("MINSPEND", profile.key), contract, row["ContractedCost"]
-        ),
-    ]
     if spec.commitment_eligible:
-        elements.append(
-            contract_applied_element(
-                negotiated_commitment_id("USAGEMIN", profile.key),
-                contract,
-                applied_qty=row["ConsumedQuantity"],
-                applied_unit=row["ConsumedUnit"],
-            )
+        element = contract_applied_element(
+            negotiated_commitment_id("USAGEMIN", profile.key), contract,
+            applied_qty=row["ConsumedQuantity"], applied_unit=row["ConsumedUnit"],
         )
-    row["ContractApplied"] = contract_applied(elements)
+    else:
+        kind = "RATECARD" if spec.category == "Storage" else "MINSPEND"
+        element = contract_applied_element(
+            negotiated_commitment_id(kind, profile.key), contract, row["ContractedCost"],
+        )
+    row["ContractApplied"] = contract_applied([element])
 
 
 V13 = VersionAdapter(

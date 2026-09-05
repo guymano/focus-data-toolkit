@@ -23,7 +23,8 @@ A legitimate change (e.g. a new service, a FOCUS-conformance fix) requires:
 3. justification that the new bytes are correct — `tests/test_generated_conformance.py`
    runs the ported upstream FOCUS-Sample-Data conformance catalogue against both fresh
    generation and the committed `rows100_seed42` fixtures, so the committed bytes are
-   proven conformant, not merely reproducible.
+   checked semantically as well as for reproducibility. Residual official failures
+   remain documented in `docs/generator-corrections.md`.
 
 ## `correctness_migration/`
 
@@ -35,4 +36,9 @@ The P2-A correctness review of the current generators found **no incorrect outpu
 particular the two historical Split Cost Allocation JSON builders (the 1.3 generators and
 `scenarios.py`) were verified to be byte-identical on all valid inputs, so their reconciliation
 onto `engine/json_focus.allocated_method_details` is a *compatibility* change, not a migration.
-This directory is therefore intentionally empty.
+Subsequent correctness reviews added migration evidence here. In particular,
+`pr67_before.json` preserves representative subscription, tax, SKU and commitment
+rows from toolkit commit `d0c27bac6d1909fa39fe45538fce3a9d391ae0f8` before the 0.13.0
+corrections. These are synthetic records, not valid expected new output. The
+regenerated provider/version goldens and independent semantic audit define the
+corrected behavior.

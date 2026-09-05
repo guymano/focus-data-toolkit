@@ -31,7 +31,7 @@ _SERVICES: tuple[ServiceSpec, ...] = (
         "Storage", "GB-Months", "Hot LRS data stored", Decimal("0.0184"),
         Decimal("50"), Decimal("8000"), "stor", "monthly", False, False,
         id_fields={"arm_type": "Microsoft.Storage/storageAccounts"},
-        sku_details={"StorageClass": "Hot", "Redundancy": "LRS"},
+        sku_details={"StorageClass": "Hot", "Redundancy": "Local"},
     ),
     ServiceSpec(
         "Azure SQL Database", "Databases", "Relational Databases", "SQL Database",

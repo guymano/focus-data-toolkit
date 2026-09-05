@@ -72,7 +72,7 @@ def test_run_invokes_validator_and_passes_through_exit_code(monkeypatch, tmp_pat
     rc = run_official_validator(
         tmp_path / "data.csv", "1.2.0.1", extra_args=("--output-type", "console")
     )
-    assert rc == exit_code
+    assert rc == (exit_code or 1)  # empty report must fail even when executable exits zero
     argv = record.read_text()
     assert "--data-file" in argv
     assert "data.csv" in argv
