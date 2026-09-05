@@ -1,40 +1,20 @@
 #!/usr/bin/env python3
-"""Gate the generated sample datasets through the official FinOps FOCUS validator.
+"""Capture or verify complete official reports for corrected synthetic datasets.
 
-Generates the nine outputs — Cost and Usage for every provider at FOCUS 1.2 and 1.3,
-plus the 1.3 Contract Commitment dataset — and runs ``focus-validator`` (pinned
-``2.2.1``) against the matching rule model (``1.2.0.1`` / ``1.3.0.1``) with
-``--applicability-criteria ALL``, so the conditional rules for the capabilities these
-datasets deliberately exercise (commitment discounts, contract commitments,
-negotiated pricing, multi-currency, split allocation, …) run too, not only the
-universal ones.
-
-Each ``(version, provider, dataset)`` run is compared against its **exact** expected
-artifact set: an artifact tolerated for one run (e.g. the CSV loader typing AWS's
-all-digit account ids as numbers) is never silently tolerated for another. Any
-non-expected rule failure fails the gate — and so does an expected artifact that
-*stops* failing, so stale allowlist entries are pruned instead of rotting.
-
-Known artifacts are validator-side, not data-side: every entry names why the data is
-nevertheless conformant, and each claim is pinned by a data-side assertion in
-``tests/test_generated_conformance.py``. They are printed on every run so they stay
-visible.
-
-The 1.2.0.1 rule model ships inside the focus-validator package; the 1.3.0.1 model is
-fetched once from the FOCUS_Spec GitHub release into the package's ``rules/``
-directory — **SHA-256 pinned** — after which validation runs fully offline
-(``--block-download``, also avoiding GitHub API rate limits in CI). The validator
-resolves its bundled ``currency_codes.csv`` relative to the working directory, so it
-is invoked from the site-packages root.
-
-Usage:  python scripts/validate_official_samples.py  (requires Python >= 3.12 and
-        pip install focus-validator==2.2.1)
+Default reruns and compares with reviewed evidence. --check-existing verifies archived
+reports offline. --record DIR creates a candidate directory, never promotes it.
+Reference: focus-validator 2.2.1, models 1.2.0.1/1.3.0.1, applicability ALL.
 """
 
 from __future__ import annotations
 
+import argparse
+import csv
 import hashlib
-import re
+import io
+import json
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -43,9 +23,13 @@ from importlib import metadata
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "src"))
+if __name__ == "__main__":
+    sys.path.insert(0, str(REPO / "src"))
+    sys.path.insert(0, str(REPO))
 
 from focus_data_toolkit.generators import PROVIDERS, get_generator  # noqa: E402
+from focus_data_toolkit.official_report import model_inventory, parse_report  # noqa: E402
+from scripts.sample_audit import audit, statistics  # noqa: E402
 
 PINNED_VALIDATOR_VERSION = "2.2.1"
 RULE_MODEL_VERSIONS = {"1.2": "1.2.0.1", "1.3": "1.3.0.1"}
@@ -166,186 +150,203 @@ ARTIFACT_REASONS: dict[str, str] = {
     "CAU-ResourceType-C-005-C": _RESOURCE_TYPE_NOTE,
 }
 
-# Exact expected artifact set per (version, provider, dataset). Verified per run —
-# an AWS-only loader artifact appearing on Azure/GCP is an unexpected failure, and
-# an expected artifact that stops failing is a stale entry (both fail the gate).
-_COMMON_1_2 = frozenset({
-    "InvoiceId-C-004-C",
-    "CapacityReservationStatus-C-000-C",
-    "CapacityReservationStatus-C-002-C",
-    "CapacityReservationStatus-C-004-C",
-    "CommitmentDiscountStatus-C-000-C",
-    "CommitmentDiscountStatus-C-002-C",
-    "CommitmentDiscountStatus-C-004-C",
-    "CostAndUsage-D-000-M",
-    "CostAndUsage-D-002-M",
-})
-_AWS_NUMERIC_1_2 = frozenset({
-    "BillingAccountId-C-000-M",
-    "BillingAccountId-C-002-M",
-    "SubAccountId-C-000-C",
-    "SubAccountId-C-001-M",
-})
-_COMMON_1_3 = frozenset({
-    "CAU-CapacityReservationStatus-C-000-C",
-    "CAU-CapacityReservationStatus-C-002-C",
-    "CAU-CapacityReservationStatus-C-004-C",
-    "CAU-CommitmentDiscountStatus-C-000-C",
-    "CAU-CommitmentDiscountStatus-C-002-C",
-    "CAU-CommitmentDiscountStatus-C-003-C",
-    "CAU-CommitmentDiscountStatus-C-004-C",
-    "CAU-ContractApplied-C-000-C",
-    "CAU-ContractApplied-C-003-C",
-    "CAU-ContractAppliedObject-O-000-C",
-    "CAU-ContractAppliedObject-O-028-M",
-    "CAU-ContractAppliedObject-O-035-C",
-    "CAU-ContractAppliedObject-O-039-C",
-    "CAU-ContractAppliedObject-O-041-M",
-    "CAU-ContractAppliedObject-O-043-M",
-    "CAU-ContractAppliedObject-O-045-M",
-    "CAU-ContractAppliedObject-O-046-C",
-    "CAU-ContractAppliedObject-O-048-M",
-    "CAU-ContractAppliedObject-O-050-M",
-    "CAU-ContractAppliedObject-O-052-M",
-    "CAU-ContractAppliedObject-O-054-M",
-    "CAU-ContractAppliedObject-O-055-C",
-    "CAU-ContractAppliedObject-O-057-M",
-    "CAU-ContractAppliedObject-O-059-M",
-    "CAU-ContractAppliedObject-O-061-M",
-    "CAU-ContractAppliedObject-O-064-C",
-    "CAU-ContractAppliedObject-O-065-C",
-    "CAU-ContractAppliedObject-O-066-C",
-    "CAU-CostAndUsage-D-000-M",
-    "CAU-CostAndUsage-D-002-M",
-    "CAU-PricingCurrencyContractedUnitPrice-C-000-C",
-    "CAU-PricingCurrencyContractedUnitPrice-C-003-M",
-    "CAU-PricingCurrencyContractedUnitPrice-C-012-C",
-    "CAU-ResourceType-C-000-C",
-    "CAU-ResourceType-C-003-C",
-    "CAU-ResourceType-C-005-C",
-})
-_AWS_NUMERIC_1_3 = frozenset({
-    "CAU-BillingAccountId-C-000-M",
-    "CAU-BillingAccountId-C-002-M",
-    "CAU-SubAccountId-C-000-C",
-    "CAU-SubAccountId-C-001-M",
-})
-
-EXPECTED_ARTIFACTS: dict[tuple[str, str, str], frozenset[str]] = {
-    ("1.2", "aws", "CostAndUsage"): _COMMON_1_2 | _AWS_NUMERIC_1_2,
-    ("1.2", "azure", "CostAndUsage"): _COMMON_1_2,
-    ("1.2", "gcp", "CostAndUsage"): _COMMON_1_2,
-    ("1.3", "aws", "CostAndUsage"): _COMMON_1_3 | _AWS_NUMERIC_1_3,
-    ("1.3", "azure", "CostAndUsage"): _COMMON_1_3,
-    ("1.3", "gcp", "CostAndUsage"): _COMMON_1_3,
-    ("1.3", "aws", "ContractCommitment"): frozenset(),
-    ("1.3", "azure", "ContractCommitment"): frozenset(),
-    ("1.3", "gcp", "ContractCommitment"): frozenset(),
+EVIDENCE = REPO / "tests/fixtures/official/generator_validation"
+MODEL_HASHES = {
+    "1.2.0.1": "639b302ace9edd05922e3d15fcedf62723c92e7cf25e0a7a6684dd4fd4076fec",
+    "1.3.0.1": MODEL_1_3_SHA256,
 }
+CURRENCY_HASH = "60e9b405692a977040f4232e6f449fd75c251f8608e7c624cb21472d5c151e14"
+for _prefix in ("", "CAU-"):
+    ARTIFACT_REASONS[_prefix + "EffectiveCost-C-000-M"] = _CASCADE_NOTE
+    ARTIFACT_REASONS[_prefix + "EffectiveCost-C-005-C"] = (
+        "The model zeroes every Purchase without the future-eligible-charges condition. "
+        "Period subscriptions are consumed now; their effective cost equals billed cost. FOCUS_Spec#2673."
+    )
+ARTIFACT_REASONS["CAU-ContractAppliedObject-O-007-M"] = (
+    "The mandatory-five-properties rule contradicts optionalProperties. Generated Spend "
+    "elements omit quantity/unit and Usage elements omit cost; FOCUS_Spec#2674 remains unresolved."
+)
+for _rule in ("042-C", "051-C", "060-C"):
+    ARTIFACT_REASONS["CAU-ContractAppliedObject-O-" + _rule] = _CA_BRANCH_NOTE
 
-_FAIL_LINE = re.compile(r"^❌\s+(?P<rule>[A-Za-z0-9_.-]+):\s+FAIL", re.MULTILINE)
+
+def digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def source_manifest() -> dict[str, str]:
+    paths = list((REPO / "src/focus_data_toolkit/generators").rglob("*.py"))
+    paths += [REPO / "src/focus_data_toolkit" / name for name in (
+        "focus_json.py", "model/focus_json_keys.py", "official_report.py", "_version.py",
+    )]
+    paths += [Path(__file__), REPO / "scripts/sample_audit.py", REPO / "scripts/__init__.py"]
+    return {p.relative_to(REPO).as_posix(): digest(p.read_bytes().replace(b"\r\n", b"\n"))
+            for p in sorted(paths)}
 
 
-def _validator_package_dir() -> Path:
-    installed = metadata.version("focus-validator")
-    if installed != PINNED_VALIDATOR_VERSION:
-        raise SystemExit(
-            f"focus-validator {installed} installed; the gate is pinned to "
-            f"{PINNED_VALIDATOR_VERSION} (the expected-artifact sets are verified "
-            "against exactly that version)"
-        )
+def ensure_resources() -> Path:
+    if metadata.version("focus-validator") != PINNED_VALIDATOR_VERSION:
+        raise ValueError("install focus-validator==2.2.1 for the reference gate")
     import focus_validator
-
-    return Path(focus_validator.__file__).parent
-
-
-def _ensure_rule_model(pkg_dir: Path, model_version: str) -> None:
-    target = pkg_dir / "rules" / f"model-{model_version}.json"
-    if not target.exists():
-        print(f"fetching rule model {model_version} -> {target}")
-        with urllib.request.urlopen(MODEL_1_3_URL, timeout=60) as resp:
-            target.write_bytes(resp.read())
-    digest = _sha256(target)
-    if digest != MODEL_1_3_SHA256:
-        target.unlink(missing_ok=True)
-        raise SystemExit(
-            f"rule model {model_version} SHA-256 mismatch: got {digest}, expected "
-            f"{MODEL_1_3_SHA256} (source: {MODEL_1_3_URL}); the file was removed — "
-            "verify the release asset before re-running"
-        )
+    pkg = Path(focus_validator.__file__).parent
+    for version, sha in MODEL_HASHES.items():
+        path = pkg / "rules" / f"model-{version}.json"
+        if not path.exists():
+            url = f"https://github.com/FinOps-Open-Cost-and-Usage-Spec/FOCUS_Spec/releases/download/v{version[:3]}/model-{version}.json"
+            with urllib.request.urlopen(url, timeout=60) as response:
+                data = response.read()
+            if digest(data) != sha:
+                raise ValueError(f"downloaded model {version} hash mismatch")
+            path.write_bytes(data)
+        if digest(path.read_bytes()) != sha:
+            raise ValueError(f"installed model {version} hash mismatch")
+    if digest((pkg / "rules/currency_codes.csv").read_bytes()) != CURRENCY_HASH:
+        raise ValueError("currency resource hash mismatch")
+    return pkg.parent
 
 
-def _run_validator(
-    data_file: Path, model_version: str, *, dataset: str, cwd: Path
-) -> set[str]:
-    cmd = [
-        sys.executable, "-m", "focus_validator.main",
-        "--data-file", str(data_file),
-        "--validate-version", model_version,
-        "--applicability-criteria", "ALL",
-        "--block-download",
-    ]
-    if dataset != "CostAndUsage":
-        cmd += ["--focus-dataset", dataset]
-    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
-    failed = {m.group("rule") for m in _FAIL_LINE.finditer(proc.stdout)}
-    if proc.returncode != 0 and not failed:
-        print(proc.stdout[-4000:])
-        print(proc.stderr[-4000:], file=sys.stderr)
-        raise SystemExit(f"focus-validator crashed on {data_file.name}")
-    return failed
+def generated_files():
+    for provider in PROVIDERS:
+        for version in ("1.2", "1.3"):
+            module = get_generator(provider, version)
+            data = module.generate_csv_bytes(ROWS)
+            rows = list(csv.DictReader(io.StringIO(data.decode())))
+            cc_data = module.generate_contract_commitment_csv_bytes(ROWS) if version == "1.3" else None
+            cc = list(csv.DictReader(io.StringIO(cc_data.decode()))) if cc_data else None
+            audit(rows, provider, version, cc)
+            yield f"{provider}_{version}_CostAndUsage", version, "CostAndUsage", data, statistics(rows, provider)
+            if cc_data:
+                yield f"{provider}_{version}_ContractCommitment", version, "ContractCommitment", cc_data, {"rows": len(cc or [])}
 
 
-def main() -> int:
-    pkg_dir = _validator_package_dir()
-    _ensure_rule_model(pkg_dir, RULE_MODEL_VERSIONS["1.3"])
-    site_root = pkg_dir.parent  # the validator reads currency_codes.csv relative to cwd
+def compare(actual: dict, expected: dict) -> None:
+    if actual != expected:
+        raise ValueError("rule inventory/state/violation count or provenance differs from reviewed evidence")
 
-    problems: list[str] = []
-    with tempfile.TemporaryDirectory() as tmp:
-        tmpdir = Path(tmp)
-        runs: list[tuple[str, str, str, Path]] = []
-        for provider in PROVIDERS:
-            for version in ("1.2", "1.3"):
-                module = get_generator(provider, version)
-                cu = tmpdir / f"{provider}_{version}_cost_and_usage.csv"
-                cu.write_bytes(module.generate_csv_bytes(ROWS))
-                runs.append((version, provider, "CostAndUsage", cu))
-                if version == "1.3":
-                    cc = tmpdir / f"{provider}_{version}_contract_commitment.csv"
-                    cc.write_bytes(module.generate_contract_commitment_csv_bytes(ROWS))
-                    runs.append((version, provider, "ContractCommitment", cc))
 
-        assert len(runs) == 9 and {(v, p, d) for v, p, d, _ in runs} == set(EXPECTED_ARTIFACTS)
-        for version, provider, dataset, data_file in runs:
-            label = f"{provider} {version} {dataset}"
-            expected = EXPECTED_ARTIFACTS[(version, provider, dataset)]
-            failed = _run_validator(
-                data_file, RULE_MODEL_VERSIONS[version], dataset=dataset, cwd=site_root
-            )
-            for rule in sorted(failed & expected):
-                print(f"  [known artifact] {label}: {rule} — {ARTIFACT_REASONS[rule]}")
-            unexpected = sorted(failed - expected)
-            stale = sorted(expected - failed)
-            for rule in unexpected:
-                print(f"  [FAIL] {label}: unexpected failure {rule}")
-            for rule in stale:
-                print(f"  [FAIL] {label}: stale allowlist entry {rule} no longer fails — prune it")
-            problems.extend(f"{label}: unexpected {rule}" for rule in unexpected)
-            problems.extend(f"{label}: stale {rule}" for rule in stale)
-            if not unexpected and not stale:
-                print(f"OK {label} ({len(expected)} known artifact(s), exact match)")
+def run_report(path: Path, version: str, dataset: str, cwd: Path) -> tuple[bytes, dict]:
+    cmd = [sys.executable, "-m", "focus_validator.main", "--data-file", str(path.resolve()),
+           "--validate-version", RULE_MODEL_VERSIONS[version], "--focus-dataset", dataset,
+           "--applicability-criteria", "ALL", "--show-violations", "--block-download"]
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, env=env)
+    path.with_suffix(".log").write_bytes(proc.stdout)
+    path.with_suffix(".stderr.log").write_bytes(proc.stderr)
+    if proc.returncode or b"Traceback (most recent call last)" in proc.stderr:
+        raise ValueError(f"official validator exited {proc.returncode}: {proc.stderr.decode('utf-8', errors='replace')[-2000:]}")
+    if proc.stderr:
+        raise ValueError(f"unexpected official stderr; inspect {path.with_suffix('.stderr.log')}")
+    model_path = cwd / "focus_validator/rules" / f"model-{RULE_MODEL_VERSIONS[version]}.json"
+    model = json.loads(model_path.read_text(encoding="utf-8"))
+    return proc.stdout, parse_report(proc.stdout.decode("utf-8"), expected_rules=model_inventory(model, dataset))
 
-    if problems:
-        print(f"\n{len(problems)} gate problem(s):")
-        for item in problems:
-            print(f"  - {item}")
-        return 1
-    print("\nno unexpected validator failures across 9 validation runs")
+
+def failure_evidence(report, model, rows):
+    """Every residual rule must be explained; save a minimal source record and rule."""
+    proofs = {}
+    for key, result in report["rules"].items():
+        if result["status"] != "FAIL":
+            continue
+        if key not in ARTIFACT_REASONS:
+            raise ValueError(f"unexplained official failure: {key}")
+        rule = model["ModelRules"][key]
+        family = key.removeprefix("CAU-")
+        candidates = list(enumerate(rows, 1))
+        if family.startswith("EffectiveCost-"):
+            candidates = [(i, r) for i, r in candidates if r["ChargeCategory"] == "Purchase" and not r["CommitmentDiscountId"]]
+        elif family.startswith("ContractApplied"):
+            candidates = [(i, r) for i, r in candidates if r.get("ContractApplied")]
+            if any(part in family for part in ("O-042-", "O-043-", "O-065-")):
+                candidates = [(i, r) for i, r in candidates if "ContractCommitmentAppliedQuantity" in r["ContractApplied"]]
+            elif any(part in family for part in ("O-051-", "O-052-", "O-060-", "O-061-")):
+                candidates = [(i, r) for i, r in candidates if "ContractCommitmentAppliedQuantity" not in r["ContractApplied"]]
+            elif "O-039-" in family:
+                candidates = [(i, r) for i, r in candidates if any(e["ContractCommitmentId"] != r["ResourceId"] for e in json.loads(r["ContractApplied"])["Elements"])]
+        elif family.startswith("CommitmentDiscountStatus"):
+            candidates = [(i, r) for i, r in candidates if not r["CommitmentDiscountId"]]
+        elif family.startswith(("ResourceType", "PricingCurrencyContractedUnitPrice")):
+            candidates = [(i, r) for i, r in candidates if not r["ResourceId"]]
+        assert candidates, key
+        i, example = candidates[0]
+        # Composite violations count failed expressions, not bad data rows.
+        composite = rule["Function"] == "Composite" or family in ("InvoiceId-C-004-C", "ContractAppliedObject-O-007-M")
+        if not composite and len(candidates) != result["violations"]:
+            raise ValueError(f"{key}: independent population {len(candidates)} != reported {result['violations']}")
+        proofs[key] = {"explanation": ARTIFACT_REASONS[key], "model_rule": rule,
+                       "kind": "composite" if composite else "row_population",
+                       "independent_population": len(candidates), "source_record": i, "example": example}
+    return proofs
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--record", type=Path, help="new candidate directory (must not exist)")
+    modes.add_argument("--check-existing", action="store_true", help="verify archived evidence offline")
+    args = parser.parse_args(argv)
+    baseline = None if args.record else json.loads((EVIDENCE / "baseline.json").read_text(encoding="utf-8"))
+    sources = source_manifest()
+    files = list(generated_files())
+    resource_pin = {"validator": PINNED_VALIDATOR_VERSION, "models": MODEL_HASHES,
+                    "currency_sha256": CURRENCY_HASH, "applicability": "ALL"}
+    parameters = {"rows": ROWS, "seeds": {"1.2": 1202, "1.3": 1302}, "include_credits": False}
+    if baseline:
+        if sources != baseline["sources"]:
+            changed = sorted(k for k in sources.keys() | baseline["sources"].keys()
+                             if sources.get(k) != baseline["sources"].get(k))
+            raise ValueError("generation source provenance differs; review a fresh candidate: " + ", ".join(changed))
+        compare(resource_pin, baseline["resources"])
+        compare(parameters, baseline["parameters"])
+        if set(baseline["runs"]) != {name for name, *_ in files}:
+            raise ValueError("missing or extra dataset run")
+    if args.check_existing:
+        for name, version, dataset, data, stats in files:
+            expected = baseline["runs"][name]
+            compare({"data_sha256": digest(data), "statistics": stats},
+                    {k: expected[k] for k in ("data_sha256", "statistics")})
+            raw = (EVIDENCE / f"{name}.log").read_bytes()
+            if (EVIDENCE / f"{name}.stderr.log").read_bytes():
+                raise ValueError(f"{name}: archived stderr must be empty")
+            if digest(raw) != expected["report_sha256"]:
+                raise ValueError(f"{name}: archived report hash mismatch")
+            compare(parse_report(raw.decode("utf-8")), expected["report"])
+            model = {"ModelRules": {k: v["model_rule"] for k, v in expected["failure_evidence"].items()}}
+            compare(failure_evidence(expected["report"], model, list(csv.DictReader(io.StringIO(data.decode())))), expected["failure_evidence"])
+        print("Verified 9 archived reports, complete rules and provenance")
+        return 0
+    cwd = ensure_resources()
+    if args.record:
+        destination = args.record.resolve()
+        if destination == EVIDENCE.resolve() or EVIDENCE.resolve() in destination.parents:
+            raise ValueError("record candidates outside committed evidence")
+        destination.mkdir(parents=True, exist_ok=False)
+    else:
+        destination = Path(tempfile.mkdtemp(prefix="focus-official-"))
+    print(f"Reports: {destination} (retained on failure)", flush=True)
+    result = {"sources": sources, "resources": resource_pin, "parameters": parameters, "runs": {}}
+    for name, version, dataset, data, stats in files:
+        path = destination / f"{name}.csv"
+        path.write_bytes(data)
+        raw, report = run_report(path, version, dataset, cwd)
+        (destination / f"{name}.log").write_bytes(raw)
+        model = json.loads((cwd / "focus_validator/rules" / f"model-{RULE_MODEL_VERSIONS[version]}.json").read_text(encoding="utf-8"))
+        proofs = failure_evidence(report, model, list(csv.DictReader(io.StringIO(data.decode()))))
+        entry = {"data_sha256": digest(data), "report_sha256": digest(raw), "statistics": stats, "report": report, "failure_evidence": proofs}
+        result["runs"][name] = entry
+        if baseline:
+            # Raw logs can contain machine-specific paths/timing; semantic inventory is exact.
+            compare({k: entry[k] for k in ("data_sha256", "statistics", "report", "failure_evidence")},
+                    {k: baseline["runs"][name][k] for k in ("data_sha256", "statistics", "report", "failure_evidence")})
+        print(f"{name}: PASS={report['passed']} FAIL={report['failed']} SKIPPED={report['skipped']}", flush=True)
+    (destination / "baseline.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if baseline:
+        # This directory was created by mkdtemp in this invocation, never supplied
+        # by the caller. Preserve failed comparisons; remove only successful runs.
+        shutil.rmtree(destination)
+        print("All 9 reports match; temporary comparison files removed.")
+    else:
+        print(f"Complete candidate reports: {destination}")
+    print("Known FAIL/SKIPPED are not conformance passes.")
     return 0
 
 

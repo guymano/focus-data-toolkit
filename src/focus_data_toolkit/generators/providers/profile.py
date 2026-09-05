@@ -51,7 +51,7 @@ class RowContext:
 class ResourceRef:
     """Everything a provider's ``resource_id`` callable might need.
 
-    Each provider reads only the fields it uses (AWS: region + billing account; Azure:
+    Each provider reads only the fields it uses (AWS: region + owning subaccount; Azure:
     subscription id + name; GCP: project id), so the callable signature stays uniform and
     the callables never draw from the RNG.
     """
@@ -107,7 +107,7 @@ class ProviderProfile:
     sub_accounts: tuple[tuple[str, str], ...]
     resource_id: Callable[[ResourceRef], str]  # pure, never draws
     resource_name: Callable[[random.Random, ServiceSpec], str]  # usage/purchase resource name
-    committed_resource_name: Callable[[random.Random, ServiceSpec, int], str]  # committed-usage (index k)
+    # Legacy draw hooks preserve the seeded stream; final IDs use canonical offers.
     sku_id: Callable[[random.Random, ServiceSpec], str]
     sku_price_id: Callable[[random.Random], str]
     allocated_resource_id: Callable[[random.Random, str, RowContext, str], str]  # (rng, region_id, ctx, workload)

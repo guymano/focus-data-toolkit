@@ -18,7 +18,9 @@ include tools/extract_focus_1_4_model.py
 recursive-include scripts *.py
 recursive-include schema *.json
 recursive-include docs *.md
+include docs/generator-statistics.json
 recursive-include tests *.py *.csv *.json *.md
+recursive-include tests/fixtures/official/generator_validation *.log
 
 global-exclude *.py[cod]
 global-exclude __pycache__

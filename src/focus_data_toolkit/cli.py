@@ -132,17 +132,30 @@ def _stderr_progress():
 
 def _cmd_generate(args: argparse.Namespace) -> int:
     module = get_generator(args.provider, args.focus_version)
+    from focus_data_toolkit.generators.engine.serialize import generate_bundle_csv_bytes
+
+    # Built-in profiles share a single registry for the two output files. Registered
+    # third-party generators retain their historical module API.
+    if hasattr(module, "PROFILE") and hasattr(module, "ADAPTER"):
+        cau_bytes, cc_bytes = generate_bundle_csv_bytes(
+            args.rows, args.seed, profile=module.PROFILE, adapter=module.ADAPTER
+        )
+    else:
+        cau_bytes = module.generate_csv_bytes(args.rows, args.seed)
+        cc_bytes = (module.generate_contract_commitment_csv_bytes(args.rows, args.seed)
+                    if args.focus_version == "1.3" else None)
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     suffix = args.focus_version.replace(".", "_")
 
     cau = out_dir / f"focus_{suffix}_cost_and_usage_{args.provider}.csv"
-    cau.write_bytes(module.generate_csv_bytes(args.rows, args.seed))
+    cau.write_bytes(cau_bytes)
     print(f"wrote {cau} ({args.rows} rows, seed {args.seed})")
 
     if args.focus_version == "1.3":
         cc = out_dir / f"focus_{suffix}_contract_commitment_{args.provider}.csv"
-        cc.write_bytes(module.generate_contract_commitment_csv_bytes(args.rows, args.seed))
+        assert cc_bytes is not None
+        cc.write_bytes(cc_bytes)
         print(f"wrote {cc}")
     return 0
 
@@ -883,7 +896,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="declare a FOCUS applicability condition the source supports (repeatable)",
     )
     val.add_argument(
-        "--official", action="store_true", help="run the official FinOps focus-validator instead"
+        "--official", action="store_true", help="run the official FinOps focus-validator; "
+        "console output shown after completion (tested with 2.2.1)"
     )
     val.add_argument(
         "--focus-version", help="rule-model version for --official (e.g. 1.2.0.1)"

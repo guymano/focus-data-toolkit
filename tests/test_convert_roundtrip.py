@@ -78,7 +78,7 @@ def test_invoice_detail_reconciles_with_cost_and_usage(source_tables):
             and r.get("ChargeCategory") == detail["ChargeCategory"]
         ]
         expected = sum(Decimal(r["BilledCost"] or "0") for r in members)
-        assert Decimal(detail["BilledCost"]) == expected.quantize(Decimal("0.000001"))
+        assert Decimal(detail["BilledCost"]) == expected
 
 
 def test_cau_rows_backlink_to_invoice_details_in_synthetic(source_tables):

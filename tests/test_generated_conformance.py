@@ -3,9 +3,11 @@
 Ports the upstream FOCUS-Sample-Data checker catalogue (24 assertions per provider for
 1.2, 36-37 for 1.3 — ``generators/check_focus_1_2_samples.py`` /
 ``check_focus_1_3_samples.py`` in that repository) onto this toolkit's generator
-output. Every check runs against both a freshly generated table (the shared
-``source_tables`` fixture) and the committed golden fixtures, so the committed bytes
-are proven conformant, not just reproducible. Upstream check numbers appear as
+output. Checks run against fresh 1000-row tables and committed 100-row golden
+fixtures, so the committed bytes
+are checked against these invariants as well as byte reproducibility. This does
+not prove full conformance; residual official failures are documented separately.
+Upstream check numbers appear as
 ``[U-n]`` comments (1.3 numbering) for future syncs; byte reproducibility ([U-1],
 [U-29]) is covered by ``tests/test_generator_golden.py`` and column counts ([U-2],
 [U-30]) by ``tests/test_generators.py``.
@@ -29,8 +31,9 @@ from focus_data_toolkit.generators import PROVIDERS, get_generator
 
 GOLDEN = Path(__file__).parent / "fixtures" / "golden" / "compatibility_golden"
 
-# Same grid as the conftest `source_tables` fixture, for the credits variant.
-_ROWS = 100
+# Conformance coverage grid for both generated variants; golden fixtures remain
+# 100 rows. Other test modules keep the smaller shared conftest grid.
+_ROWS = 1000
 _SEEDS = {"1.2": 1202, "1.3": 1302}
 
 D = Decimal
@@ -46,14 +49,19 @@ def _golden_rows(name: str) -> list[dict[str, str]]:
 
 
 @pytest.fixture(scope="session")
-def conformance_tables(source_tables):
+def conformance_tables():
     """{(source, provider, version): (cau, cc_or_None)} over generated, golden and
     credits-enabled data — every check runs against all three, so the Credit rows
     (absent from the default fixture and the rows100 goldens) are exercised too."""
     tables = {}
     for provider in PROVIDERS:
         for version in ("1.2", "1.3"):
-            tables[("generated", provider, version)] = source_tables[(provider, version)]
+            module = get_generator(provider, version)
+            tables[("generated", provider, version)] = (
+                module.generate_rows(_ROWS, _SEEDS[version]),
+                module.generate_contract_commitment_rows(_ROWS, _SEEDS[version])
+                if version == "1.3" else None,
+            )
             tag = version.replace(".", "_")
             cau = _golden_rows(f"{provider}_{tag}_cost_and_usage_rows100_seed42.csv")
             cc = (
@@ -77,7 +85,7 @@ def conformance_tables(source_tables):
                     csv.DictReader(
                         io.StringIO(
                             module.generate_contract_commitment_csv_bytes(
-                                _ROWS, _SEEDS[version]
+                                _ROWS, _SEEDS[version], include_credits=True
                             ).decode("utf-8")
                         )
                     )
@@ -364,8 +372,8 @@ def test_pricing_currency_on_tax_and_credit(conformance_tables, source, provider
     rows = [r for r in cau if r["ChargeCategory"] in ("Tax", "Credit")]
     assert rows, "expected Tax rows"
     for r in rows:
-        assert r["PricingCurrency"] == "USD"
-        assert D(r["PricingCurrencyEffectiveCost"]) == D(r["EffectiveCost"])
+        fx = D("0.92") if r["PricingCurrency"] == "EUR" else D("1")
+        assert D(r["PricingCurrencyEffectiveCost"]) == D(r["EffectiveCost"]) * fx
 
 
 # --------------------------------------------------------------------------- #
@@ -512,7 +520,8 @@ def test_cross_file_contract_applied_integrity(conformance_tables, source, provi
     assert referenced <= cc_ids  # [U-34]
     non_discount = cc_ids - discount_ids
     assert non_discount  # [U-35]
-    assert non_discount <= referenced  # [U-36]
+    # U-36 population coverage has its own test below; every fixture still runs
+    # all referential checks here, including the smaller golden tables.
     contracts: dict[str, set[str]] = defaultdict(set)
     for r in cc:
         contracts[r["ContractId"]].add(r["ContractCommitmentId"])
@@ -527,11 +536,10 @@ def test_applied_metrics_match_the_commitment_category_and_unit(
     # carries a quantity in exactly the commitment's own ContractCommitmentUnit
     # (applying GB-Months or Requests to an Hours commitment would make its progress
     # unmeasurable), and an element applied to a Spend-category commitment carries a
-    # cost. Every Usage commitment must actually receive such applications.
+    # cost. Population coverage is checked separately below.
     cau, cc = conformance_tables[(source, provider, "1.3")]
     assert cc
     commitments = {r["ContractCommitmentId"]: r for r in cc}
-    usage_applied: set[str] = set()
     for r in cau:
         if not r["ContractApplied"]:
             continue
@@ -543,12 +551,22 @@ def test_applied_metrics_match_the_commitment_category_and_unit(
                     element.contract_commitment_id,
                     element.applied_unit,
                 )
-                usage_applied.add(element.contract_commitment_id)
             else:
                 assert element.applied_cost is not None
-    assert usage_applied >= {
-        r["ContractCommitmentId"] for r in cc if r["ContractCommitmentCategory"] == "Usage"
-    }
+
+
+@matrix_1_3
+def test_all_contract_terms_are_exercised_at_reference_size(conformance_tables, source, provider):
+    cau, cc = conformance_tables[(source, provider, "1.3")]
+    if len(cau) < _ROWS:
+        pytest.skip("100-row goldens verify links and metrics but do not guarantee all negotiated terms")
+    assert cc
+    referenced = {element.contract_commitment_id for row in cau if row["ContractApplied"]
+                  for element in parse_contract_applied(row["ContractApplied"], version="1.3").elements}
+    discount_ids = {r["CommitmentDiscountId"] for r in cau if r["CommitmentDiscountId"]}
+    non_discount = {r["ContractCommitmentId"] for r in cc} - discount_ids
+    assert non_discount <= referenced  # U-36, with and without credits
+    assert {r["ContractCommitmentId"] for r in cc if r["ContractCommitmentCategory"] == "Usage"} <= referenced
 
 
 # --------------------------------------------------------------------------- #

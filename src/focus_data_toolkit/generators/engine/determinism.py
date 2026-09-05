@@ -7,10 +7,13 @@ the billing window live in exactly one place so they can never drift between pro
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
+
+from focus_data_toolkit.model.focus_json_keys import SKU_PRICE_DETAILS_KEYS
 
 # --------------------------------------------------------------------------- #
 # Billing window (fixed timestamps -> no clock -> byte-reproducible)
@@ -42,21 +45,9 @@ OWNERS = ("team-platform", "team-data", "team-payments")
 
 PRICING_CATEGORIES: tuple[str, ...] = ("Standard", "Dynamic", "Committed", "Other")
 # FOCUS-defined SkuPriceDetails property keys (others MUST be x_-prefixed).
-FOCUS_SKU_PRICE_KEYS: frozenset[str] = frozenset(
-    {
-        "CoreCount",
-        "MemorySize",
-        "InstanceType",
-        "InstanceSeries",
-        "OperatingSystem",
-        "DiskType",
-        "DiskSpace",
-        "DiskMaxIops",
-        "GpuCount",
-        "NetworkMaxIops",
-        "NetworkMaxThroughput",
-    }
-)
+
+FOCUS_SKU_PRICE_KEYS = SKU_PRICE_DETAILS_KEYS
+FLEET_SIZE = Decimal("500")
 
 HEX_LOWER = "0123456789abcdef"
 HEX_UPPER = "0123456789ABCDEF"
@@ -113,11 +104,6 @@ def sku_price_details(spec_sku_details: dict[str, object]) -> str:
     return json.dumps(spec_sku_details, separators=(",", ":"))
 
 
-def contract_id_for(commit_id: str) -> str:
-    """Deterministic parent ContractId for a commitment id (shared by both 1.3 datasets)."""
-    return f"CONTRACT-{commit_id.rsplit('/', 1)[-1][:12]}"
-
-
 # Negotiated contract terms that are NOT commitment discounts (minimum spend, negotiated
 # rate card, usage commitment). They live in the Contract Commitment dataset and are
 # reachable from Cost and Usage exclusively through ``ContractApplied`` — never via
@@ -156,4 +142,32 @@ def set_currency(
     fx = EUR_PER_USD
     row["PricingCurrencyListUnitPrice"] = s(q(list_unit * fx, PRICE_Q))
     row["PricingCurrencyContractedUnitPrice"] = s(q(contracted_unit * fx, PRICE_Q))
-    row["PricingCurrencyEffectiveCost"] = s(q(effective_cost * fx, COST_Q))
+    row["PricingCurrencyEffectiveCost"] = s(exact_cost(effective_cost, fx))
+
+
+def stable_id(prefix: str, values: object) -> str:
+    """Stable identity independent of Python hash randomization and dictionary order."""
+    payload = json.dumps(values, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return prefix + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+
+
+def set_sku_ids(row: dict[str, str]) -> None:
+    """Identify the offer, then its list price; negotiated terms do not change a SKU."""
+    if not row.get("SkuPriceDetails"):
+        raise ValueError("SKU identity requires a populated SkuPriceDetails JSON object")
+    details = json.loads(row["SkuPriceDetails"])
+    if not isinstance(details, dict):
+        raise ValueError("SKU identity requires a SkuPriceDetails JSON object")
+    for key in details:
+        if key.startswith("x_") and key[2:] in FOCUS_SKU_PRICE_KEYS:
+            raise ValueError(f"Use FOCUS property {key[2:]}")
+        if not key.startswith("x_") and key not in FOCUS_SKU_PRICE_KEYS:
+            raise ValueError(f"Custom SKU property requires x_ prefix: {key}")
+    row["SkuId"] = stable_id("SKU-", [row[k] for k in (
+        "ProviderName", "ServiceName", "SkuMeter", "RegionId", "PricingUnit",
+    )] + [details])
+    row["SkuPriceId"] = stable_id("SPRICE-", [row[k] for k in (
+        "SkuId", "BillingCurrency", "PricingCurrency",
+    )] + [format(Decimal(row[k]).normalize(), "f") for k in (
+        "ListUnitPrice", "PricingCurrencyListUnitPrice",
+    )])

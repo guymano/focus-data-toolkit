@@ -59,8 +59,8 @@ def test_credit_path_reachable(provider, version):
 @pytest.mark.parametrize("provider", PROVIDERS)
 def test_contract_commitment_join_key(provider):
     module = get_generator(provider, "1.3")
-    cu = _rows(module.generate_csv_bytes(150, 11))
-    cc = _rows(module.generate_contract_commitment_csv_bytes(150, 11))
+    cu = _rows(module.generate_csv_bytes(1000, 11))
+    cc = _rows(module.generate_contract_commitment_csv_bytes(1000, 11))
     purchase_ids = {r["CommitmentDiscountId"] for r in cu if r["ChargeCategory"] == "Purchase" and r["CommitmentDiscountId"]}
     commitment_ids = {r["ContractCommitmentId"] for r in cc}
     assert purchase_ids, "expected at least one commitment discount"

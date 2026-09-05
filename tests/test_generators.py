@@ -40,7 +40,9 @@ def test_generated_contract_applied_is_conformant_1_3(source_tables, provider):
         if not value:
             continue
         parse_contract_applied(value, version="1.3")  # raises if non-conformant
-        assert '"ContractCommitmentAppliedCost":' in value  # spec key name
+        assert ('"ContractCommitmentAppliedCost":' in value or
+                '"ContractCommitmentAppliedQuantity":' in value)
+        assert ":null" not in value  # inapplicable properties are absent
         assert '"AppliedCost"' not in value  # not the short/legacy name
         seen += 1
     assert seen, f"{provider}: expected some ContractApplied rows"

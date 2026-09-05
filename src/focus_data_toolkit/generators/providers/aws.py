@@ -31,7 +31,7 @@ _SERVICES: tuple[ServiceSpec, ...] = (
         "Storage", "GB-Months", "S3 Standard storage", Decimal("0.023"),
         Decimal("50"), Decimal("8000"), "bucket-", "monthly", False, False,
         id_fields={"arn_kind": "bucket"},
-        sku_details={"StorageClass": "Standard", "Redundancy": "LRS"},
+        sku_details={"StorageClass": "Standard", "Redundancy": "Zonal"},
     ),
     ServiceSpec(
         "AmazonRDS", "Databases", "Relational Databases", "RDS Instance",
@@ -101,19 +101,17 @@ _SUB_ACCOUNTS: tuple[tuple[str, str], ...] = (
 
 
 def _resource_id(ref: ResourceRef) -> str:
-    svc = ref.spec.name[6:].lower() or "svc"
+    svc = {"AmazonEC2": "ec2", "AmazonS3": "s3", "AmazonRDS": "rds",
+           "AWSLambda": "lambda", "AmazonVPC": "ec2", "AmazonCloudWatch": "cloudwatch",
+           "AmazonDynamoDB": "dynamodb", "AWSGlue": "glue"}[ref.spec.name]
     return (
-        f"arn:aws:{svc}:{ref.region_id}:{ref.billing_id}:"
+        f"arn:aws:{svc}:{ref.region_id}:{ref.sub_id}:"
         f"{ref.spec.id_fields['arn_kind']}/{ref.resource_name}"
     )
 
 
 def _resource_name(rng: random.Random, spec: ServiceSpec) -> str:
     return f"{spec.name_prefix}{hexid(rng, 12)}"
-
-
-def _committed_resource_name(rng: random.Random, spec: ServiceSpec, k: int) -> str:
-    return f"{spec.name_prefix}{k:04d}{hexid(rng, 8)}"
 
 
 def _sku_id(rng: random.Random, spec: ServiceSpec) -> str:
@@ -125,7 +123,7 @@ def _sku_price_id(rng: random.Random) -> str:
 
 
 def _allocated_resource_id(rng: random.Random, region_id: str, ctx: RowContext, workload: str) -> str:
-    return f"arn:aws:eks:{region_id}:{ctx.billing_id}:workload/{workload}-{hexid(rng, 6)}"
+    return f"arn:aws:eks:{region_id}:{ctx.sub_id}:workload/{workload}-{hexid(rng, 6)}"
 
 
 def _commit_id(rng: random.Random, region_id: str, sub_id: str, spend_based: bool) -> str:
@@ -166,7 +164,6 @@ AWS = ProviderProfile(
     sub_accounts=_SUB_ACCOUNTS,
     resource_id=_resource_id,
     resource_name=_resource_name,
-    committed_resource_name=_committed_resource_name,
     sku_id=_sku_id,
     sku_price_id=_sku_price_id,
     allocated_resource_id=_allocated_resource_id,

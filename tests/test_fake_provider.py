@@ -57,7 +57,6 @@ FAKE = ProviderProfile(
     sub_accounts=(("900000000011", "fake-prod"),),
     resource_id=lambda ref: f"fake://{ref.sub_id}/{ref.spec.id_fields['kind']}/{ref.resource_name}",
     resource_name=lambda rng, spec: f"{spec.name_prefix}{hexid(rng, 8)}",
-    committed_resource_name=lambda rng, spec, k: f"{spec.name_prefix}{k:04d}{hexid(rng, 6)}",
     sku_id=lambda rng, spec: f"FSKU-{hexid(rng, 6)}",
     sku_price_id=lambda rng: f"FSP-{hexid(rng, 8)}",
     allocated_resource_id=lambda rng, region_id, ctx, workload: f"fake://{ctx.sub_id}/wl/{workload}-{hexid(rng, 6)}",

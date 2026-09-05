@@ -25,3 +25,6 @@
 *.gz       binary
 *.zip       binary
 *.png       binary
+
+# Official report hashes cover the original bytes, including platform line endings.
+tests/fixtures/official/generator_validation/*.log -text -diff
