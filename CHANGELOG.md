@@ -26,7 +26,8 @@ policy.
   - `ListCost` and `ContractedCost` equal unit price × `PricingQuantity` when both are
     present, Correction rows included (C-011). The relative tolerance is the official
     focus-validator's (1e-9 × max(|cost|, 1)), and the arithmetic is exact whatever the
-    caller's Decimal context; amounts too extreme to compute are reported as a violation;
+    caller's Decimal context. An operand whose exponent lies beyond ±1000 is reported as
+    not computable instead of being computed;
   - a unit is null exactly when its quantity is (`PricingUnit`, `ConsumedUnit`,
     `CommitmentDiscountUnit`, C-005/C-006);
   - `ListUnitPrice` and `ContractedUnitPrice` are present when `SkuPriceId` is set
@@ -40,8 +41,13 @@ policy.
   Other static rules of the model are not checked. These include the pricing-currency
   unit prices' C-012, whose presence is not visible on a row and whose model condition
   for `PricingCurrencyContractedUnitPrice` contradicts its text.
-  **Upgrade note:** expect refusals for provider costs rounded to the cent (exact
-  identity), and for 1.2 Correction rows, which 1.2 exempted from the identity.
+  **Upgrade note:** expect refusals for:
+  - provider costs rounded to the cent (exact identity), and 1.2 Correction rows, which
+    1.2 exempted from the identity;
+  - Credit rows whose `EffectiveCost` differs from `BilledCost` (C-017), and Tax rows
+    that the converter does not migrate to `BilledCost`;
+  - rows with a `SkuPriceId` but a null `ListUnitPrice` or `ContractedUnitPrice` in a
+    column the source carries (C-013/C-015).
 - The client-like test fixture violated the cost identity by a factor of 1000; its
   quantities are corrected. Its Tax row no longer carries a pricing quantity, and its
   pricing-currency effective cost now matches its effective cost.

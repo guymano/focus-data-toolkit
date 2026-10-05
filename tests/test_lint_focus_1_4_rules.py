@@ -6,12 +6,13 @@ rule, independent of the converter and the generators.
 
 from __future__ import annotations
 
-from decimal import Decimal, localcontext
+import csv
+from decimal import Decimal, Inexact, localcontext
 from pathlib import Path
 
 import pytest
 
-from focus_data_toolkit.convert import convert_to_focus_1_4, read_csv_rows
+from focus_data_toolkit.convert import convert_files, convert_to_focus_1_4, read_csv_rows
 from focus_data_toolkit.model.capabilities import CapabilityProfile
 from focus_data_toolkit.model.validator import (
     COND_UNIT_PRICING,
@@ -89,20 +90,66 @@ def test_cost_identity_tolerance_boundary_is_inclusive():
     assert rule in _rules({**base, "ListCost": "0.3000000010000000001"})
 
 
+# A product that a 4-digit context rounds (0.370370367 -> 0.3704), and a cost just off it.
+EXACT_MATCH = {"PricingQuantity": "3", "ListUnitPrice": "0.123456789", "ListCost": "0.370370367"}
+REAL_DIFFERENCE = {"PricingQuantity": "3", "ListUnitPrice": "0.1", "ListCost": "0.30001"}
+
+
 def test_cost_identity_does_not_depend_on_the_callers_decimal_context():
     rule = ("cost_not_unit_price_times_quantity", "ListCost")
-    row = {"PricingQuantity": "3", "ListUnitPrice": "0.1", "ListCost": "0.30001"}
     with localcontext() as ctx:
-        ctx.prec = 4  # would round the product and the difference away
-        assert rule in _rules(row)
+        ctx.prec = 4
+        # Rounding the product would hide a real difference...
+        assert rule in _rules(REAL_DIFFERENCE)
+        # ...and invent one where the identity holds exactly.
+        assert rule not in _rules(EXACT_MATCH)
 
 
-def test_extreme_amounts_yield_a_violation_not_an_exception():
-    huge_cost = {"PricingQuantity": "3", "ListUnitPrice": "0.1", "ListCost": "9E999999999"}
-    assert ("cost_not_unit_price_times_quantity", "ListCost") in _rules(huge_cost)
-    beyond_exponent_range = {"PricingQuantity": "1E999999999999999999",
-                             "ListUnitPrice": "1E999999999999999999", "ListCost": "1"}
-    assert ("cost_identity_not_computable", "ListCost") in _rules(beyond_exponent_range)
+def test_cost_identity_ignores_a_caller_context_that_traps_inexact():
+    rule = ("cost_not_unit_price_times_quantity", "ListCost")
+    with localcontext() as ctx:
+        ctx.prec = 4
+        ctx.traps[Inexact] = True
+        assert rule in _rules(REAL_DIFFERENCE)
+        assert rule not in _rules(EXACT_MATCH)
+
+
+@pytest.mark.parametrize(
+    "extreme",
+    [
+        {"ListCost": "9E999999999"},
+        {"PricingQuantity": "1E-999999999999999999"},
+        {"PricingQuantity": "1E999999999999999999", "ListUnitPrice": "1E999999999999999999"},
+        {"ListUnitPrice": "0E-999999999"},
+        {"ListCost": "1E1001"},
+    ],
+)
+def test_extreme_exponents_are_not_computable_and_never_computed(extreme):
+    # Exact arithmetic on such operands could need billions of digits (a MemoryError): they
+    # are reported as not computable before any arithmetic.
+    row = {"PricingQuantity": "3", "ListUnitPrice": "0.1", "ListCost": "0.3", **extreme}
+    flagged = _rules(row)
+    assert ("cost_identity_not_computable", "ListCost") in flagged
+    assert ("cost_not_unit_price_times_quantity", "ListCost") not in flagged
+
+
+def test_large_but_bounded_exponents_are_still_computed_exactly():
+    rule = ("cost_not_unit_price_times_quantity", "ListCost")
+    # The lint's numeric format writes exponents without a "+" sign.
+    base = {"PricingQuantity": "1E500", "ListUnitPrice": "1E500"}
+    exact = _rules({**base, "ListCost": "1E1000"})
+    assert rule not in exact
+    assert ("cost_identity_not_computable", "ListCost") not in exact
+    assert rule in _rules({**base, "ListCost": "2E1000"})
+
+
+def test_an_extreme_amount_does_not_stop_the_conversion(source_tables):
+    cau, _ = source_tables[("aws", "1.2")]
+    usage = next(r for r in cau if r["ChargeCategory"] == "Usage" and r["PricingQuantity"])
+    row = dict(usage, PricingQuantity="1E-999999999999999999")
+    for mode in ("strict", "synthetic"):
+        report = convert_to_focus_1_4([row], mode=mode).reports[CU]
+        assert "cost_identity_not_computable" in {v.rule for v in report.violations}
 
 
 # --------------------------------------------------------------------------- #
@@ -171,6 +218,30 @@ def test_converter_tells_the_linter_which_columns_its_source_lacked(source_table
     }
     accepted = convert_to_focus_1_4([without_column], mode="strict").reports[CU]
     assert "required_with_sku_price_id" not in {v.rule for v in accepted.violations}
+
+
+def _write(path: Path, rows: list[dict[str, str]]) -> Path:
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    return path
+
+
+def test_streaming_tells_the_linter_which_columns_its_source_lacked(tmp_path, source_tables):
+    # Same plumbing as the eager pipeline: a source without ContractedUnitPrice publishes,
+    # while one carrying the column with a null value next to a SkuPriceId is refused.
+    cau, _ = source_tables[("aws", "1.2")]
+    without_column = [{k: v for k, v in r.items() if k != "ContractedUnitPrice"} for r in cau]
+    convert_files(_write(tmp_path / "without.csv", without_column), tmp_path / "out1",
+                  mode="strict")
+    assert (tmp_path / "out1" / "focus_1_4_manifest.json").exists()
+    with_null = [dict(r) for r in cau]
+    target = next(r for r in with_null if r["ChargeCategory"] == "Usage" and r["SkuPriceId"])
+    target["ContractedUnitPrice"] = ""
+    with pytest.raises(Exception, match="lint"):
+        convert_files(_write(tmp_path / "with.csv", with_null), tmp_path / "out2", mode="strict")
+    assert not (tmp_path / "out2" / "focus_1_4_manifest.json").exists()
 
 
 def test_client_like_fixture_lints_clean_under_unit_pricing():

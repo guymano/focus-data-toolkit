@@ -106,9 +106,20 @@ _UNIT_OF_QUANTITY: tuple[tuple[str, str], ...] = (
 # difference of up to 1e-9 x |cost| (about 1.2 on a cost of 1.2e9), exactly as that validator.
 _PRODUCT_TOLERANCE = Decimal("1e-9")
 # The identity is computed exactly and independently of the caller's Decimal context: a
-# narrower context would round the product (accepting real differences), and an extreme
-# exponent must surface as a violation, never as an exception.
+# narrower context would round the product (accepting real differences). Exact arithmetic is
+# only bounded when the operands are: an exponent beyond +/-_MAX_EXPONENT is not money and
+# could need billions of digits, so it is reported as not computable, never computed.
 _EXACT = Context(prec=MAX_PREC, Emax=MAX_EMAX, Emin=MIN_EMIN)
+_MAX_EXPONENT = 1000
+
+
+def _exactly_computable(*values: Decimal) -> bool:
+    """Whether exact arithmetic on ``values`` stays small (every exponent within the bound)."""
+    for value in values:
+        exponent = value.as_tuple().exponent  # a str for NaN and Infinity
+        if not isinstance(exponent, int) or max(abs(exponent), abs(value.adjusted())) > _MAX_EXPONENT:
+            return False
+    return True
 
 _DATASET_ALIASES = {
     "cost and usage": "Cost and Usage", "costandusage": "Cost and Usage", "cau": "Cost and Usage",
@@ -414,6 +425,11 @@ def _cost_and_usage(
                                     ("ContractedCost", "ContractedUnitPrice")):
             price, cost = amount(price_col), amount(cost_col)
             if price is None or cost is None:
+                continue
+            if not _exactly_computable(price, quantity, cost):
+                out.append((cost_col, "cost_identity_not_computable",
+                            f"{price_col} x PricingQuantity cannot be computed exactly "
+                            f"(an exponent lies beyond +/-{_MAX_EXPONENT})"))
                 continue
             try:
                 difference = _EXACT.abs(_EXACT.subtract(_EXACT.multiply(price, quantity), cost))
