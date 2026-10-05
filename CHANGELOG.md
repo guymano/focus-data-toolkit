@@ -11,29 +11,46 @@ policy.
 
 ### Added
 
-### Fixed
-
-- `ContractCommitmentDurationType` is derived only when the commitment period spans a whole
-  number of calendar months (day clamped at month end). It is no longer rounded from
-  `days / 30.44`, which turned any span into a plausible-looking term. Other spans are left
-  empty (`FDT-CC-001`, now in the code catalogue) for a supplement to fill. The generated
-  samples' 12-month periods are unchanged.
-- The `aws-savings-plans` adapter (now v2) is keyed by `savingsPlanArn`, the fully
-  qualified identifier FOCUS recommends and the one Contract Commitment and
-  `CommitmentDiscountId` carry. v1 keyed by the bare `savingsPlanId`, so its rows could
-  never join. Exports without `savingsPlanArn` are no longer auto-detected. The adapter
-  also maps `termDurationInSeconds` (1 and 3 years) to the duration.
-
-### - The supplement API and the documented failures are now public, re-exported from the
-
+- The supplement API and the documented failures are now public, re-exported from the
   package root: `SupplementBundle`, `SupplementFileSpec`, `load_bundle_dir`,
   `compute_gaps`, `GapReport`, `Mode`, `ConversionError`, `SupplementError` and
   `AtomicWriteError`. Library callers no longer import internal modules, which
   docs/versioning.md leaves free to change. Existing import paths keep working.
+- `ContractCommitmentDurationType` is a `contract_commitment` supplement column. A
+  supplied term wins over the derived value. It must follow the v1.4 Expected Format, a
+  positive whole number and a listed unit (`1 Year`, `3 Years`, `36 Months`); anything
+  else is refused (`FDT-SUPP-004`), and the lint applies the same rule to output.
+- `fdt gaps` reports `ContractCommitmentDurationType` as a conditional advisory: it is
+  derived only for periods spanning whole calendar months, so the other terms must be
+  supplied. Without a commitment period in the source it is a blocking gap.
+- A supplement that almost matches a provider adapter now names what it lacks, e.g.
+  `aws-savings-plans@2 requires savingsPlanArn` for an export from the v1 adapter era.
 
-### - `ContractCommitmentDurationType` is a `contract_commitment` supplement column. A
+### Changed
 
-  supplied explicit term wins over the derived value.
+- **Breaking:** the `aws-savings-plans` adapter (now v2) is keyed by `savingsPlanArn`,
+  the fully qualified identifier FOCUS recommends and the one Contract Commitment and
+  `CommitmentDiscountId` carry. v1 keyed by the bare `savingsPlanId`, so its rows could
+  never join. Exports without `savingsPlanArn` are no longer auto-detected; re-export
+  with the ARN (as `describe-savings-plans` returns it). The adapter also maps
+  `termDurationInSeconds` (1 and 3 years) to the duration.
+- **New byte baseline:** `ContractCommitmentDurationType` is written in whole years when
+  the term is a multiple of 12 months (`1 Year`, `3 Years`), as in the specification's
+  examples, instead of `12 Months` / `36 Months`. Other terms stay in months.
+
+### Fixed
+
+- `ContractCommitmentDurationType` is no longer rounded from `days / 30.44`, which turned
+  any span into a plausible-looking term. It is derived (`DERIVED`) only when the
+  commitment period spans a whole number of calendar months, the day clamped at month
+  end. Otherwise strict mode leaves it empty (`UNAVAILABLE`): Contract Commitment is not
+  produced until the term is supplied, and the other datasets are unaffected. Synthetic
+  mode assumes the nearest whole-month value (`ASSUMED`). `FDT-CC-001` lists the
+  commitments concerned, at the same point in the eager and streaming pipelines.
+- The duration's lineage is settled per row. A partial supplement no longer blanks, or
+  counts as supplied, the terms derived for the rows it does not cover.
+- A naive commitment timestamp is read as UTC, as FOCUS requires, instead of failing to
+  compare with an offset one; months are counted in the start's frame.
 
 ### Security
 

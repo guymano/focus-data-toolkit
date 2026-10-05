@@ -24,7 +24,7 @@
                    "queued": "Proposed", "queued-deleted": "Canceled", "retired": "Expired",
                    "pending-return": "Active", "returned": "Canceled"}},
     {"target": "ContractCommitmentDurationType", "source": "termDurationInSeconds",
-     "value_map": {"31536000": "12 Months", "94608000": "36 Months"}},
+     "value_map": {"31536000": "1 Year", "94608000": "3 Years"}},
     {"target": "ContractCommitmentCreated", "source": "start", "transform": "date_to_utc"},
     {"target": "ContractCommitmentBenefitCategory", "const": "Discount"},
     {"target": "ContractCommitmentModel", "const": "Continuous"},

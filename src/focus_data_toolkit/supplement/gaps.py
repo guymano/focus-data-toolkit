@@ -28,6 +28,10 @@ from focus_data_toolkit.supplement.kinds import SUPPLEMENT_KINDS, kinds_for_colu
 
 GAP_REPORT_FORMAT = "1"
 
+# Mandatory columns derived only for the rows the source proves (a header cannot tell how
+# many): reported as non-blocking advisories, since the remaining rows must be supplied.
+_CONDITIONALLY_DERIVED = frozenset({("Contract Commitment", "ContractCommitmentDurationType")})
+
 
 @dataclass(frozen=True)
 class ColumnGap:
@@ -129,7 +133,14 @@ class GapReport:
                     kinds = ", ".join(g.supplement_kinds) or "-"
                     lines.append(f"  - {g.column}{extra}  <- supplement kind: {kinds}")
             for g in recommended:
-                lines.append(f"  ~ {g.column} (recommended, nullable)")
+                if g.allows_nulls:
+                    lines.append(f"  ~ {g.column} (recommended, nullable)")
+                else:
+                    kinds = ", ".join(g.supplement_kinds) or "-"
+                    lines.append(
+                        f"  ~ {g.column} (conditional: {g.current_note})"
+                        f"  <- supplement kind: {kinds}"
+                    )
             lines.append("")
         kinds_used = sorted(
             {k for gaps in self.gaps.values() for g in gaps for k in g.supplement_kinds}
@@ -182,6 +193,10 @@ def compute_gaps(
                 cc_prov[col] = ColumnRule(
                     Lineage.UNAVAILABLE, note="absent from the Contract Commitment source"
                 )
+        if not {"ContractCommitmentPeriodStart", "ContractCommitmentPeriodEnd"} <= present_cc:
+            cc_prov["ContractCommitmentDurationType"] = ColumnRule(
+                Lineage.UNAVAILABLE, note="no commitment period in the source to derive it from"
+            )
     provenance: dict[str, dict[str, ColumnRule]] = {
         "Cost and Usage": cost_and_usage_provenance(
             source_columns, source_version, invoice_detail_linked=False
@@ -202,6 +217,8 @@ def compute_gaps(
             rule = prov.get(col)
             if col in blockers:
                 out.append(_gap(name, col, spec, rule, blocking=True))
+            elif (name, col) in _CONDITIONALLY_DERIVED:
+                out.append(_gap(name, col, spec, rule, blocking=False))
             elif (
                 rule is not None
                 and not rule.is_factual

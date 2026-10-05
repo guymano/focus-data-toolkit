@@ -80,6 +80,14 @@ _DATASET_ALIASES = {
 _NUMERIC_RE = re.compile(r"-?\d+(\.\d+)?(E-?\d+)?")
 # DateTimeFormat: literal YYYY-MM-DDTHH:mm:ss[.fff]Z (UTC 'Z' only, ISO 8601).
 _DATETIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
+# Columns whose "Expected Format" the v1.4 specification spells out exactly.
+# ContractCommitmentDurationType: "[Numeric Value] [Unit]", a positive whole number and
+# one of the listed units, singular or plural ("1 Year", "3 Years", "36 Months").
+_EXPECTED_FORMATS = {
+    "ContractCommitmentDurationType": re.compile(
+        r"[1-9]\d* (?:Minute|Hour|Day|Week|Month|Quarter|Year)s?"
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -288,6 +296,9 @@ def _format_violation(spec: dict, column: str, value: str) -> str | None:
     if value_format in ("JSON Object", "Key-Value") or data_type == "JSON":
         return _validate_json_column(column, value, value_format)
     if value_format == "Expected Format":
+        pattern = _EXPECTED_FORMATS.get(column)
+        if pattern is not None:
+            return None if pattern.fullmatch(value) else "bad_expected_format"
         return None if re.search(r"\d", value) and re.search(r"[A-Za-z]", value) \
             else "bad_expected_format"
     return None

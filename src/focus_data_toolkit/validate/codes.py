@@ -43,7 +43,7 @@ CATALOG: dict[str, CodeSpec] = dict([
        "legacy FOCUS 1.3 ContractApplied identifier casing normalized (erratum #3)"),
     # --- Contract Commitment 1.3 -> 1.4 expansion --------------------------------
     _s("FDT-CC-001", Severity.WARNING,
-       "commitment period is not a whole number of calendar months; DurationType not derived"),
+       "DurationType neither derivable from the commitment period nor supplied"),
     # --- multi-provider / context ------------------------------------------------
     _s("FDT-CTX-001", Severity.WARNING, "source carries multiple provider contexts"),
     _s("FDT-CTX-002", Severity.WARNING, "source carries multiple invoice issuers"),

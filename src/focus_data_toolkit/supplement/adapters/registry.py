@@ -206,6 +206,25 @@ def detect_adapter(header: Sequence[str]) -> Adapter | None:
     )
 
 
+def near_miss_adapters(header: Sequence[str]) -> list[tuple[Adapter, tuple[str, ...]]]:
+    """Adapters ``header`` almost matches, with the required fields it lacks.
+
+    An adapter is a near miss when its optional detection fields match and only part of its
+    required fields are present: typically an export from an older adapter version.
+    """
+    present = set(header)
+    out: list[tuple[Adapter, tuple[str, ...]]] = []
+    for name in sorted(load_adapters()):
+        adapter = load_adapters()[name]
+        missing = tuple(f for f in adapter.detect_all_of if f not in present)
+        if not missing or len(missing) == len(adapter.detect_all_of):
+            continue
+        if adapter.detect_any_of and not present & set(adapter.detect_any_of):
+            continue
+        out.append((adapter, missing))
+    return out
+
+
 def adapter_provenance() -> dict:
     """The vendored adapter provenance manifest (source docs + hashes)."""
     return json.loads((ADAPTERS_DIR / PROVENANCE_FILENAME).read_text(encoding="utf-8"))

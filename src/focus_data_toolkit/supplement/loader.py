@@ -201,7 +201,7 @@ def _resolve_kind(
     canonical-kind rows and returns its ``<adapter>@<version>`` tag.
     """
     from focus_data_toolkit.supplement.adapters import get_adapter, load_adapters
-    from focus_data_toolkit.supplement.adapters.registry import detect_adapter
+    from focus_data_toolkit.supplement.adapters.registry import detect_adapter, near_miss_adapters
 
     path = spec.path
     if spec.kind is not None:
@@ -237,6 +237,15 @@ def _resolve_kind(
     detected = detect_adapter(header)
     if detected is not None:
         return _apply_adapter(detected, path, header, raw_rows)
+    near = near_miss_adapters(header)
+    if near:
+        closest = "; ".join(
+            f"{adapter.source_tag} requires {', '.join(missing)}" for adapter, missing in near
+        )
+        raise SupplementError(
+            f"{path}: header matches no supplement kind and no provider adapter; "
+            f"closest adapter(s): {closest}"
+        )
     detect_kind(header)  # no canonical + no adapter -> raise the canonical "no kind" error
     raise AssertionError("unreachable")  # pragma: no cover
 

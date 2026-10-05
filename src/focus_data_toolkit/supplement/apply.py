@@ -279,6 +279,8 @@ def apply_contract_commitments(
         for column in table.fact_columns:
             if column == upfront:
                 continue  # handled below (derivable from the payment model)
+            if column == "ContractCommitmentDurationType":
+                continue  # settled per row afterwards (convert.contract_commitment)
             _apply_column(
                 row, column, table.value(key, column),
                 synthetic=synthetic, counters=out.counters,
