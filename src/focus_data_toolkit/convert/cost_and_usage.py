@@ -73,8 +73,10 @@ _SKU_PRICE_CASCADE: tuple[str, ...] = NULL_WHEN_SKU_PRICE_ID_NULL + tuple(
     UNIT_OF_QUANTITY.values()
 )
 # Exact arithmetic for migration bookkeeping: source amounts may carry more digits than the
-# default 28-digit context, and a reported delta must never be rounded.
+# default 28-digit context, and a reported delta must never be rounded. Amounts are bounded
+# to exponents within +/-_MAX_EXPONENT (see _decimal), so an exact result stays small.
 _EXACT = Context(prec=MAX_PREC, Emax=MAX_EMAX, Emin=MIN_EMIN)
+_MAX_EXPONENT = 1000
 
 
 def _cascade_applies(converted: Mapping[str, str]) -> bool:
@@ -220,11 +222,19 @@ def migration_diagnostics(migrations: CostAndUsageMigrations) -> list[Diagnostic
 
 
 def _decimal(text: str) -> Decimal | None:
+    """Parse an amount for exact bookkeeping; ``None`` when unusable.
+
+    An amount whose exponent lies beyond ``_MAX_EXPONENT`` is not money, and exact arithmetic
+    on it could need billions of digits, so it is treated like an unparseable one.
+    """
     try:
         value = Decimal(text.strip())
     except (InvalidOperation, ValueError):
         return None
-    return value if value.is_finite() else None
+    exponent = value.as_tuple().exponent  # a str for NaN and Infinity
+    if not isinstance(exponent, int) or max(abs(exponent), abs(value.adjusted())) > _MAX_EXPONENT:
+        return None
+    return value
 
 
 def contract_applied_legacy_diagnostic(legacy_keys: set[str]) -> Diagnostic | None:

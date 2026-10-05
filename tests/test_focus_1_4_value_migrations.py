@@ -105,6 +105,28 @@ def test_tax_delta_is_exact_beyond_the_default_decimal_precision(tax_row):
     assert delta == f"{tax_row['BillingCurrency']}:0.9999999999999999999999999999999"
 
 
+@pytest.mark.parametrize(
+    "billed", ["1E-999999999999999999", "9E+999999999", "0E-999999999", "1E+1001"],
+)
+def test_extreme_tax_amounts_are_left_for_the_linter(tax_row, billed):
+    # Exponents this far out are not money; exact bookkeeping on them would need billions of
+    # digits. The row is left as is (like an unparseable amount) and conversion completes.
+    tax_row.update({"BilledCost": billed, "PricingCurrencyEffectiveCost": ""})
+    result = convert_to_focus_1_4([tax_row], mode="strict", validate=False)
+    [tax] = result.datasets[CU]
+    assert tax["EffectiveCost"] == "7.5"
+    assert "FDT-MIG-001" not in _codes(result)
+
+
+def test_large_but_bounded_tax_amounts_are_still_exact(tax_row):
+    tax_row.update({"BilledCost": "1E+1000", "EffectiveCost": "1E-1000",
+                    "PricingCurrencyEffectiveCost": ""})
+    result = convert_to_focus_1_4([tax_row], mode="strict", validate=False)
+    delta = _one(result, "FDT-MIG-001").context["effective_cost_delta_by_currency"]
+    # 10**1000 - 10**-1000, written out exactly.
+    assert delta.split(":", 1)[1] == "9" * 1000 + "." + "9" * 1000
+
+
 def test_null_tax_effective_cost_takes_billed_cost(tax_row):
     tax_row.update({"EffectiveCost": "", "PricingCurrencyEffectiveCost": ""})
     result = convert_to_focus_1_4([tax_row], mode="strict")
