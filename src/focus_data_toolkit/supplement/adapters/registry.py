@@ -229,9 +229,12 @@ def near_miss_adapters(header: Sequence[str]) -> list[tuple[Adapter, tuple[str, 
     """Adapters ``header`` almost matches, with the required fields it lacks.
 
     An adapter is a near miss when its optional detection fields match and only part of its
-    required fields are present: typically an export from an older adapter version.
+    required fields are present: typically an export from an older adapter version. A header
+    whose matching fields are all canonical FOCUS names (some exports share names such as
+    ``InvoiceId``) is a malformed canonical file instead, never a near miss.
     """
     present = set(header)
+    canonical = {c for kind in SUPPLEMENT_KINDS.values() for c in (*kind.join_keys, *kind.columns)}
     out: list[tuple[Adapter, tuple[str, ...]]] = []
     for name in sorted(load_adapters()):
         adapter = load_adapters()[name]
@@ -241,6 +244,8 @@ def near_miss_adapters(header: Sequence[str]) -> list[tuple[Adapter, tuple[str, 
         if adapter.detect_any_of and not present & set(adapter.detect_any_of):
             continue
         if present & set(adapter.detect_none_of):
+            continue
+        if not (present & {*adapter.detect_all_of, *adapter.detect_any_of}) - canonical:
             continue
         out.append((adapter, missing))
     return out

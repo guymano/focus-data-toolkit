@@ -250,13 +250,14 @@ def settle_duration_type(
     prov = dict(provenance)
     unresolved = [r.get("ContractCommitmentId", "") for r, lin in zip(rows, final, strict=True)
                   if lin in (Lineage.UNAVAILABLE, Lineage.ASSUMED)]
-    if Lineage.UNAVAILABLE in final:
+    assumed, empty = final.count(Lineage.ASSUMED), final.count(Lineage.UNAVAILABLE)
+    if empty:
         prov[DURATION] = ColumnRule(
             Lineage.UNAVAILABLE,
-            note=f"{final.count(Lineage.UNAVAILABLE)} commitment(s): the period spans no whole "
-            "number of calendar months and no term was supplied",
+            note=f"{empty} commitment(s) left empty: no whole number of calendar months, "
+            "no usable period to assume from, or no term supplied",
         )
-    elif Lineage.ASSUMED in final:
+    elif assumed:
         prov[DURATION] = ColumnRule(
             Lineage.ASSUMED, "commitment period span",
             note="nearest whole-month value where the period spans no whole number of "
@@ -268,10 +269,16 @@ def settle_duration_type(
         prov[DURATION] = ColumnRule(Lineage.ENRICHED, supplier.source_for(DURATION))
     if not unresolved:
         return prov, None
-    outcome = (
-        "synthetic mode: the nearest whole-month value is assumed" if synthetic
-        else "strict mode: Contract Commitment is not produced until the term is supplied"
-    )
+    if not synthetic:
+        outcome = "strict mode: Contract Commitment is not produced until the term is supplied"
+    else:
+        parts = []
+        if assumed:
+            parts.append(f"{assumed} take the nearest whole-month value (assumed)")
+        if empty:
+            parts.append(f"{empty} have no usable period (unparseable, inverted or empty) and "
+                         "stay empty, which the lint refuses")
+        outcome = "synthetic mode: " + "; ".join(parts)
     return prov, Diagnostic(
         code="FDT-CC-001",
         severity=Severity.WARNING,

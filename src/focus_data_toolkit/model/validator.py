@@ -80,10 +80,12 @@ _DATASET_ALIASES = {
 _NUMERIC_RE = re.compile(r"-?\d+(\.\d+)?(E-?\d+)?")
 # DateTimeFormat: literal YYYY-MM-DDTHH:mm:ss[.fff]Z (UTC 'Z' only, ISO 8601).
 _DATETIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
-# Columns whose "Expected Format" the v1.4 specification spells out exactly.
-# ContractCommitmentDurationType: "[Numeric Value] [Unit]", a positive whole number and
-# one of the listed units, singular or plural ("1 Year", "3 Years", "36 Months").
-_EXPECTED_FORMATS = {
+# Formats the v1.4 specification recommends (SHOULD) for an "Expected Format" column.
+# ContractCommitmentDurationType: "[Numeric Value] [Unit]", a positive whole number and one
+# of the listed units, singular or plural ("1 Year", "3 Years", "36 Months"); rules
+# CCT-ContractCommitmentDurationType-C-004-O/C-005-O. Being SHOULD, they never fail the lint
+# of a 1.4 file; supplied facts must follow them (check_column_value).
+_RECOMMENDED_FORMATS = {
     "ContractCommitmentDurationType": re.compile(
         r"[1-9]\d* (?:Minute|Hour|Day|Week|Month|Quarter|Year)s?"
     ),
@@ -296,9 +298,6 @@ def _format_violation(spec: dict, column: str, value: str) -> str | None:
     if value_format in ("JSON Object", "Key-Value") or data_type == "JSON":
         return _validate_json_column(column, value, value_format)
     if value_format == "Expected Format":
-        pattern = _EXPECTED_FORMATS.get(column)
-        if pattern is not None:
-            return None if pattern.fullmatch(value) else "bad_expected_format"
         return None if re.search(r"\d", value) and re.search(r"[A-Za-z]", value) \
             else "bad_expected_format"
     return None
@@ -410,8 +409,10 @@ def check_column_value(dataset: str, column: str, value: str) -> str | None:
     """Format-check one non-empty value against the model spec of ``dataset.column``.
 
     Returns the violated rule name (as in the lint report) or ``None``. Used by the
-    supplement validator so client-supplied facts obey exactly the same format rules
-    as converted data. An unknown column returns ``"unknown_column"``.
+    supplement validator so client-supplied facts obey the same format rules as converted
+    data, plus the formats the specification recommends (``_RECOMMENDED_FORMATS``): a fact
+    the toolkit publishes on a client's behalf follows the recommended form. An unknown
+    column returns ``"unknown_column"``.
     """
     name = resolve_dataset(dataset)
     spec = load_model()["datasets"][name]["columns"].get(column)
@@ -420,6 +421,9 @@ def check_column_value(dataset: str, column: str, value: str) -> str | None:
     text = value.strip()
     if not text:
         return None
+    recommended = _RECOMMENDED_FORMATS.get(column)
+    if recommended is not None and not recommended.fullmatch(text):
+        return "bad_expected_format"
     return _format_violation(spec, column, text)
 
 

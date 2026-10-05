@@ -17,9 +17,10 @@ policy.
   `AtomicWriteError`. Library callers no longer import internal modules, which
   docs/versioning.md leaves free to change. Existing import paths keep working.
 - `ContractCommitmentDurationType` is a `contract_commitment` supplement column. A
-  supplied term wins over the derived value. It must follow the v1.4 Expected Format, a
+  supplied term wins over the derived value. It must follow the format v1.4 recommends, a
   positive whole number and a listed unit (`1 Year`, `3 Years`, `36 Months`); anything
-  else is refused (`FDT-SUPP-004`), and the lint applies the same rule to output.
+  else is refused (`FDT-SUPP-004`). That format is a SHOULD in the specification, so the
+  lint of a 1.4 file does not fail on it.
 - `fdt gaps` reports `ContractCommitmentDurationType` as a conditional advisory: it is
   derived only for periods spanning whole calendar months, so the other terms must be
   supplied. Without a commitment period in the source it is a blocking gap.

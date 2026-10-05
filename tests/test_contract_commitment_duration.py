@@ -152,6 +152,17 @@ def test_settle_synthetic_assumes_and_says_so():
     assert "synthetic mode" in diag.message
 
 
+def test_settle_synthetic_says_which_rows_have_no_usable_period():
+    unusable = ("not a date", "2027-05-01T00:00:00Z")
+    out, rule, diag, counts = _settle(_rows(WHOLE, ODD, unusable), synthetic=True)
+    assert [r[DURATION] for r in out] == ["1 Year", "1 Year", ""]
+    assert rule.lineage is Lineage.UNAVAILABLE and "no usable period" in (rule.note or "")
+    assert counts == {"ASSUMED": 1, "DERIVED": 1, "UNAVAILABLE": 1}
+    assert diag is not None and diag.context["row_count"] == "2"
+    assert "1 take the nearest whole-month value" in diag.message
+    assert "1 have no usable period" in diag.message
+
+
 def test_settle_all_derived_keeps_the_derived_rule_and_reports_nothing():
     out, rule, diag, counts = _settle(_rows(WHOLE, WHOLE), synthetic=False)
     assert rule == PROVENANCE[DURATION]
@@ -238,6 +249,7 @@ def test_strict_dataset_waits_for_the_missing_term(tmp_path, odd_source):
     result = convert_to_focus_1_4(cau, cc, mode=Mode.STRICT, supplements=bundle)
     entry = result.manifest["datasets"]["Contract Commitment"]
     assert entry["status"] == "NOT_PRODUCED"
+    assert entry["blocking_columns"] == [DURATION]
     assert entry["columns"][DURATION]["lineage"] == "UNAVAILABLE"
     assert [d for d in result.diagnostics if d.code == "FDT-CC-001"]
     # The other datasets are unaffected.
@@ -302,6 +314,18 @@ def test_expected_format_accepts_number_and_listed_unit(value):
 )
 def test_expected_format_rejects_anything_else(value):
     assert check_column_value("Contract Commitment", DURATION, value) == "bad_expected_format"
+
+
+@pytest.mark.parametrize("value", ["1 year", "12 months", "P1Y"])
+def test_the_lint_does_not_fail_a_recommended_format(value):
+    # The v1.4 format is a SHOULD (CCT-ContractCommitmentDurationType-C-004-O/C-005-O): a
+    # third-party 1.4 file using another form is not refused by the lint. Supplied facts
+    # must follow it (test_expected_format_rejects_anything_else).
+    from focus_data_toolkit.model.validator import lint_focus_1_4_structure
+
+    report = lint_focus_1_4_structure("Contract Commitment", [{DURATION: value}])
+    assert not [v for v in report.violations
+                if v.column == DURATION and v.rule == "bad_expected_format"]
 
 
 CC_1_3 = (
