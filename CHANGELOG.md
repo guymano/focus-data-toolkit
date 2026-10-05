@@ -30,7 +30,8 @@ policy.
   (REST shape, api-version 2022-11-01). One row per order, keyed by the lowercased order
   ARM id. Each provides the term (`1 Year`, `3 Years`, `5 Years`, or `1 Month` for a
   monthly savings plan), the payment model and interval, the lifecycle status where the
-  provisioning state determines one, and the benefit category. The commitment model is
+  provisioning state determines one, the creation time where the response carries it,
+  and the benefit category. The commitment model is
   not emitted: the order does not carry the commitment grain. A savings plan order is
   recognised by its `sku.name`; a new `none_of` detection clause rules out the plan- and
   reservation-level lists, which share it. A `lower` adapter transform supports

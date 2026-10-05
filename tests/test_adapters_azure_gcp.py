@@ -20,6 +20,7 @@ from focus_data_toolkit.supplement import (
     SupplementFileSpec,
 )
 from focus_data_toolkit.supplement.adapters import detect_adapter, load_adapters
+from focus_data_toolkit.supplement.adapters.registry import near_miss_adapters
 
 
 def write_csv(path: Path, rows: list[dict[str, str]]) -> Path:
@@ -176,12 +177,23 @@ def test_azure_savings_plan_order_facts(tmp_path):
     assert table.adapter == "azure-savings-plan-orders@1"
     key = (f"{SP_BASE}0001".lower(),)
     assert table.value(key, "ContractCommitmentBenefitCategory") == "Discount"
-    # The commitment grain (Hourly or FullTerm) is on the plan, not the order.
+    # The commitment grain (Hourly or FullTerm) is on the plan, not the order; Created needs
+    # systemData, which this response omits.
     for column in ("ContractCommitmentModel", "ContractCommitmentFulfillmentInterval",
                    "ContractCommitmentCreated", "ContractCommitmentOfferCategory",
                    "ContractCommitmentLastUpdated", "ContractCommitmentApplicability",
                    "InvoiceIssuerName"):
         assert column not in table.fact_columns, column
+
+
+def test_azure_savings_plan_order_created_comes_from_system_data(tmp_path):
+    # FOCUS 1.4: Created is the moment the record was instantiated, which ARM records in
+    # systemData.createdAt (7-digit fractions are truncated to microseconds).
+    order = {**sp_order(1), "systemData": {"createdAt": "2026-04-30T21:22:56.8541664Z",
+                                            "createdByType": "User"}}
+    table = _load(tmp_path, "sp_orders.json", [order])
+    key = (f"{SP_BASE}0001".lower(),)
+    assert table.value(key, "ContractCommitmentCreated") == "2026-04-30T21:22:56.854166Z"
 
 
 def _header(record: dict) -> list[str]:
@@ -216,6 +228,9 @@ def test_plan_and_reservation_level_lists_are_not_orders():
                                   "benefitStartTime": "2026-05-01T00:00:00Z"}}
     assert detect_adapter(_header(plan)) is None
     assert detect_adapter(_header(reservation)) is None
+    # Nor are they near misses of the reservation order adapter: the sku rules it out.
+    assert near_miss_adapters(_header(plan)) == []
+    assert near_miss_adapters(_header(reservation)) == []
 
 
 def _commitment_source(source_tables, order_id: str) -> tuple[list, list]:
@@ -228,20 +243,23 @@ def _commitment_source(source_tables, order_id: str) -> tuple[list, list]:
 
 
 def test_azure_reservation_order_enriches_end_to_end(tmp_path, source_tables):
-    order = ri_order(1, term="P3Y", plan="Monthly", state="Cancelled")
+    order = ri_order(1, term="P3Y", plan="Upfront", state="Cancelled")
     cau, cc = _commitment_source(source_tables, order["id"])
     path = tmp_path / "ri_orders.json"
     path.write_text(json.dumps({"value": [order]}), encoding="utf-8")
     bundle = SupplementBundle.load([SupplementFileSpec(path=path)])
     result = convert_to_focus_1_4(cau, cc, mode=Mode.SYNTHETIC, supplements=bundle)
     [row] = result.datasets["Contract Commitment"]
-    # Each expected value differs from both the derived value and the synthetic default.
+    # Each expected value differs from both the derived value and the synthetic default
+    # (1 Year, No Upfront, Monthly, Active).
     assert row["ContractCommitmentDurationType"] == "3 Years"
-    assert row["ContractCommitmentPaymentModel"] == "No Upfront"
+    assert row["ContractCommitmentPaymentModel"] == "All Upfront"
+    assert row["ContractCommitmentPaymentInterval"] == "One-Time"
     assert row["ContractCommitmentLifecycleStatus"] == "Canceled"
     columns = result.manifest["datasets"]["Contract Commitment"]["columns"]
     source = "supplement:azure-reservation-orders@1:ri_orders.json"
-    for column in ("ContractCommitmentDurationType", "ContractCommitmentLifecycleStatus"):
+    for column in ("ContractCommitmentDurationType", "ContractCommitmentPaymentModel",
+                   "ContractCommitmentPaymentInterval", "ContractCommitmentLifecycleStatus"):
         assert columns[column]["lineage"] == "ENRICHED", column
         assert columns[column]["source"] == source, column
 
@@ -269,9 +287,12 @@ def test_azure_savings_plan_order_with_client_terms_end_to_end(tmp_path, source_
     assert row["ContractCommitmentModel"] == "Discontinuous"
     assert row["ContractCommitmentFulfillmentInterval"] == "Full Period"
     columns = result.manifest["datasets"]["Contract Commitment"]["columns"]
-    assert columns["ContractCommitmentDurationType"]["source"] == (
-        "supplement:azure-savings-plan-orders@1:sp_orders.json"
-    )
+    # "No Upfront" is also the synthetic default: the attribution shows the adapter set it.
+    for column in ("ContractCommitmentDurationType", "ContractCommitmentPaymentModel",
+                   "ContractCommitmentPaymentInterval", "ContractCommitmentLifecycleStatus"):
+        assert columns[column]["source"] == (
+            "supplement:azure-savings-plan-orders@1:sp_orders.json"
+        ), column
     assert columns["ContractCommitmentModel"]["source"] == "supplement:contract_commitment:terms.csv"
 
 

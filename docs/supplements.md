@@ -117,8 +117,10 @@ The Azure order adapters key each commitment by the **order**, the purchase that
 the term, billing plan and price; splits and merges stay inside it. The ARM id is
 lowercased because Azure ids are case-insensitive and Microsoft's APIs and exports mix
 casings. A Contract Commitment source must use the same key. They emit the term
-(`ContractCommitmentDurationType`: `1 Year`, `3 Years`, `5 Years`), the payment model and
-interval, the lifecycle status and the benefit category (`Discount`). The lifecycle status
+(`ContractCommitmentDurationType`: `1 Year`, `3 Years`, `5 Years`, or `1 Month` for a monthly
+savings plan term), the payment model and interval, the lifecycle status, the creation time
+(`createdDateTime` for a reservation order, ARM `systemData.createdAt` for a savings plan
+order when the response carries it) and the benefit category (`Discount`). The lifecycle status
 comes from `provisioningState`, without a clock: `Expired`, `Cancelled` and the creation and
 billing states map; `Succeeded` does not, because finished provisioning cannot tell a
 running term from an exhausted pre-purchase pool. They leave out what an order does not

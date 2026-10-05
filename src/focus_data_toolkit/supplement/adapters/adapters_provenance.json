@@ -33,7 +33,7 @@
       "target_kind": "contract_commitment",
       "source": "Azure Reservations REST API \u2014 ReservationOrderResponse (Microsoft.Capacity reservationOrders, list)",
       "doc_url": "https://learn.microsoft.com/en-us/rest/api/reserved-vm-instances/reservation-order/list?view=rest-reserved-vm-instances-2022-11-01",
-      "sha256": "3be18e660dc57441979e284ea28db2a0707e6332df04e3f8c926e7ac9f9c51b4"
+      "sha256": "da2dc70db4e7fc79324f63833841a754c20df5aef48c8965ca8fa1d854d5dff4"
     },
     {
       "file": "azure_savings_plan_orders.json",
@@ -41,7 +41,7 @@
       "target_kind": "contract_commitment",
       "source": "Azure Billing Benefits REST API \u2014 SavingsPlanOrderModel (Microsoft.BillingBenefits savingsPlanOrders, list)",
       "doc_url": "https://learn.microsoft.com/en-us/rest/api/billingbenefits/savings-plan-order/list?view=rest-billingbenefits-2022-11-01",
-      "sha256": "ab72a54beed65e9336949560f6259e34f0d63a749a9caca3dc0b5a8be2d1384f"
+      "sha256": "a4f222c3000fd938b78fcfb8d023b598e372ae83ea9ee10cdd1c8fa261031676"
     },
     {
       "file": "gcp_compute_commitments.json",
