@@ -19,20 +19,32 @@ policy.
 
 ### Changed
 
-- The FOCUS 1.4 linter now enforces the static Cost and Usage rules of the v1.4
-  requirements model that it did not check. Output that passed before can now fail the
-  lint, and strict publication refuses it:
+- The FOCUS 1.4 linter now enforces more of the static Cost and Usage rules of the v1.4
+  requirements model. Output that passed before can now fail the lint, and strict
+  publication refuses it:
   - Tax and Credit `EffectiveCost` equals `BilledCost` (CAU-EffectiveCost-C-017);
   - `ListCost` and `ContractedCost` equal unit price × `PricingQuantity` when both are
     present, Correction rows included (C-011). The relative tolerance is the official
-    focus-validator's (1e-9 × max(|cost|, 1));
+    focus-validator's (1e-9 × max(|cost|, 1)), and the arithmetic is exact whatever the
+    caller's Decimal context; amounts too extreme to compute are reported as a violation;
   - a unit is null exactly when its quantity is (`PricingUnit`, `ConsumedUnit`,
     `CommitmentDiscountUnit`, C-005/C-006);
+  - `ListUnitPrice` and `ContractedUnitPrice` are present when `SkuPriceId` is set
+    (C-013/C-015). This applies in every profile, as these rules have no applicability
+    criteria, except for a column the source did not carry.
+    `lint_focus_1_4_structure(source_absent_columns=...)` lets a producer name such
+    columns; the converter does so;
   - under a declared `SupportsUnitPricing` condition, the pricing and quantity columns
-    are null when `SkuPriceId` is null, and the list and contracted unit prices are
-    present when it is set.
+    are null when `SkuPriceId` is null (C-009 to C-016).
+
+  Other static rules of the model are not checked. These include the pricing-currency
+  unit prices' C-012, whose presence is not visible on a row and whose model condition
+  for `PricingCurrencyContractedUnitPrice` contradicts its text.
+  **Upgrade note:** expect refusals for provider costs rounded to the cent (exact
+  identity), and for 1.2 Correction rows, which 1.2 exempted from the identity.
 - The client-like test fixture violated the cost identity by a factor of 1000; its
-  quantities are corrected.
+  quantities are corrected. Its Tax row no longer carries a pricing quantity, and its
+  pricing-currency effective cost now matches its effective cost.
 
 ### Security
 

@@ -10,10 +10,13 @@ presented as a FOCUS 1.4 dataset is well-formed against the committed 1.4 data m
   JSON/Key-Value well-formedness with the ``x_`` custom-key rule).
 * ``SEMANTIC_VALID`` — single-row cross-field rules (Tax nulls, consumption gating,
   ``LastUpdated >= Created``, ServiceSubcategory↔ServiceCategory, upfront-percentage vs
-  payment model, condition-aware required columns, ContractApplied deep structure, the
-  static FOCUS 1.4 Cost and Usage rules: Tax/Credit ``EffectiveCost = BilledCost``, cost =
-  unit price × ``PricingQuantity`` within the official validator's relative tolerance,
-  unit/quantity pairing and, under declared unit pricing, the ``SkuPriceId`` rules), and
+  payment model, condition-aware required columns, ContractApplied deep structure, and
+  these FOCUS 1.4 Cost and Usage rules: Tax/Credit ``EffectiveCost = BilledCost`` (C-017),
+  cost = unit price × ``PricingQuantity`` within the official validator's relative
+  tolerance (C-011), unit/quantity pairing (C-005/C-006), list and contracted unit prices
+  required with a ``SkuPriceId`` (C-013/C-015, unless the source lacks the column) and,
+  under declared unit pricing, the ``SkuPriceId`` null cascade (C-009 to C-016). Other
+  static rules of the v1.4 model are not checked), and
   the official FOCUS JSON object schemas (vendored verbatim in ``model/json_schemas/``)
   for ``ContractApplied``, ``AllocatedMethodDetails``,
   ``CommitmentProgramEligibilityDetails`` and ``ContractCommitmentApplicability``.
@@ -35,7 +38,15 @@ import warnings
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import (
+    MAX_EMAX,
+    MAX_PREC,
+    MIN_EMIN,
+    Context,
+    Decimal,
+    DecimalException,
+    InvalidOperation,
+)
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -91,8 +102,13 @@ _UNIT_OF_QUANTITY: tuple[tuple[str, str], ...] = (
 )
 # Relative tolerance of the cost = unit price x quantity identity, the official
 # focus-validator's (ColumnByColumnEqualsColumnValue: |a x b - r| <= 1e-9 x max(|r|, 1)).
-# It absorbs representation rounding only, never a pricing difference.
+# It exists to absorb representation rounding; being relative, it also accepts an absolute
+# difference of up to 1e-9 x |cost| (about 1.2 on a cost of 1.2e9), exactly as that validator.
 _PRODUCT_TOLERANCE = Decimal("1e-9")
+# The identity is computed exactly and independently of the caller's Decimal context: a
+# narrower context would round the product (accepting real differences), and an extreme
+# exponent must surface as a violation, never as an exception.
+_EXACT = Context(prec=MAX_PREC, Emax=MAX_EMAX, Emin=MIN_EMIN)
 
 _DATASET_ALIASES = {
     "cost and usage": "Cost and Usage", "costandusage": "Cost and Usage", "cau": "Cost and Usage",
@@ -324,7 +340,11 @@ def _format_violation(spec: dict, column: str, value: str) -> str | None:
 # --------------------------------------------------------------------------- #
 # Cross-field (single-row, SEMANTIC) rules — each returns (column, rule, message) tuples.
 # --------------------------------------------------------------------------- #
-def _cost_and_usage(row: dict, model: dict, supported: frozenset[str]) -> list[tuple]:
+def _cost_and_usage(
+    row: dict, model: dict, supported: frozenset[str], absent: frozenset[str] = frozenset()
+) -> list[tuple]:
+    """Single-row Cost and Usage rules; ``absent`` are columns the source did not carry."""
+
     def empty(col: str) -> bool:
         return not (row.get(col) or "").strip()
 
@@ -393,25 +413,42 @@ def _cost_and_usage(row: dict, model: dict, supported: frozenset[str]) -> list[t
         for cost_col, price_col in (("ListCost", "ListUnitPrice"),
                                     ("ContractedCost", "ContractedUnitPrice")):
             price, cost = amount(price_col), amount(cost_col)
-            if price is not None and cost is not None and (
-                abs(price * quantity - cost) > _PRODUCT_TOLERANCE * max(abs(cost), Decimal(1))
-            ):
+            if price is None or cost is None:
+                continue
+            try:
+                difference = _EXACT.abs(_EXACT.subtract(_EXACT.multiply(price, quantity), cost))
+                allowed = _EXACT.multiply(_PRODUCT_TOLERANCE, max(_EXACT.abs(cost), Decimal(1)))
+                mismatch = difference > allowed
+            except DecimalException:
+                out.append((cost_col, "cost_identity_not_computable",
+                            f"{price_col} x PricingQuantity cannot be computed exactly"))
+                continue
+            if mismatch:
                 out.append((cost_col, "cost_not_unit_price_times_quantity",
                             f"{cost_col} must equal {price_col} x PricingQuantity"))
 
-    # SkuPriceId-dependent rules apply only to a provider that declares unit pricing: that is
-    # the presence condition of SkuPriceId, and an undeclared condition is never evaluated.
-    if COND_UNIT_PRICING in supported:
-        if empty("SkuPriceId"):
+    if empty("SkuPriceId"):
+        # The null cascade (C-009 to C-016) applies only to a provider that declares unit
+        # pricing, SkuPriceId's presence condition: an undeclared condition is never evaluated.
+        if COND_UNIT_PRICING in supported:
             for col in _NULL_WITHOUT_SKU_PRICE_ID:
                 if not empty(col):
                     out.append((col, "must_be_null_without_sku_price_id",
                                 f"{col} must be null when SkuPriceId is null"))
-        else:
-            for col in ("ListUnitPrice", "ContractedUnitPrice"):
-                if empty(col):
-                    out.append((col, "required_with_sku_price_id",
-                                f"{col} must not be null when SkuPriceId is not null"))
+    else:
+        # CAU-ListUnitPrice-C-013 / CAU-ContractedUnitPrice-C-015 carry no applicability
+        # criteria in the v1.4 model, so they apply whatever conditions are declared, as in
+        # the official validator. A unit-price column the source does not carry has not met
+        # its own presence condition, so it is not evaluated.
+        # The pricing-currency unit prices (C-012 of each) are not enforced: their presence
+        # depends on public price lists or virtual currencies (model rules D-046-C/D-054-C),
+        # which a row does not show, and the machine-readable condition of
+        # CAU-PricingCurrencyContractedUnitPrice-C-012-C (SkuPriceId IS null) contradicts its
+        # own text ("when SkuPriceId is not null") and C-011.
+        for col in ("ListUnitPrice", "ContractedUnitPrice"):
+            if col not in absent and empty(col):
+                out.append((col, "required_with_sku_price_id",
+                            f"{col} must not be null when SkuPriceId is not null"))
 
     # ChargeFrequency must not be Usage-Based for Purchase charges.
     if charge == "Purchase" and (row.get("ChargeFrequency") or "").strip() == "Usage-Based":
@@ -429,7 +466,9 @@ def _cost_and_usage(row: dict, model: dict, supported: frozenset[str]) -> list[t
 
 
 def _last_updated_rule(created: str, updated: str) -> Callable:
-    def _rule(row: dict, model: dict, supported: frozenset[str]) -> list[tuple]:
+    def _rule(
+        row: dict, model: dict, supported: frozenset[str], absent: frozenset[str] = frozenset()
+    ) -> list[tuple]:
         c, u = (row.get(created) or "").strip(), (row.get(updated) or "").strip()
         if c and u and _DATETIME_RE.fullmatch(c) and _DATETIME_RE.fullmatch(u):
             if _parse_dt(u) < _parse_dt(c):
@@ -439,7 +478,9 @@ def _last_updated_rule(created: str, updated: str) -> Callable:
     return _rule
 
 
-def _contract_commitment_upfront(row: dict, model: dict, supported: frozenset[str]) -> list[tuple]:
+def _contract_commitment_upfront(
+    row: dict, model: dict, supported: frozenset[str], absent: frozenset[str] = frozenset()
+) -> list[tuple]:
     pm = (row.get("ContractCommitmentPaymentModel") or "").strip()
     pct = _decimal_or_none((row.get("ContractCommitmentPaymentUpfrontPercentage") or "").strip())
     if not pm or pct is None:
@@ -492,6 +533,7 @@ def lint_focus_1_4_structure(
     model: dict | None = None,
     supported_conditions: Iterable[str] | None = None,
     profile: CapabilityProfile | None = None,
+    source_absent_columns: Iterable[str] | None = None,
 ) -> LintReport:
     """Structurally + semantically lint ``rows`` against the FOCUS 1.4 model.
 
@@ -504,6 +546,11 @@ def lint_focus_1_4_structure(
     FOCUS applicability conditions the provider supports; conditionally-required
     columns are enforced only for those conditions (default: none enforced, so
     sparse-but-valid rows pass — an undeclared condition is *not evaluated*).
+
+    ``source_absent_columns`` names columns the producer emitted as null because its
+    source did not carry them (the converter writes every 1.4 column). Together with the
+    columns missing from ``rows``, they are treated as absent, so a rule that depends on a
+    column's presence is not evaluated for them.
     """
     name = resolve_dataset(dataset)
     model = model or load_model()
@@ -524,6 +571,9 @@ def lint_focus_1_4_structure(
     for key in sorted(present):
         if key not in columns and not key.startswith("x_"):
             add("unknown_column", f"{key} is not a FOCUS 1.4 {name} column", key)
+    absent = frozenset(c for c in columns if c not in present) | frozenset(
+        source_absent_columns or ()
+    )
 
     cross_field = _CROSS_FIELD.get(name, [])
     for i, row in enumerate(rows):
@@ -541,7 +591,7 @@ def lint_focus_1_4_structure(
             if rule:
                 add(rule, f"invalid value {value!r}", col, i)
         for fn in cross_field:
-            for col, rule, msg in fn(row, model, supported):
+            for col, rule, msg in fn(row, model, supported, absent):
                 add(rule, msg, col, i, level=LEVEL_SEMANTIC)
 
     return LintReport(name, len(rows), tuple(violations))

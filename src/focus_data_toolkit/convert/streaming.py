@@ -43,6 +43,7 @@ from focus_data_toolkit.convert import (
     ConversionError,
     assemble_manifest,
     output_filename_for,
+    source_absent_columns,
 )
 from focus_data_toolkit.convert.billing_period import PROVENANCE as BILLING_PERIOD_PROVENANCE
 from focus_data_toolkit.convert.billing_period import billing_period_row
@@ -254,11 +255,14 @@ def _lint_file(
     capabilities: CapabilityProfile | None = None,
     check=None,
     on_rows=None,
+    absent_columns: frozenset[str] = frozenset(),
 ):
     """Lint a produced file (or partition tree) in bounded chunks, returning a merged LintReport.
 
     ``check`` (a no-arg callable) is invoked per chunk to honour cancellation; ``on_rows`` (an
-    ``int -> None`` callable) receives the running row count for progress reporting.
+    ``int -> None`` callable) receives the running row count for progress reporting;
+    ``absent_columns`` are the columns the source did not carry (see
+    :func:`~focus_data_toolkit.convert.source_absent_columns`).
     """
     from focus_data_toolkit.model.validator import (
         _CHECKED_LEVELS,
@@ -274,7 +278,9 @@ def _lint_file(
 
     def flush(rows: list[dict[str, str]]) -> None:
         nonlocal total, levels
-        report = lint_focus_1_4_structure(dataset, rows, profile=capabilities)
+        report = lint_focus_1_4_structure(
+            dataset, rows, profile=capabilities, source_absent_columns=absent_columns
+        )
         levels = report.levels_checked
         for v in report.violations:
             if v.row_index is None:
@@ -856,6 +862,7 @@ def convert_files(
                     name, out.path_for(fname), output_format,
                     partition_by=partition_map.get(name), capabilities=capabilities,
                     check=_check, on_rows=_lint_rows,
+                    absent_columns=source_absent_columns(name, source_cols),
                 )
                 entry = manifest["datasets"][name]
                 if entry["conformance"] == manifest_mod.CONF_NOT_VALIDATED:

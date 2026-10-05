@@ -55,7 +55,7 @@ from focus_data_toolkit.io.atomic_writer import (
     OnExists,
     sha256sums_text,
 )
-from focus_data_toolkit.model import FOCUS_1_4_DATASETS, load_model
+from focus_data_toolkit.model import FOCUS_1_4_DATASETS, dataset_columns, load_model
 from focus_data_toolkit.model.capabilities import CapabilityProfile
 from focus_data_toolkit.model.validator import LintReport, lint_focus_1_4_structure
 from focus_data_toolkit.modes import Mode
@@ -106,6 +106,19 @@ def output_filename_for(
     if output_format == "parquet" and base.endswith(".csv"):
         base = base[:-4] + ("" if partitioned else ".parquet")
     return f"synthetic_{base}" if synthetic_prefix else base
+
+
+def source_absent_columns(dataset: str, source_columns: Iterable[str]) -> frozenset[str]:
+    """The Cost and Usage columns the source did not carry (the converter emits them null).
+
+    The linter treats them as absent, so a rule that depends on a column's presence is not
+    evaluated for a column the provider never supplied. Other datasets are derived, not
+    copied from a source, so nothing is reported for them.
+    """
+    if dataset != "Cost and Usage":
+        return frozenset()
+    present = set(source_columns)
+    return frozenset(c for c in dataset_columns(dataset) if c not in present)
 
 
 class ConversionError(ValueError):
@@ -529,7 +542,10 @@ def convert_to_focus_1_4(
     )
     if validate:
         for name, rows in produced.items():
-            report = lint_focus_1_4_structure(name, rows, profile=capabilities)
+            report = lint_focus_1_4_structure(
+                name, rows, profile=capabilities,
+                source_absent_columns=source_absent_columns(name, source_cols),
+            )
             result.reports[name] = report
             entry = result.manifest["datasets"][name]
             # Only a factual dataset advertises a lint conclusion; set it now that the

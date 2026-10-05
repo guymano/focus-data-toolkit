@@ -6,10 +6,13 @@ rule, independent of the converter and the generators.
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, localcontext
+from pathlib import Path
 
 import pytest
 
+from focus_data_toolkit.convert import convert_to_focus_1_4, read_csv_rows
+from focus_data_toolkit.model.capabilities import CapabilityProfile
 from focus_data_toolkit.model.validator import (
     COND_UNIT_PRICING,
     LEVEL_SEMANTIC,
@@ -73,6 +76,33 @@ def test_cost_identity_tolerance_scales_with_large_costs():
            "ListCost": "1234567800.5"}
     assert rule not in _rules(row)
     assert rule in _rules({**row, "ListCost": "1234567802"})
+    # The tolerance scales with |cost|, so a large negative (credited) cost behaves the same.
+    negative = {"PricingQuantity": "-1000000", "ListUnitPrice": "1234.5678"}
+    assert rule not in _rules({**negative, "ListCost": "-1234567800.5"})
+    assert rule in _rules({**negative, "ListCost": "-1234567802"})
+
+
+def test_cost_identity_tolerance_boundary_is_inclusive():
+    rule = ("cost_not_unit_price_times_quantity", "ListCost")
+    base = {"PricingQuantity": "3", "ListUnitPrice": "0.1"}  # product 0.3, |cost| < 1
+    assert rule not in _rules({**base, "ListCost": "0.300000001"})  # exactly 1e-9 off
+    assert rule in _rules({**base, "ListCost": "0.3000000010000000001"})
+
+
+def test_cost_identity_does_not_depend_on_the_callers_decimal_context():
+    rule = ("cost_not_unit_price_times_quantity", "ListCost")
+    row = {"PricingQuantity": "3", "ListUnitPrice": "0.1", "ListCost": "0.30001"}
+    with localcontext() as ctx:
+        ctx.prec = 4  # would round the product and the difference away
+        assert rule in _rules(row)
+
+
+def test_extreme_amounts_yield_a_violation_not_an_exception():
+    huge_cost = {"PricingQuantity": "3", "ListUnitPrice": "0.1", "ListCost": "9E999999999"}
+    assert ("cost_not_unit_price_times_quantity", "ListCost") in _rules(huge_cost)
+    beyond_exponent_range = {"PricingQuantity": "1E999999999999999999",
+                             "ListUnitPrice": "1E999999999999999999", "ListCost": "1"}
+    assert ("cost_identity_not_computable", "ListCost") in _rules(beyond_exponent_range)
 
 
 # --------------------------------------------------------------------------- #
@@ -92,7 +122,7 @@ def test_unit_follows_quantity(quantity_col, unit_col):
 
 
 # --------------------------------------------------------------------------- #
-# SkuPriceId rules, evaluated only under declared unit pricing
+# SkuPriceId rules
 # --------------------------------------------------------------------------- #
 def test_pricing_columns_must_be_null_without_sku_price_id_under_unit_pricing():
     row = {"ChargeCategory": "Credit", "SkuPriceId": "", "PricingQuantity": "2",
@@ -104,10 +134,49 @@ def test_pricing_columns_must_be_null_without_sku_price_id_under_unit_pricing():
     assert not {r for r in _rules(row) if r[0] == "must_be_null_without_sku_price_id"}
 
 
-def test_unit_prices_required_with_sku_price_id_under_unit_pricing():
+@pytest.mark.parametrize(
+    ("charge", "charge_class"), [("Usage", ""), ("Purchase", ""), ("Usage", "Correction")]
+)
+def test_unit_prices_required_with_sku_price_id_in_every_profile(charge, charge_class):
+    # CAU-ListUnitPrice-C-013 / CAU-ContractedUnitPrice-C-015 have no applicability criteria
+    # in the v1.4 model: they apply whatever conditions the caller declares.
+    row = {"ChargeCategory": charge, "ChargeClass": charge_class, "SkuId": "S1",
+           "SkuPriceId": "SP1", "ListUnitPrice": "", "ContractedUnitPrice": "0.09"}
+    for unit_pricing in (False, True):
+        flagged = _rules(row, unit_pricing=unit_pricing)
+        assert ("required_with_sku_price_id", "ListUnitPrice") in flagged
+        assert ("required_with_sku_price_id", "ContractedUnitPrice") not in flagged
+
+
+def test_unit_price_rules_skip_a_column_the_source_did_not_carry():
     row = {"ChargeCategory": "Usage", "SkuId": "S1", "SkuPriceId": "SP1",
-           "ListUnitPrice": "", "ContractedUnitPrice": "0.09"}
-    flagged = _rules(row, unit_pricing=True)
-    assert ("required_with_sku_price_id", "ListUnitPrice") in flagged
-    assert ("required_with_sku_price_id", "ContractedUnitPrice") not in flagged
-    assert ("required_with_sku_price_id", "ListUnitPrice") not in _rules(row)
+           "ListUnitPrice": "0.12", "ContractedUnitPrice": ""}
+    rule = ("required_with_sku_price_id", "ContractedUnitPrice")
+    assert rule in _rules(row)
+    report = lint_focus_1_4_structure(CU, [row], source_absent_columns=["ContractedUnitPrice"])
+    assert rule not in {(v.rule, v.column) for v in report.violations}
+    # A column missing from the rows themselves (e.g. a 1.4 file read from disk) counts too.
+    without_column = {k: v for k, v in row.items() if k != "ContractedUnitPrice"}
+    assert rule not in _rules(without_column)
+
+
+def test_converter_tells_the_linter_which_columns_its_source_lacked(source_tables):
+    cau, _ = source_tables[("aws", "1.2")]
+    usage = next(r for r in cau if r["ChargeCategory"] == "Usage" and r["SkuPriceId"])
+    with_column = dict(usage, ContractedUnitPrice="")
+    without_column = {k: v for k, v in usage.items() if k != "ContractedUnitPrice"}
+    refused = convert_to_focus_1_4([with_column], mode="strict").reports[CU]
+    assert ("required_with_sku_price_id", "ContractedUnitPrice") in {
+        (v.rule, v.column) for v in refused.violations
+    }
+    accepted = convert_to_focus_1_4([without_column], mode="strict").reports[CU]
+    assert "required_with_sku_price_id" not in {v.rule for v in accepted.violations}
+
+
+def test_client_like_fixture_lints_clean_under_unit_pricing():
+    fixture = Path(__file__).parent / "fixtures" / "client_like" / "consolidated_multi_provider_1_3.csv"
+    result = convert_to_focus_1_4(
+        read_csv_rows(fixture), mode="synthetic",
+        capabilities=CapabilityProfile.of(COND_UNIT_PRICING),
+    )
+    assert result.reports[CU].ok, result.reports[CU].messages()
