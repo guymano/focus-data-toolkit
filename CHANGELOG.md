@@ -13,6 +13,11 @@ policy.
 
 - `ContractCommitmentDurationType` is a `contract_commitment` supplement column. A
   supplied explicit term wins over the derived value.
+- Azure commitment adapters `azure-reservation-orders` and `azure-savings-plan-orders`
+  (REST shape, api-version 2022-11-01). One row per order, keyed by the lowercased order
+  ARM id. Each provides the term, payment model and interval, lifecycle status and the
+  invariant commitment-discount facts. A `lower` adapter transform supports
+  case-insensitive provider identifiers.
 
 ### Fixed
 

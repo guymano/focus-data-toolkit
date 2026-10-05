@@ -30,10 +30,118 @@ def write_csv(path: Path, rows: list[dict[str, str]]) -> Path:
     return path
 
 
-def test_all_four_adapters_registered():
+def test_all_adapters_registered():
     assert set(load_adapters()) == {
-        "aws-invoice-summary", "aws-savings-plans", "azure-invoice", "gcp-compute-commitments"
+        "aws-invoice-summary", "aws-savings-plans", "azure-invoice",
+        "azure-reservation-orders", "azure-savings-plan-orders", "gcp-compute-commitments",
     }
+
+
+# --------------------------------------------------------------------------- #
+# Azure commitment order adapters (REST shape: {"value": [...]} with nested properties)
+# --------------------------------------------------------------------------- #
+RI_ORDER = "/providers/Microsoft.Capacity/reservationOrders/1e6407ba-0000-4000-8000-00000000a001"
+SP_ORDER = "/providers/microsoft.billingbenefits/savingsPlanOrders/20000000-0000-4000-8000-00000000b001"
+
+
+def azure_reservation_orders_json() -> dict:
+    def order(oid: str, term: str, plan: str, state: str) -> dict:
+        return {"id": oid, "name": oid.rsplit("/", 1)[1], "type": "Microsoft.Capacity/reservationOrders",
+                "properties": {"term": term, "billingPlan": plan, "provisioningState": state,
+                               "originalQuantity": 2, "createdDateTime": "2026-04-30T21:22:56.8541664Z",
+                               "benefitStartTime": "2026-05-01T00:00:00Z",
+                               "reservations": [{"id": f"{oid}/reservations/r-1"}]}}
+    return {"value": [
+        order(RI_ORDER, "P1Y", "Upfront", "Succeeded"),
+        order(RI_ORDER[:-4] + "a002", "P3Y", "Monthly", "Cancelled"),
+        order(RI_ORDER[:-4] + "a003", "P5Y", "Monthly", "Failed"),
+    ], "nextLink": None}
+
+
+def azure_savings_plan_orders_json() -> dict:
+    return {"value": [
+        {"id": SP_ORDER, "name": SP_ORDER.rsplit("/", 1)[1],
+         "properties": {"term": "P3Y", "billingPlan": "P1M", "provisioningState": "Succeeded",
+                        "benefitStartTime": "2026-05-01T00:00:00Z",
+                        "savingsPlans": [SP_ORDER.replace("microsoft.billingbenefits",
+                                                          "Microsoft.BillingBenefits") + "/savingsPlans/s-1"]},
+         "sku": {"name": "Compute_Savings_Plan"}},
+        {"id": SP_ORDER[:-4] + "b002", "name": "b002",
+         "properties": {"term": "P1Y", "provisioningState": "Expired", "savingsPlans": []}},
+    ]}
+
+
+def _load(tmp_path: Path, name: str, data: dict):
+    path = tmp_path / name
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return SupplementBundle.load([SupplementFileSpec(path=path)]).get("contract_commitment")
+
+
+def test_azure_reservation_orders_adapter(tmp_path):
+    table = _load(tmp_path, "ri_orders.json", azure_reservation_orders_json())
+    assert table.adapter == "azure-reservation-orders@1"
+    key = (RI_ORDER.lower(),)  # ARM ids are case-insensitive: keyed lowercased
+    assert table.value(key, "ContractCommitmentDurationType") == "12 Months"
+    assert table.value(key, "ContractCommitmentPaymentModel") == "All Upfront"
+    assert table.value(key, "ContractCommitmentPaymentInterval") == "One-Time"
+    assert table.value(key, "ContractCommitmentLifecycleStatus") == "Active"
+    assert table.value(key, "ContractCommitmentCreated") == "2026-04-30T21:22:56.854166Z"
+    assert table.value(key, "ContractCommitmentBenefitCategory") == "Discount"
+    assert table.value(key, "ContractCommitmentModel") == "Continuous"
+    monthly = (RI_ORDER[:-4].lower() + "a002",)
+    assert table.value(monthly, "ContractCommitmentDurationType") == "36 Months"
+    assert table.value(monthly, "ContractCommitmentPaymentModel") == "No Upfront"
+    assert table.value(monthly, "ContractCommitmentPaymentInterval") == "Monthly"
+    assert table.value(monthly, "ContractCommitmentLifecycleStatus") == "Canceled"
+    # 'Failed' has no FOCUS lifecycle value: left for the client, never guessed.
+    failed = (RI_ORDER[:-4].lower() + "a003",)
+    assert table.value(failed, "ContractCommitmentLifecycleStatus") == ""
+    assert table.value(failed, "ContractCommitmentDurationType") == "60 Months"
+    # Not determinable from an order: never emitted.
+    for column in ("ContractCommitmentFulfillmentInterval", "ContractCommitmentOfferCategory",
+                   "ContractCommitmentDiscountPercentage", "InvoiceIssuerName"):
+        assert column not in table.fact_columns, column
+
+
+def test_azure_savings_plan_orders_adapter(tmp_path):
+    table = _load(tmp_path, "sp_orders.json", azure_savings_plan_orders_json())
+    assert table.adapter == "azure-savings-plan-orders@1"
+    key = (SP_ORDER.lower(),)
+    assert table.value(key, "ContractCommitmentDurationType") == "36 Months"
+    assert table.value(key, "ContractCommitmentPaymentModel") == "No Upfront"
+    assert table.value(key, "ContractCommitmentPaymentInterval") == "Monthly"
+    assert table.value(key, "ContractCommitmentLifecycleStatus") == "Active"
+    # No billingPlan: the API says it is required only for monthly plans, but never that its
+    # absence means upfront, so the payment terms are left for the client.
+    upfront = (SP_ORDER[:-4].lower() + "b002",)
+    assert table.value(upfront, "ContractCommitmentPaymentModel") == ""
+    assert table.value(upfront, "ContractCommitmentLifecycleStatus") == "Expired"
+    for column in ("ContractCommitmentFulfillmentInterval", "ContractCommitmentCreated"):
+        assert column not in table.fact_columns, column
+
+
+def test_azure_order_adapters_are_told_apart_by_header():
+    ri = detect_adapter(["id", "name", "properties.term", "properties.originalQuantity",
+                         "properties.reservations", "properties.billingPlan"])
+    sp = detect_adapter(["id", "name", "properties.term", "properties.savingsPlans",
+                         "properties.billingPlan"])
+    assert ri is not None and ri.name == "azure-reservation-orders"
+    assert sp is not None and sp.name == "azure-savings-plan-orders"
+
+
+def test_azure_order_adapter_enriches_a_contract_commitment_keyed_by_order(tmp_path, source_tables):
+    # SightPilot-style 1.3 Contract Commitment keyed by the lowercased order ARM id.
+    cau, cc = source_tables[("azure", "1.3")]
+    cc = [dict(r) for r in cc[:1]]
+    cc[0]["ContractCommitmentId"] = RI_ORDER.lower()
+    table_path = tmp_path / "ri_orders.json"
+    table_path.write_text(json.dumps(azure_reservation_orders_json()), encoding="utf-8")
+    bundle = SupplementBundle.load([SupplementFileSpec(path=table_path)])
+    result = convert_to_focus_1_4(cau, cc, mode=Mode.SYNTHETIC, supplements=bundle)
+    [row] = result.datasets["Contract Commitment"]
+    assert row["ContractCommitmentPaymentModel"] == "All Upfront"
+    assert row["ContractCommitmentDurationType"] == "12 Months"
+    assert row["ContractCommitmentLifecycleStatus"] == "Active"
 
 
 # --------------------------------------------------------------------------- #

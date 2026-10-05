@@ -109,7 +109,18 @@ Shipped adapters:
 | `aws-invoice-summary` | AWS Invoicing API `InvoiceSummary` (`aws invoicing list-invoice-summaries`) | `invoice` |
 | `aws-savings-plans` | AWS Savings Plans inventory (`aws savingsplans describe-savings-plans`), keyed by `savingsPlanArn` (v2), so it joins a Contract Commitment keyed by the fully qualified ARN | `contract_commitment` |
 | `azure-invoice` | Azure Billing Invoices REST API (`az billing invoice list`) | `invoice` |
+| `azure-reservation-orders` | Azure reservation orders, REST shape (`az rest --method get --url "/providers/Microsoft.Capacity/reservationOrders?api-version=2022-11-01"`), one row per order keyed by its ARM id **lowercased** | `contract_commitment` |
+| `azure-savings-plan-orders` | Azure savings plan orders, REST shape (`az rest --method get --url "/providers/Microsoft.BillingBenefits/savingsPlanOrders?api-version=2022-11-01"`), one row per order keyed by its ARM id **lowercased** | `contract_commitment` |
 | `gcp-compute-commitments` | GCP Compute Engine commitments (`gcloud compute commitments list --format=json`) | `contract_commitment` |
+
+The Azure order adapters key each commitment by the **order**, the purchase that carries
+the term, billing plan and price; splits and merges stay inside it. The ARM id is
+lowercased because Azure ids are case-insensitive and Microsoft's APIs and exports mix
+casings. A Contract Commitment source must use the same key. They emit the term
+(`ContractCommitmentDurationType`), the payment model and interval, the lifecycle status
+(from `provisioningState`, without a clock) and the invariant commitment-discount facts.
+They leave out what an order does not determine: the fulfillment interval, the offer
+category, `LastUpdated`, applicability, the discount percentage and the invoice issuer.
 
 Then just pass the export straight to `convert` / `supplements validate`:
 

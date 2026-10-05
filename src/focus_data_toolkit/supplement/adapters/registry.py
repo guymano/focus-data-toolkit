@@ -62,8 +62,20 @@ def _to_utc_datetime(value: str) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%S") + micro + "Z"
 
 
+def _lower(value: str) -> str:
+    """Lowercase an identifier whose provider treats it case-insensitively.
+
+    Azure ARM resource ids are case-insensitive and Microsoft's own APIs and exports mix
+    casings for the same id (``microsoft.capacity/reservationOrders`` vs
+    ``Microsoft.Capacity/reservationorders``), while supplement joins are exact. Adapters
+    that key on such an id lowercase it, and so must the source they join.
+    """
+    return value.strip().lower()
+
+
 _TRANSFORMS = {
     "date_to_utc": _to_utc_datetime,
+    "lower": _lower,
 }
 
 

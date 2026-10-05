@@ -28,6 +28,22 @@
       "sha256": "3539beba9d84cab5ae7fa8f7e2c35fb32d3c333e85a01ff887748ad6a4780e85"
     },
     {
+      "file": "azure_reservation_orders.json",
+      "adapter": "azure-reservation-orders",
+      "target_kind": "contract_commitment",
+      "source": "Azure Reservations REST API \u2014 ReservationOrderResponse (Microsoft.Capacity reservationOrders, list)",
+      "doc_url": "https://learn.microsoft.com/en-us/rest/api/reserved-vm-instances/reservation-order/list?view=rest-reserved-vm-instances-2022-11-01",
+      "sha256": "eacb48b5757ebbc4b3d132fbfc6156ddc6f1d905abdadf7b45a517ec83bd69ef"
+    },
+    {
+      "file": "azure_savings_plan_orders.json",
+      "adapter": "azure-savings-plan-orders",
+      "target_kind": "contract_commitment",
+      "source": "Azure Billing Benefits REST API \u2014 SavingsPlanOrderModel (Microsoft.BillingBenefits savingsPlanOrders, list)",
+      "doc_url": "https://learn.microsoft.com/en-us/rest/api/billingbenefits/savings-plan-order/list?view=rest-billingbenefits-2022-11-01",
+      "sha256": "2b8342cdaba6a9a067cd02c60a5eadf1516dd7edae0f53a02f7100813bea457b"
+    },
+    {
       "file": "gcp_compute_commitments.json",
       "adapter": "gcp-compute-commitments",
       "target_kind": "contract_commitment",

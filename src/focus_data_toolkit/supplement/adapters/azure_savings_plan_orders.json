@@ -1,0 +1,31 @@
+{
+  "adapter": "azure-savings-plan-orders",
+  "version": "1",
+  "target_kind": "contract_commitment",
+  "provenance": {
+    "source": "Azure Billing Benefits REST API — SavingsPlanOrderModel (Microsoft.BillingBenefits savingsPlanOrders, list)",
+    "doc_url": "https://learn.microsoft.com/en-us/rest/api/billingbenefits/savings-plan-order/list?view=rest-billingbenefits-2022-11-01",
+    "field_names_from": "Azure/azure-rest-api-specs specification/billingbenefits/resource-manager/Microsoft.BillingBenefits/BillingBenefits/stable/2022-11-01/billingbenefits.json (SavingsPlanOrderModelProperties, Term P1Y/P3Y/P5Y, BillingPlan P1M, ProvisioningState); P1M as a term is from api-version 2026-06-01",
+    "retrieved": "2026-10-05",
+    "notes": "REST shape: the order JSON is flattened so 'properties.*' become dot-path columns (e.g. az rest --method get --url '/providers/Microsoft.BillingBenefits/savingsPlanOrders?api-version=2022-11-01'). One row per savings plan ORDER, keyed by its ARM id lowercased (Azure ARM ids are case-insensitive); a Contract Commitment source must key the same way. term maps to the FOCUS duration. billingPlan P1M is the monthly plan (no upfront, monthly payments); an order without billingPlan is not mapped, because 'absent means upfront' is not stated by the API. provisioningState maps without a clock: Succeeded=Active, Expired, Cancelled=Canceled, creation/billing states=Pending; Failed has no FOCUS lifecycle value. BenefitCategory=Discount and Model=Continuous are invariant for savings plans (FOCUS 1.4 glossary: a commitment discount). Not emitted: FulfillmentInterval (the commitment grain is on the plan, and api-version 2026-06-01 adds FullTerm besides Hourly), Created (the order has no creation timestamp), OfferCategory, LastUpdated, Applicability, DiscountPercentage and InvoiceIssuerName."
+  },
+  "detect": {
+    "all_of": ["id", "properties.term", "properties.savingsPlans"],
+    "any_of": ["properties.billingPlan", "properties.benefitStartTime", "properties.provisioningState"]
+  },
+  "fields": [
+    {"target": "ContractCommitmentId", "source": "id", "transform": "lower"},
+    {"target": "ContractCommitmentDurationType", "source": "properties.term",
+     "value_map": {"P1M": "1 Month", "P1Y": "12 Months", "P3Y": "36 Months", "P5Y": "60 Months"}},
+    {"target": "ContractCommitmentPaymentModel", "source": "properties.billingPlan",
+     "value_map": {"P1M": "No Upfront"}},
+    {"target": "ContractCommitmentPaymentInterval", "source": "properties.billingPlan",
+     "value_map": {"P1M": "Monthly"}},
+    {"target": "ContractCommitmentLifecycleStatus", "source": "properties.provisioningState",
+     "value_map": {"Succeeded": "Active", "Expired": "Expired", "Cancelled": "Canceled",
+                   "Creating": "Pending", "PendingBilling": "Pending",
+                   "ConfirmedBilling": "Pending", "Created": "Pending"}},
+    {"target": "ContractCommitmentBenefitCategory", "const": "Discount"},
+    {"target": "ContractCommitmentModel", "const": "Continuous"}
+  ]
+}
