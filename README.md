@@ -67,7 +67,9 @@ convert_files("cost_and_usage.csv", "focus-1.4", mode="strict")
 
 ## What it does, and what it doesn't
 
-- Converts FOCUS 1.2/1.3 Cost and Usage into the four FOCUS 1.4 datasets.
+- Converts FOCUS 1.2/1.3 Cost and Usage into the four FOCUS 1.4 datasets. Values a 1.4 rule
+  fixes deterministically are migrated and reported (`FDT-MIG-*`). Values it cannot fix without
+  inventing a fact are refused. See [docs/conversion-rules.md](docs/conversion-rules.md).
 - The three other datasets come only from [supplements](docs/supplements.md) or synthetic mode.
   There is no FOCUS 1.4 generator and no invalid-data generator.
 - Built for real data: bounded-memory streaming (`--stream`), atomic writes, a deterministic

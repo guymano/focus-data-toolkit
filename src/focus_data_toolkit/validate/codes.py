@@ -5,6 +5,7 @@ downstream tooling can key on them across releases. Namespaces:
 
 * ``FDT-DET-*``   — schema / version detection
 * ``FDT-CA-*``    — ContractApplied parsing / migration normalizations
+* ``FDT-MIG-*``   — 1.2/1.3 values migrated (or refused) to meet a FOCUS 1.4 rule
 * ``FDT-CROSS-*`` — inter-dataset referential integrity & reconciliation
 * ``FDT-ALLOC-*`` — split cost allocation
 * ``FDT-CORR-*``  — corrections / credits / billing lifecycle
@@ -40,6 +41,17 @@ CATALOG: dict[str, CodeSpec] = dict([
     # --- ContractApplied parsing / migration --------------------------------------
     _s("FDT-CA-001", Severity.WARNING,
        "legacy FOCUS 1.3 ContractApplied identifier casing normalized (erratum #3)"),
+    # --- value migrations to FOCUS 1.4 rules --------------------------------------
+    _s("FDT-MIG-001", Severity.WARNING,
+       "Tax EffectiveCost set to BilledCost (FOCUS 1.4 CAU-EffectiveCost-C-017)"),
+    _s("FDT-MIG-002", Severity.WARNING,
+       "pricing/quantity values nulled where SkuPriceId is null (FOCUS 1.3+)"),
+    _s("FDT-MIG-003", Severity.WARNING,
+       "null source pricing-currency values backfilled from billing-currency values"),
+    _s("FDT-MIG-010", Severity.ERROR,
+       "Tax EffectiveCost change cannot be restated in a different PricingCurrency"),
+    _s("FDT-MIG-011", Severity.ERROR,
+       "null PricingCurrencyEffectiveCost cannot be backfilled across currencies"),
     # --- multi-provider / context ------------------------------------------------
     _s("FDT-CTX-001", Severity.WARNING, "source carries multiple provider contexts"),
     _s("FDT-CTX-002", Severity.WARNING, "source carries multiple invoice issuers"),

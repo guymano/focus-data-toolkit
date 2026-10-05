@@ -9,6 +9,31 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- 1.2/1.3 Cost and Usage values that FOCUS 1.4 no longer allows are migrated to the 1.4
+  rule instead of being copied into non-conformant output. Each migration is counted and
+  reported, and the affected values carry `DERIVED` lineage:
+  - Tax `EffectiveCost` equals `BilledCost` (CAU-EffectiveCost-C-017), with the net change
+    per billing currency (`FDT-MIG-001`);
+  - pricing and quantity columns, and their units, are nulled where `SkuPriceId` is null
+    (`FDT-MIG-002`);
+  - null source pricing-currency values are backfilled with a warning (`FDT-MIG-003`).
+- A null `PricingCurrencyEffectiveCost` is no longer backfilled from `EffectiveCost` when
+  `PricingCurrency` differs from `BillingCurrency`. The copy labelled a billing-currency
+  amount with another currency. Conversion now stops with `FDT-MIG-011`; a Tax restatement
+  across currencies stops with `FDT-MIG-010`. See
+  [conversion rules](docs/conversion-rules.md).
+
+### Changed
+
+- Manifest provenance: on sources that can trigger those migrations, `EffectiveCost` and
+  the `SkuPriceId`-dependent columns are now labelled `DERIVED` at column level. This
+  follows the "weakest lineage the rule can produce" convention, and `lineage_summary`
+  records the per-value mix. Converted values of the generated samples are unchanged.
+- `ConversionError` and `ConversionCancelled` are defined in `focus_data_toolkit.convert.exceptions`
+  and re-exported unchanged from `focus_data_toolkit.convert`.
+
 ## [0.13.0] — 2026-09-05
 
 Prepared in source; publishing is a separate release step.
