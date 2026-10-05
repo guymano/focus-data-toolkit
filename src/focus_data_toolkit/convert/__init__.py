@@ -40,11 +40,14 @@ from focus_data_toolkit.convert.contract_commitment import (
 )
 from focus_data_toolkit.convert.contract_commitment import convert_contract_commitment
 from focus_data_toolkit.convert.cost_and_usage import (
+    CostAndUsageMigrations,
     contract_applied_legacy_diagnostic,
     convert_cost_and_usage,
     cost_and_usage_provenance,
+    migration_diagnostics,
 )
 from focus_data_toolkit.convert.detect import detect_focus_version
+from focus_data_toolkit.convert.exceptions import ConversionCancelled, ConversionError
 from focus_data_toolkit.convert.invoice_detail import PROVENANCE as INVOICE_DETAIL_PROVENANCE
 from focus_data_toolkit.convert.invoice_detail import build_invoice_details
 from focus_data_toolkit.errors import Diagnostic, Severity
@@ -121,19 +124,6 @@ def source_absent_columns(dataset: str, source_columns: Iterable[str]) -> frozen
         return frozenset()
     present = set(source_columns)
     return frozenset(c for c in dataset_columns(dataset) if c not in present)
-
-
-class ConversionError(ValueError):
-    """Raised when the source cannot be converted."""
-
-
-class ConversionCancelled(ConversionError):
-    """Raised cooperatively when a cancel predicate returns True mid-conversion.
-
-    Subclasses :class:`ConversionError` so existing ``except ConversionError`` handlers
-    still clean up (the atomic staging directory is removed on the way out, so nothing is
-    published); the CLI catches it first to report a distinct cancelled exit code.
-    """
 
 
 @dataclass
@@ -471,9 +461,10 @@ def convert_to_focus_1_4(
     linked = bool(id_mapping)
     cu_counters = LineageCounters()
     ca_legacy: set[str] = set()
+    cu_migrations = CostAndUsageMigrations()
     cu_rows = convert_cost_and_usage(
         cau_rows, version, invoice_detail_ids=id_mapping, counters=cu_counters,
-        legacy_keys=ca_legacy, source_columns=source_cols,
+        legacy_keys=ca_legacy, migrations=cu_migrations, source_columns=source_cols,
     )
     lineage_counts["Cost and Usage"] = cu_counters
     cu_prov = cost_and_usage_provenance(source_cols, version, invoice_detail_linked=linked)
@@ -513,6 +504,7 @@ def convert_to_focus_1_4(
     legacy_diag = contract_applied_legacy_diagnostic(ca_legacy)
     if legacy_diag is not None:
         diagnostics.append(legacy_diag)
+    diagnostics.extend(migration_diagnostics(cu_migrations))
 
     _entries, manifest, produced_output_files = assemble_manifest(
         version=version,

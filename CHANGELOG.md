@@ -44,8 +44,8 @@ policy.
   **Upgrade note:** expect refusals for:
   - provider costs rounded to the cent (exact identity), and 1.2 Correction rows, which
     1.2 exempted from the identity;
-  - Credit rows whose `EffectiveCost` differs from `BilledCost` (C-017), and Tax rows
-    that the converter does not migrate to `BilledCost`;
+  - Credit rows whose `EffectiveCost` differs from `BilledCost` (C-017), which the
+    converter copies as is (Tax rows are migrated, `FDT-MIG-001`);
   - rows with a `SkuPriceId` but a null `ListUnitPrice` or `ContractedUnitPrice` in a
     column the source carries (C-013/C-015).
 - **Output layout:** a `ListUnitPrice` or `ContractedUnitPrice` column the source does
@@ -57,6 +57,36 @@ policy.
 - The client-like test fixture violated the cost identity by a factor of 1000; its
   quantities are corrected. Its Tax row no longer carries a pricing quantity, and its
   pricing-currency effective cost now matches its effective cost.
+- **New byte baseline for conversion manifests.** On sources that can trigger those
+  migrations, `EffectiveCost` and the `SkuPriceId`-dependent columns are now labelled
+  `DERIVED` at column level. This follows the "weakest lineage the rule can produce"
+  convention, and `lineage_summary` records the per-value mix. Converted values of the
+  generated samples are unchanged.
+- `ConversionError` and `ConversionCancelled` are defined in `focus_data_toolkit.convert.exceptions`
+  and re-exported unchanged from `focus_data_toolkit.convert`.
+
+### Fixed
+
+- 1.2/1.3 Cost and Usage values that break a FOCUS 1.4 rule the converter can meet without
+  inventing a fact are migrated, instead of being copied into non-conformant output. Each
+  migration is counted and reported, and each migrated value counts as `DERIVED` in
+  `lineage_summary`:
+  - Tax `EffectiveCost` equals `BilledCost` (CAU-EffectiveCost-C-017), with the exact net
+    change per billing currency (`FDT-MIG-001`). Credit rows, also covered by C-017, are not
+    rewritten;
+  - pricing and quantity columns and their units are nulled where `SkuPriceId` is null, on
+    Tax, Credit, Adjustment and Correction rows (`FDT-MIG-002`). For a 1.2 source this
+    migrates values 1.2 allowed; a 1.3 source already broke its own version's rule;
+  - on Usage/Purchase rows that are not corrections, FOCUS 1.4 requires the same columns to
+    be non-null, so their values are kept and the conflict is reported (`FDT-MIG-004`); so
+    are rows whose `ChargeCategory` is missing or not an allowed value;
+  - null source pricing-currency values are backfilled with a warning (`FDT-MIG-003`).
+- A null `PricingCurrencyEffectiveCost` is no longer backfilled from `EffectiveCost` when
+  `PricingCurrency` differs from `BillingCurrency`, or when `BillingCurrency` is null. The
+  copy labelled a billing-currency amount with another, or an unknown, currency.
+  **Upgrade note:** a multi-currency source with such nulls used to convert; it now stops
+  with `FDT-MIG-011` (CLI exit 2). A Tax restatement across currencies stops with
+  `FDT-MIG-010`. See [conversion rules](docs/conversion-rules.md).
 
 ### Security
 
