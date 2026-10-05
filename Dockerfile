@@ -39,6 +39,15 @@ ENV PATH="/opt/venv/bin:${PATH}" \
     TMPDIR=/work \
     PYTHONUNBUFFERED=1
 
+# Debian security fixes published after the pinned base image was built. Each package is
+# pinned to the exact fixed version, so a rebuild installs the same bytes while the version
+# is in the archive. Drop an entry once a base digest bump ships that version or newer.
+# - libpcre2-8-0 10.42-1+deb12u2 (bookworm-security): CVE-2026-103111, HIGH in the
+#   container scan; the base digest ships 10.42-1+deb12u1.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends --only-upgrade libpcre2-8-0=10.42-1+deb12u2 \
+ && rm -rf /var/lib/apt/lists/*
+
 # Non-root user. `/input` is intended to be mounted read-only; only `/work` (scratch) and
 # `/output` (atomic staging + final files) are written, so the image runs fine with a
 # read-only root filesystem (`docker run --read-only`).
