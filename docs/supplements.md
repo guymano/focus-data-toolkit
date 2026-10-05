@@ -34,7 +34,7 @@ FOCUS 1.x columns. No supplement can fabricate those — fix the export instead.
 | `billing_period` | Billing Period | `InvoiceIssuerName`, `BillingPeriodStart`, `BillingPeriodEnd` | `BillingPeriodCreated`, `BillingPeriodLastUpdated`, `BillingPeriodStatus` |
 | `invoice` | Invoice Detail (header level) | `InvoiceIssuerName`, `InvoiceId` | `InvoiceIssueDate`, `InvoiceIssueStatus`, `PaymentTerms`, `PaymentDueDate`, `ReferenceInvoiceId`, `PurchaseOrderNumber`, `PaymentCurrency` |
 | `invoice_line` | Invoice Detail (line level) | the full business grain (`InvoiceIssuerName`, `InvoiceId`, `BillingAccountId`, `BillingCurrency`, `BillingPeriodStart`, `BillingPeriodEnd`, `ChargeCategory`) | `InvoiceDetailId`, `InvoiceDetailCreated`, `InvoiceDetailLastUpdated`, `InvoiceDetailDescription`, `InvoiceDetailGrain`, `PaymentCurrencyBilledCost`, `PaymentCurrencyInvoiceDetailId` (+ `BilledCost`, accepted only as a reconciliation check) |
-| `contract_commitment` | Contract Commitment | `ContractCommitmentId` | the 1.4-new commercial terms (`ContractCommitmentCreated/LastUpdated`, `ContractCommitmentApplicability`, `…BenefitCategory`, `…FulfillmentInterval`, `…LifecycleStatus`, `…Model`, `…OfferCategory`, `…PaymentInterval`, `…PaymentModel`, `…PaymentUpfrontPercentage`, `…DiscountPercentage`), the explicit term `ContractCommitmentDurationType` (it wins over the value derived from a period spanning whole calendar months, and is required when the period does not), plus optional `ServiceProviderName` / `InvoiceIssuerName` overrides |
+| `contract_commitment` | Contract Commitment | `ContractCommitmentId` | the 1.4-new commercial terms (`ContractCommitmentCreated/LastUpdated`, `ContractCommitmentApplicability`, `…BenefitCategory`, `…FulfillmentInterval`, `…LifecycleStatus`, `…Model`, `…OfferCategory`, `…PaymentInterval`, `…PaymentModel`, `…PaymentUpfrontPercentage`, `…DiscountPercentage`), the explicit term `ContractCommitmentDurationType` (`1 Year`, `3 Years`, `36 Months`: a positive whole number and a v1.4 unit; it wins over the value derived from a period spanning whole calendar months, and is required in strict mode when the period does not), plus optional `ServiceProviderName` / `InvoiceIssuerName` overrides |
 
 Rules that apply to every kind:
 
@@ -96,7 +96,7 @@ $ focus-toolkit supplements adapters
 aws-invoice-summary (v1) -> invoice
     source: AWS Invoicing API — InvoiceSummary (ListInvoiceSummaries)
     doc:    https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_invoicing_InvoiceSummary.html
-aws-savings-plans (v1) -> contract_commitment
+aws-savings-plans (v2) -> contract_commitment
 azure-invoice (v1) -> invoice
 gcp-compute-commitments (v1) -> contract_commitment
     ...
@@ -148,6 +148,8 @@ value is auditable back to the native export. Honesty rules:
   applicability scope) are **not** emitted — the coverage report shows the residual gap and
   you supply those separately.
 - An export that matches no adapter falls back to the generic FOCUS-named path with a clear
-  message. Nothing is ever guessed.
+  message. Nothing is ever guessed. When it almost matches one (typically an export made
+  for an older adapter version), the error names the adapter and the fields it lacks, e.g.
+  `aws-savings-plans@2 requires savingsPlanArn`.
 - Account-type / format variants are distinct versioned tables; an unrecognized variant
   falls back rather than half-matching.

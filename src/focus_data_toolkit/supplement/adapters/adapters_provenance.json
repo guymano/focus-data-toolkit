@@ -17,7 +17,7 @@
       "target_kind": "contract_commitment",
       "source": "AWS Savings Plans API \u2014 SavingsPlan (DescribeSavingsPlans)",
       "doc_url": "https://docs.aws.amazon.com/savingsplans/latest/APIReference/API_SavingsPlan.html",
-      "sha256": "fb06dd5b830d5de83480b566fb3a764e97e2136b069f4477f561dc24f86ffd68"
+      "sha256": "c1bef8a5b4860685db60dc8f334659707fe7779f2fc0276f47896371c5bf79bc"
     },
     {
       "file": "azure_invoice.json",
