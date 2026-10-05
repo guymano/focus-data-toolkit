@@ -243,8 +243,8 @@ def _resolve_kind(
             f"{adapter.source_tag} requires {', '.join(missing)}" for adapter, missing in near
         )
         raise SupplementError(
-            f"{path}: header matches no supplement kind and no provider adapter; "
-            f"closest adapter(s): {closest}"
+            f"{path}: header matches no supplement kind (need all join keys plus at least one "
+            f"fact column) and no provider adapter; closest adapter(s): {closest}"
         )
     detect_kind(header)  # no canonical + no adapter -> raise the canonical "no kind" error
     raise AssertionError("unreachable")  # pragma: no cover

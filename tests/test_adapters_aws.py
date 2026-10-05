@@ -257,6 +257,37 @@ def test_bare_savings_plan_ids_never_join(tmp_path, source_tables):
     )
 
 
+def test_independent_savings_plans_export_joins_an_arn_keyed_commitment(tmp_path, source_tables):
+    # The export rows are written by hand (aws_savings_plans_rows, realistic ARNs); only the
+    # Contract Commitment source is rekeyed to those ARNs, so the supplement is never built
+    # from the ids it must join.
+    cau, cc = source_tables[("aws", "1.3")]
+    commitments = [dict(r) for r in cc if ":savingsplan/" in r["ContractCommitmentId"]][:2]
+    commitments[0]["ContractCommitmentId"] = ARN_A
+    commitments[1]["ContractCommitmentId"] = ARN_B
+    export = write_csv(tmp_path / "sp.csv", aws_savings_plans_rows())
+    bundle = SupplementBundle.load([SupplementFileSpec(path=export)])
+    result = convert_to_focus_1_4(cau, commitments, mode=Mode.SYNTHETIC, supplements=bundle)
+    assert not [d for d in result.diagnostics if d.code == "FDT-SUPP-005"]
+    by_id = {r["ContractCommitmentId"]: r for r in result.datasets["Contract Commitment"]}
+    assert by_id[ARN_A]["ContractCommitmentPaymentModel"] == "No Upfront"
+    assert by_id[ARN_A]["ContractCommitmentLifecycleStatus"] == "Active"
+    assert by_id[ARN_B]["ContractCommitmentPaymentModel"] == "All Upfront"
+    assert by_id[ARN_B]["ContractCommitmentPaymentInterval"] == "One-Time"
+    assert by_id[ARN_B]["ContractCommitmentLifecycleStatus"] == "Expired"
+    # The supplied 3-year term wins over the 1 Year the 12-month period would derive.
+    assert by_id[ARN_B]["ContractCommitmentDurationType"] == "3 Years"
+
+
+def test_malformed_canonical_file_gets_the_canonical_error_not_an_adapter_hint(tmp_path):
+    # InvoiceId and PurchaseOrderNumber are FOCUS names the AWS invoice export shares: a
+    # FOCUS-named invoice file missing InvoiceIssuerName is a malformed canonical file.
+    path = write_csv(tmp_path / "inv.csv", [{"InvoiceId": "INV-1", "PurchaseOrderNumber": "PO-1"}])
+    with pytest.raises(SupplementError, match="need all join keys") as exc:
+        SupplementBundle.load([SupplementFileSpec(path=path)])
+    assert "aws-invoice-summary" not in str(exc.value)
+
+
 def test_adapter_output_flows_through_validation_and_enriches(tmp_path, source_tables):
     # AWS invoice export + minimal PaymentTerms/status supplement -> Invoice Detail enriched.
     cau, _ = source_tables[("aws", "1.2")]
