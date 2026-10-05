@@ -65,6 +65,26 @@ from focus_data_toolkit import convert_files
 convert_files("cost_and_usage.csv", "focus-1.4", mode="strict")
 ```
 
+Everything a library caller needs is importable from the package root, including
+supplements and the failures to handle:
+
+```python
+from pathlib import Path
+
+from focus_data_toolkit import (
+    AtomicWriteError, ConversionError, Mode, SupplementBundle, SupplementError,
+    SupplementFileSpec, convert_files,
+)
+
+try:
+    bundle = SupplementBundle.load([SupplementFileSpec(path=Path("invoices.json"))])
+    convert_files("cost_and_usage.csv", "focus-1.4", mode=Mode.STRICT, supplements=bundle)
+except (ConversionError, SupplementError):
+    ...  # invalid source or unusable supplement: nothing was written
+except AtomicWriteError:
+    ...  # the lint or cross-dataset gate refused publication: nothing was written
+```
+
 ## What it does, and what it doesn't
 
 - Converts FOCUS 1.2/1.3 Cost and Usage into the four FOCUS 1.4 datasets. Values a 1.4 rule
