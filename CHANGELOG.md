@@ -9,6 +9,15 @@ policy.
 
 ## [Unreleased]
 
+### Security
+
+- Refresh the Runner base image digest (`python:3.12-slim-bookworm`) so the image no
+  longer ships the `libpcre2-8-0` 10.42-1 package flagged HIGH by the container scan
+  (CVE-2026-103111, CVE-2026-86145, CVE-2026-89157, CVE-2026-89161).
+- Lock `urllib3` 2.8.0 (PYSEC-2026-4175, -4176, -4177). It reaches the lock only
+  transitively, through the optional `validator` extra (`focus-validator` -> `requests`)
+  and the release tooling (`twine`); the core toolkit has no runtime dependency.
+
 ## [0.13.0] — 2026-09-05
 
 Prepared in source; publishing is a separate release step.

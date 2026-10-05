@@ -6,7 +6,7 @@
 # The base image is pinned by digest (immutable). We start from Debian slim rather than
 # distroless so PyArrow's native libraries, CA certificates and diagnostics work out of the
 # box; hardening to distroless is a later, separately-validated step.
-ARG BASE=python:3.12-slim-bookworm@sha256:d50fb7611f86d04a3b0471b46d7557818d88983fc3136726336b2a4c657aa30b
+ARG BASE=python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3
 
 # --- builder: install into an isolated venv (with the [parquet] extra) --------------------
 FROM ${BASE} AS builder
