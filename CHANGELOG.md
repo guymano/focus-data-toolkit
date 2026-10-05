@@ -9,6 +9,14 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- The supplement API and the documented failures are now public, re-exported from the
+  package root: `SupplementBundle`, `SupplementFileSpec`, `load_bundle_dir`,
+  `compute_gaps`, `GapReport`, `Mode`, `ConversionError`, `SupplementError` and
+  `AtomicWriteError`. Library callers no longer import internal modules, which
+  docs/versioning.md leaves free to change. Existing import paths keep working.
+
 ### Security
 
 - The Runner image no longer ships the `libpcre2-8-0` 10.42-1 package flagged HIGH by
