@@ -9,6 +9,15 @@ policy.
 
 ## [Unreleased]
 
+### Changed
+
+- Manifest provenance: on sources that can trigger those migrations, `EffectiveCost` and
+  the `SkuPriceId`-dependent columns are now labelled `DERIVED` at column level. This
+  follows the "weakest lineage the rule can produce" convention, and `lineage_summary`
+  records the per-value mix. Converted values of the generated samples are unchanged.
+- `ConversionError` and `ConversionCancelled` are defined in `focus_data_toolkit.convert.exceptions`
+  and re-exported unchanged from `focus_data_toolkit.convert`.
+
 ### Fixed
 
 - 1.2/1.3 Cost and Usage values that FOCUS 1.4 no longer allows are migrated to the 1.4
@@ -25,14 +34,16 @@ policy.
   across currencies stops with `FDT-MIG-010`. See
   [conversion rules](docs/conversion-rules.md).
 
-### Changed
+### Security
 
-- Manifest provenance: on sources that can trigger those migrations, `EffectiveCost` and
-  the `SkuPriceId`-dependent columns are now labelled `DERIVED` at column level. This
-  follows the "weakest lineage the rule can produce" convention, and `lineage_summary`
-  records the per-value mix. Converted values of the generated samples are unchanged.
-- `ConversionError` and `ConversionCancelled` are defined in `focus_data_toolkit.convert.exceptions`
-  and re-exported unchanged from `focus_data_toolkit.convert`.
+- The Runner image no longer ships the `libpcre2-8-0` 10.42-1 package flagged HIGH by
+  the container scan (CVE-2026-103111, CVE-2026-86145, CVE-2026-89157, CVE-2026-89161).
+  The base image digest (`python:3.12-slim-bookworm`) is refreshed, bringing
+  10.42-1+deb12u1. The runtime stage then installs the pinned bookworm-security fix
+  10.42-1+deb12u2, which no base digest ships yet.
+- Lock `urllib3` 2.8.0 (PYSEC-2026-4175, -4176, -4177). It reaches the lock only
+  transitively, through the optional `validator` extra (`focus-validator` -> `requests`)
+  and the release tooling (`twine`); the core toolkit has no runtime dependency.
 
 ## [0.13.0] — 2026-09-05
 
