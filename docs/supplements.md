@@ -34,7 +34,7 @@ FOCUS 1.x columns. No supplement can fabricate those — fix the export instead.
 | `billing_period` | Billing Period | `InvoiceIssuerName`, `BillingPeriodStart`, `BillingPeriodEnd` | `BillingPeriodCreated`, `BillingPeriodLastUpdated`, `BillingPeriodStatus` |
 | `invoice` | Invoice Detail (header level) | `InvoiceIssuerName`, `InvoiceId` | `InvoiceIssueDate`, `InvoiceIssueStatus`, `PaymentTerms`, `PaymentDueDate`, `ReferenceInvoiceId`, `PurchaseOrderNumber`, `PaymentCurrency` |
 | `invoice_line` | Invoice Detail (line level) | the full business grain (`InvoiceIssuerName`, `InvoiceId`, `BillingAccountId`, `BillingCurrency`, `BillingPeriodStart`, `BillingPeriodEnd`, `ChargeCategory`) | `InvoiceDetailId`, `InvoiceDetailCreated`, `InvoiceDetailLastUpdated`, `InvoiceDetailDescription`, `InvoiceDetailGrain`, `PaymentCurrencyBilledCost`, `PaymentCurrencyInvoiceDetailId` (+ `BilledCost`, accepted only as a reconciliation check) |
-| `contract_commitment` | Contract Commitment | `ContractCommitmentId` | the 1.4-new commercial terms (`ContractCommitmentCreated/LastUpdated`, `ContractCommitmentApplicability`, `…BenefitCategory`, `…FulfillmentInterval`, `…LifecycleStatus`, `…Model`, `…OfferCategory`, `…PaymentInterval`, `…PaymentModel`, `…PaymentUpfrontPercentage`, `…DiscountPercentage`) plus optional `ServiceProviderName` / `InvoiceIssuerName` overrides |
+| `contract_commitment` | Contract Commitment | `ContractCommitmentId` | the 1.4-new commercial terms (`ContractCommitmentCreated/LastUpdated`, `ContractCommitmentApplicability`, `…BenefitCategory`, `…FulfillmentInterval`, `…LifecycleStatus`, `…Model`, `…OfferCategory`, `…PaymentInterval`, `…PaymentModel`, `…PaymentUpfrontPercentage`, `…DiscountPercentage`), the explicit term `ContractCommitmentDurationType` (it wins over the value derived from a period spanning whole calendar months, and is required when the period does not), plus optional `ServiceProviderName` / `InvoiceIssuerName` overrides |
 
 Rules that apply to every kind:
 
@@ -107,7 +107,7 @@ Shipped adapters:
 | Adapter | Provider export | Target kind |
 |---|---|---|
 | `aws-invoice-summary` | AWS Invoicing API `InvoiceSummary` (`aws invoicing list-invoice-summaries`) | `invoice` |
-| `aws-savings-plans` | AWS Savings Plans inventory (`aws savingsplans describe-savings-plans`) | `contract_commitment` |
+| `aws-savings-plans` | AWS Savings Plans inventory (`aws savingsplans describe-savings-plans`), keyed by `savingsPlanArn` (v2), so it joins a Contract Commitment keyed by the fully qualified ARN | `contract_commitment` |
 | `azure-invoice` | Azure Billing Invoices REST API (`az billing invoice list`) | `invoice` |
 | `gcp-compute-commitments` | GCP Compute Engine commitments (`gcloud compute commitments list --format=json`) | `contract_commitment` |
 

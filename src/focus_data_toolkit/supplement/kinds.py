@@ -78,7 +78,9 @@ INVOICE_LINE_KIND = SupplementKind(
     ),
 )
 
-# The 1.4-new contract-commitment commercial terms a 1.3 source does not carry.
+# The 1.4-new contract-commitment commercial terms a 1.3 source does not carry, plus the
+# explicit term (DurationType), which the converter derives only from a whole number of
+# calendar months: a supplied value wins over the derived one.
 CONTRACT_COMMITMENT_KIND = SupplementKind(
     name="contract_commitment",
     target_dataset="Contract Commitment",
@@ -89,6 +91,7 @@ CONTRACT_COMMITMENT_KIND = SupplementKind(
             "ContractCommitmentBenefitCategory",
             "ContractCommitmentCreated",
             "ContractCommitmentDiscountPercentage",
+            "ContractCommitmentDurationType",
             "ContractCommitmentFulfillmentInterval",
             "ContractCommitmentLastUpdated",
             "ContractCommitmentLifecycleStatus",

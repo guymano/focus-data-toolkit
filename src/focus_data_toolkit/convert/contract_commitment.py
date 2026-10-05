@@ -4,7 +4,9 @@ The 17 columns FOCUS 1.4 adds are populated as follows:
 
 * Derived from the source or the Cost and Usage context:
   ``ContractCommitmentCreated`` / ``ContractCommitmentLastUpdated`` (period
-  start), ``ContractCommitmentDurationType`` (from the commitment period),
+  start), ``ContractCommitmentDurationType`` (from the commitment period, only when
+  it spans a whole number of calendar months; otherwise it is left empty and must
+  be supplied),
   ``InvoiceIssuerName`` / ``ServiceProviderName`` (provider context),
   ``PricingCurrency`` (billing currency),
   ``PricingCurrencyContractCommitmentCost`` (commitment cost).
@@ -24,6 +26,7 @@ The 17 columns FOCUS 1.4 adds are populated as follows:
 
 from __future__ import annotations
 
+import calendar
 import json
 from datetime import datetime
 
@@ -44,7 +47,11 @@ _OBSERVED_FROM_1_3 = (
 )
 PROVENANCE: dict[str, ColumnRule] = {
     **{c: ColumnRule(Lineage.OBSERVED, f"ContractCommitment.{c}") for c in _OBSERVED_FROM_1_3},
-    "ContractCommitmentDurationType": ColumnRule(Lineage.DERIVED, "commitment period span"),
+    "ContractCommitmentDurationType": ColumnRule(
+        Lineage.DERIVED,
+        "commitment period span",
+        note="whole calendar months only; any other span is left empty (not derivable)",
+    ),
     "InvoiceIssuerName": ColumnRule(Lineage.ENRICHED, "Cost and Usage provider context"),
     "ServiceProviderName": ColumnRule(Lineage.ENRICHED, "Cost and Usage provider context"),
     "PricingCurrency": ColumnRule(Lineage.DERIVED, "ContractCommitment.BillingCurrency"),
@@ -98,17 +105,29 @@ def _parse(ts: str) -> datetime | None:
         return None
 
 
+def _add_months(ts: datetime, months: int) -> datetime:
+    """``ts`` shifted by ``months`` calendar months, the day clamped to the month's last day."""
+    total = ts.month - 1 + months
+    year, month = ts.year + total // 12, total % 12 + 1
+    return ts.replace(year=year, month=month, day=min(ts.day, calendar.monthrange(year, month)[1]))
+
+
 def _duration_type(start: str, end: str) -> str:
     """Return an Expected-Format duration like ``"12 Months"`` from the period.
 
-    An unparseable or inverted period yields ``""`` (never a fabricated duration):
-    the value cannot be derived from the source, and the mandatory-column lint will
-    flag the row rather than silently publish an arbitrary ``"12 Months"``.
+    The duration is derived only when the (exclusive) end is exactly the start shifted
+    by a whole number of calendar months (Jan 31 + 1 month = Feb 28/29). Any other span
+    is not a standard offering length that the dates prove (FOCUS says the duration
+    "MAY differ" from the actual period), so it yields ``""``, as do unparseable or
+    inverted periods. The mandatory-column lint then flags the row unless a supplement
+    supplies ``ContractCommitmentDurationType``; nothing is rounded to a guess.
     """
     a, b = _parse(start or ""), _parse(end or "")
     if a is None or b is None or b <= a:
         return ""
-    months = max(1, round((b - a).days / 30.44))
+    months = (b.year - a.year) * 12 + (b.month - a.month)
+    if months < 1 or _add_months(a, months) != b:
+        return ""
     return f"{months} Months" if months > 1 else "1 Month"
 
 
@@ -168,8 +187,9 @@ def convert_contract_commitment(
             Diagnostic(
                 code="FDT-CC-001",
                 severity=Severity.WARNING,
-                message="commitment period unparseable or inverted; "
-                "ContractCommitmentDurationType left empty (not derivable)",
+                message="commitment period unparseable, inverted or not a whole number of "
+                "calendar months; ContractCommitmentDurationType left empty (not derivable: "
+                "supply it in a contract_commitment supplement)",
                 datasets=(DATASET,),
                 context={
                     "row_count": str(len(unparseable_ids)),

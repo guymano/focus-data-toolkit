@@ -9,6 +9,24 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- `ContractCommitmentDurationType` is a `contract_commitment` supplement column. A
+  supplied explicit term wins over the derived value.
+
+### Fixed
+
+- `ContractCommitmentDurationType` is derived only when the commitment period spans a whole
+  number of calendar months (day clamped at month end). It is no longer rounded from
+  `days / 30.44`, which turned any span into a plausible-looking term. Other spans are left
+  empty (`FDT-CC-001`, now in the code catalogue) for a supplement to fill. The generated
+  samples' 12-month periods are unchanged.
+- The `aws-savings-plans` adapter (now v2) is keyed by `savingsPlanArn`, the fully
+  qualified identifier FOCUS recommends and the one Contract Commitment and
+  `CommitmentDiscountId` carry. v1 keyed by the bare `savingsPlanId`, so its rows could
+  never join. Exports without `savingsPlanArn` are no longer auto-detected. The adapter
+  also maps `termDurationInSeconds` (1 and 3 years) to the duration.
+
 ### Security
 
 - The Runner image no longer ships the `libpcre2-8-0` 10.42-1 package flagged HIGH by
