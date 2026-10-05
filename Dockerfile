@@ -6,7 +6,7 @@
 # The base image is pinned by digest (immutable). We start from Debian slim rather than
 # distroless so PyArrow's native libraries, CA certificates and diagnostics work out of the
 # box; hardening to distroless is a later, separately-validated step.
-ARG BASE=python:3.12-slim-bookworm@sha256:d50fb7611f86d04a3b0471b46d7557818d88983fc3136726336b2a4c657aa30b
+ARG BASE=python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3
 
 # --- builder: install into an isolated venv (with the [parquet] extra) --------------------
 FROM ${BASE} AS builder
@@ -38,6 +38,15 @@ ENV PATH="/opt/venv/bin:${PATH}" \
     FOCUS_TOOLKIT_WORK_DIR=/work \
     TMPDIR=/work \
     PYTHONUNBUFFERED=1
+
+# Debian security fixes published after the pinned base image was built. Each package is
+# pinned to the exact fixed version, so a rebuild installs the same bytes while the version
+# is in the archive. Drop an entry once a base digest bump ships that version or newer.
+# - libpcre2-8-0 10.42-1+deb12u2 (bookworm-security): CVE-2026-103111, HIGH in the
+#   container scan; the base digest ships 10.42-1+deb12u1.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends --only-upgrade libpcre2-8-0=10.42-1+deb12u2 \
+ && rm -rf /var/lib/apt/lists/*
 
 # Non-root user. `/input` is intended to be mounted read-only; only `/work` (scratch) and
 # `/output` (atomic staging + final files) are written, so the image runs fine with a
