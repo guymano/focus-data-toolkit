@@ -10,7 +10,10 @@ presented as a FOCUS 1.4 dataset is well-formed against the committed 1.4 data m
   JSON/Key-Value well-formedness with the ``x_`` custom-key rule).
 * ``SEMANTIC_VALID`` — single-row cross-field rules (Tax nulls, consumption gating,
   ``LastUpdated >= Created``, ServiceSubcategory↔ServiceCategory, upfront-percentage vs
-  payment model, condition-aware required columns, ContractApplied deep structure), and
+  payment model, condition-aware required columns, ContractApplied deep structure, the
+  static FOCUS 1.4 Cost and Usage rules: Tax/Credit ``EffectiveCost = BilledCost``, cost =
+  unit price × ``PricingQuantity`` within the official validator's relative tolerance,
+  unit/quantity pairing and, under declared unit pricing, the ``SkuPriceId`` rules), and
   the official FOCUS JSON object schemas (vendored verbatim in ``model/json_schemas/``)
   for ``ContractApplied``, ``AllocatedMethodDetails``,
   ``CommitmentProgramEligibilityDetails`` and ``ContractCommitmentApplicability``.
@@ -65,6 +68,31 @@ _CHECKED_LEVELS: tuple[str, ...] = (LEVEL_STRUCTURAL, LEVEL_SEMANTIC)
 # "conditionally required" columns. Callers pass the subset they declare.
 COND_MULTIPLE_PRICING_CATEGORIES = "SupportsMultiplePricingCategories"
 COND_UNIT_PRICING = "SupportsUnitPricing"
+
+# Columns FOCUS 1.4 requires to be null when SkuPriceId is null (CAU-ListUnitPrice-C-012,
+# CAU-ContractedUnitPrice-C-014, CAU-PricingCurrencyListUnitPrice-C-011,
+# CAU-PricingCurrencyContractedUnitPrice-C-011, CAU-PricingCategory-C-012,
+# CAU-PricingQuantity-C-011, CAU-ConsumedQuantity-C-009, CAU-CommitmentDiscountQuantity-C-016).
+_NULL_WITHOUT_SKU_PRICE_ID: tuple[str, ...] = (
+    "ListUnitPrice",
+    "ContractedUnitPrice",
+    "PricingCurrencyListUnitPrice",
+    "PricingCurrencyContractedUnitPrice",
+    "PricingCategory",
+    "PricingQuantity",
+    "ConsumedQuantity",
+    "CommitmentDiscountQuantity",
+)
+# (quantity, unit) pairs: a unit is null exactly when its quantity is (CAU-*Unit-C-005/006).
+_UNIT_OF_QUANTITY: tuple[tuple[str, str], ...] = (
+    ("PricingQuantity", "PricingUnit"),
+    ("ConsumedQuantity", "ConsumedUnit"),
+    ("CommitmentDiscountQuantity", "CommitmentDiscountUnit"),
+)
+# Relative tolerance of the cost = unit price x quantity identity, the official
+# focus-validator's (ColumnByColumnEqualsColumnValue: |a x b - r| <= 1e-9 x max(|r|, 1)).
+# It absorbs representation rounding only, never a pricing difference.
+_PRODUCT_TOLERANCE = Decimal("1e-9")
 
 _DATASET_ALIASES = {
     "cost and usage": "Cost and Usage", "costandusage": "Cost and Usage", "cau": "Cost and Usage",
@@ -339,6 +367,51 @@ def _cost_and_usage(row: dict, model: dict, supported: frozenset[str]) -> list[t
     if empty("CommitmentDiscountQuantity") and not empty("CommitmentDiscountUnit"):
         out.append(("CommitmentDiscountUnit", "unit_without_quantity",
                     "CommitmentDiscountUnit must be null when CommitmentDiscountQuantity is null"))
+    # The other direction of the unit/quantity pairing (CAU-*Unit-C-005/006).
+    if empty("PricingQuantity") and not empty("PricingUnit"):
+        out.append(("PricingUnit", "unit_without_quantity",
+                    "PricingUnit must be null when PricingQuantity is null"))
+    for quantity_col, unit_col in _UNIT_OF_QUANTITY:
+        if not empty(quantity_col) and empty(unit_col):
+            out.append((unit_col, "quantity_without_unit",
+                        f"{unit_col} must not be null when {quantity_col} is not null"))
+
+    def amount(col: str) -> Decimal | None:
+        return _decimal_or_none((row.get(col) or "").strip())
+
+    # CAU-EffectiveCost-C-017: EffectiveCost MUST equal BilledCost for Tax and Credit.
+    if charge in ("Tax", "Credit"):
+        billed, effective = amount("BilledCost"), amount("EffectiveCost")
+        if billed is not None and effective is not None and billed != effective:
+            out.append(("EffectiveCost", "effective_cost_differs_from_billed",
+                        f"EffectiveCost must equal BilledCost when ChargeCategory is '{charge}'"))
+
+    # CAU-ListCost-C-011 / CAU-ContractedCost-C-011: cost = unit price x PricingQuantity
+    # whenever both are present (Correction rows included since 1.3).
+    quantity = amount("PricingQuantity")
+    if quantity is not None:
+        for cost_col, price_col in (("ListCost", "ListUnitPrice"),
+                                    ("ContractedCost", "ContractedUnitPrice")):
+            price, cost = amount(price_col), amount(cost_col)
+            if price is not None and cost is not None and (
+                abs(price * quantity - cost) > _PRODUCT_TOLERANCE * max(abs(cost), Decimal(1))
+            ):
+                out.append((cost_col, "cost_not_unit_price_times_quantity",
+                            f"{cost_col} must equal {price_col} x PricingQuantity"))
+
+    # SkuPriceId-dependent rules apply only to a provider that declares unit pricing: that is
+    # the presence condition of SkuPriceId, and an undeclared condition is never evaluated.
+    if COND_UNIT_PRICING in supported:
+        if empty("SkuPriceId"):
+            for col in _NULL_WITHOUT_SKU_PRICE_ID:
+                if not empty(col):
+                    out.append((col, "must_be_null_without_sku_price_id",
+                                f"{col} must be null when SkuPriceId is null"))
+        else:
+            for col in ("ListUnitPrice", "ContractedUnitPrice"):
+                if empty(col):
+                    out.append((col, "required_with_sku_price_id",
+                                f"{col} must not be null when SkuPriceId is not null"))
 
     # ChargeFrequency must not be Usage-Based for Purchase charges.
     if charge == "Purchase" and (row.get("ChargeFrequency") or "").strip() == "Usage-Based":

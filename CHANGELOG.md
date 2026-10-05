@@ -9,6 +9,23 @@ policy.
 
 ## [Unreleased]
 
+### Changed
+
+- The FOCUS 1.4 linter now enforces the static Cost and Usage rules of the v1.4
+  requirements model that it did not check. Output that passed before can now fail the
+  lint, and strict publication refuses it:
+  - Tax and Credit `EffectiveCost` equals `BilledCost` (CAU-EffectiveCost-C-017);
+  - `ListCost` and `ContractedCost` equal unit price × `PricingQuantity` when both are
+    present, Correction rows included (C-011). The relative tolerance is the official
+    focus-validator's (1e-9 × max(|cost|, 1));
+  - a unit is null exactly when its quantity is (`PricingUnit`, `ConsumedUnit`,
+    `CommitmentDiscountUnit`, C-005/C-006);
+  - under a declared `SupportsUnitPricing` condition, the pricing and quantity columns
+    are null when `SkuPriceId` is null, and the list and contracted unit prices are
+    present when it is set.
+- The client-like test fixture violated the cost identity by a factor of 1000; its
+  quantities are corrected.
+
 ### Security
 
 - The Runner image no longer ships the `libpcre2-8-0` 10.42-1 package flagged HIGH by
