@@ -563,10 +563,10 @@ def lint_focus_1_4_structure(
     columns are enforced only for those conditions (default: none enforced, so
     sparse-but-valid rows pass — an undeclared condition is *not evaluated*).
 
-    ``source_absent_columns`` names columns the producer emitted as null because its
-    source did not carry them (the converter writes every 1.4 column). Together with the
-    columns missing from ``rows``, they are treated as absent, so a rule that depends on a
-    column's presence is not evaluated for them.
+    A model column missing from ``rows`` is treated as absent, so a rule that depends on a
+    column's presence is not evaluated for it. ``source_absent_columns`` lets a producer that
+    writes such a column all null (rather than omitting it, as this toolkit's converter does)
+    name it as absent too.
     """
     name = resolve_dataset(dataset)
     model = model or load_model()

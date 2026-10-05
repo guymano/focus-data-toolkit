@@ -273,10 +273,28 @@ _DERIVED_FROM_1_2 = {
 
 
 # Conditional unit-price columns whose rules depend on their presence: "MUST NOT be null when
-# SkuPriceId is not null" (CAU-ListUnitPrice-C-013, CAU-ContractedUnitPrice-C-015) holds only
-# where the column exists. A source without the column has not met its presence condition,
-# so the 1.4 output omits it too; written all null, it would fail any validator.
-OMITTED_WHEN_ABSENT_FROM_SOURCE: tuple[str, ...] = ("ListUnitPrice", "ContractedUnitPrice")
+# SkuPriceId is not null" (CAU-ListUnitPrice-C-013, CAU-ContractedUnitPrice-C-015, and C-012 of
+# both pricing-currency unit prices) holds only where the column exists. A source without the
+# column has not met its presence condition, so the 1.4 output omits it too; written all null,
+# it would fail any validator applying those rules.
+OMITTED_WHEN_ABSENT_FROM_SOURCE: tuple[str, ...] = (
+    "ListUnitPrice",
+    "ContractedUnitPrice",
+    "PricingCurrencyListUnitPrice",
+    "PricingCurrencyContractedUnitPrice",
+)
+
+
+def source_header(rows: Iterable[Mapping[str, str]]) -> tuple[str, ...]:
+    """Every column any of ``rows`` carries, in first-seen order: the header of in-memory rows.
+
+    Rows read from a file share one header; dicts built by a caller may not, and a column only
+    some rows carry is still present in the source (a row without the key has a null value).
+    """
+    header: dict[str, None] = {}
+    for row in rows:
+        header.update(dict.fromkeys(row))
+    return tuple(header)
 
 
 def emitted_cost_and_usage_columns(source_columns: Iterable[str]) -> tuple[str, ...]:
@@ -566,11 +584,11 @@ def convert_cost_and_usage(
     ``invoice_detail_ids`` maps each Invoice Detail business-grain key to the
     ``InvoiceDetailId`` assigned by the Invoice Detail builder, so converted rows link back
     to their invoice line item on exactly the same key. ``source_columns`` (the source
-    header; by default the first row's columns) decides which conditional columns are
-    omitted (:func:`emitted_cost_and_usage_columns`).
+    header; by default every column any row carries, see :func:`source_header`) decides which
+    conditional columns are omitted (:func:`emitted_cost_and_usage_columns`).
     """
     if source_columns is None:
-        source_columns = rows[0].keys() if rows else ()
+        source_columns = source_header(rows)
     target = emitted_cost_and_usage_columns(source_columns)
     ids = invoice_detail_ids or {}
     return [

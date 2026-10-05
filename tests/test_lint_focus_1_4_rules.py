@@ -129,13 +129,29 @@ def test_cost_identity_ignores_a_caller_context_that_traps_inexact():
         {"ListCost": "1E1001"},
     ],
 )
-def test_extreme_exponents_are_not_computable_and_never_computed(extreme):
+@pytest.mark.parametrize(
+    ("cost_col", "price_col"),
+    [("ListCost", "ListUnitPrice"), ("ContractedCost", "ContractedUnitPrice")],
+)
+def test_extreme_exponents_are_not_computable_and_never_computed(extreme, cost_col, price_col):
     # Exact arithmetic on such operands could need billions of digits (a MemoryError): they
-    # are reported as not computable before any arithmetic.
-    row = {"PricingQuantity": "3", "ListUnitPrice": "0.1", "ListCost": "0.3", **extreme}
-    flagged = _rules(row)
-    assert ("cost_identity_not_computable", "ListCost") in flagged
-    assert ("cost_not_unit_price_times_quantity", "ListCost") not in flagged
+    # are reported as not computable before any arithmetic, within a small memory budget.
+    import tracemalloc
+
+    extreme = {
+        k.replace("ListCost", cost_col).replace("ListUnitPrice", price_col): v
+        for k, v in extreme.items()
+    }
+    row = {"PricingQuantity": "3", price_col: "0.1", cost_col: "0.3", **extreme}
+    tracemalloc.start()
+    try:
+        flagged = _rules(row)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert ("cost_identity_not_computable", cost_col) in flagged
+    assert ("cost_not_unit_price_times_quantity", cost_col) not in flagged
+    assert peak < 20 * 1024 * 1024
 
 
 def test_large_but_bounded_exponents_are_still_computed_exactly():
@@ -252,7 +268,11 @@ def test_streaming_tells_the_linter_which_columns_its_source_lacked(tmp_path, so
     assert not (tmp_path / "out2" / "focus_1_4_manifest.json").exists()
 
 
-@pytest.mark.parametrize("column", ["ListUnitPrice", "ContractedUnitPrice"])
+@pytest.mark.parametrize(
+    "column",
+    ["ListUnitPrice", "ContractedUnitPrice", "PricingCurrencyListUnitPrice",
+     "PricingCurrencyContractedUnitPrice"],
+)
 def test_a_unit_price_column_the_source_lacked_is_not_written(tmp_path, source_tables, column):
     # Its presence condition is not met, so the 1.4 output omits it too: written all null, it
     # would break C-013/C-015 for any validator that cannot know the source lacked it.
@@ -275,7 +295,22 @@ def test_a_unit_price_column_the_source_lacked_is_not_written(tmp_path, source_t
 def test_a_unit_price_column_the_source_carries_is_always_written(source_tables):
     cau, _ = source_tables[("aws", "1.2")]
     result = convert_to_focus_1_4(cau, mode="strict")
-    assert {"ListUnitPrice", "ContractedUnitPrice"} <= set(result.datasets[CU][0])
+    assert {"ListUnitPrice", "ContractedUnitPrice", "PricingCurrencyListUnitPrice",
+            "PricingCurrencyContractedUnitPrice"} <= set(result.datasets[CU][0])
+
+
+def test_a_column_only_later_rows_carry_is_still_written(source_tables):
+    # In-memory rows may differ in keys: a column some row carries is present in the source,
+    # whatever the first row holds, and no value of a later row is dropped.
+    cau, _ = source_tables[("aws", "1.2")]
+    rows = [dict(r) for r in cau[:5]]
+    first = {k: v for k, v in rows[0].items() if k != "ContractedUnitPrice"}
+    result = convert_to_focus_1_4([first, *rows[1:]], mode="synthetic", validate=False)
+    out = result.datasets[CU]
+    assert all("ContractedUnitPrice" in r for r in out)
+    assert [r["ContractedUnitPrice"] for r in out[1:]] == [r["ContractedUnitPrice"] for r in rows[1:]]
+    assert out[0]["ContractedUnitPrice"] == ""
+    assert "ContractedUnitPrice" in result.manifest["datasets"][CU]["columns"]
 
 
 def test_client_like_fixture_lints_clean_under_unit_pricing():

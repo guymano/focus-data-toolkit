@@ -45,6 +45,7 @@ from focus_data_toolkit.convert.cost_and_usage import (
     convert_cost_and_usage,
     cost_and_usage_provenance,
     migration_diagnostics,
+    source_header,
 )
 from focus_data_toolkit.convert.detect import detect_focus_version
 from focus_data_toolkit.convert.exceptions import ConversionCancelled, ConversionError
@@ -58,7 +59,7 @@ from focus_data_toolkit.io.atomic_writer import (
     OnExists,
     sha256sums_text,
 )
-from focus_data_toolkit.model import FOCUS_1_4_DATASETS, dataset_columns, load_model
+from focus_data_toolkit.model import FOCUS_1_4_DATASETS, load_model
 from focus_data_toolkit.model.capabilities import CapabilityProfile
 from focus_data_toolkit.model.validator import LintReport, lint_focus_1_4_structure
 from focus_data_toolkit.modes import Mode
@@ -109,21 +110,6 @@ def output_filename_for(
     if output_format == "parquet" and base.endswith(".csv"):
         base = base[:-4] + ("" if partitioned else ".parquet")
     return f"synthetic_{base}" if synthetic_prefix else base
-
-
-def source_absent_columns(dataset: str, source_columns: Iterable[str]) -> frozenset[str]:
-    """The Cost and Usage columns the source did not carry.
-
-    The converter emits them null, except the unit-price columns it omits altogether
-    (``OMITTED_WHEN_ABSENT_FROM_SOURCE``). The linter treats them as absent, so a rule that
-    depends on a column's presence is not evaluated for a column the provider never
-    supplied. Other datasets are derived, not copied from a source, so nothing is reported
-    for them.
-    """
-    if dataset != "Cost and Usage":
-        return frozenset()
-    present = set(source_columns)
-    return frozenset(c for c in dataset_columns(dataset) if c not in present)
 
 
 @dataclass
@@ -356,7 +342,9 @@ def convert_to_focus_1_4(
         cau_rows[0].keys(), source_version=source_version, source_dataset=source_dataset, mode=mode
     )
     synthetic = mode is Mode.SYNTHETIC
-    source_cols = set(cau_rows[0].keys())
+    # Every column any row carries: in-memory rows may differ in keys, and a column only some
+    # rows carry is still present in the source (a row without the key has a null value).
+    source_cols = set(source_header(cau_rows))
 
     # Provider/issuer context is derived from the whole source, never the first row. A single
     # representative is needed only to enrich synthetic Contract Commitment (whose 1.3 source
@@ -536,10 +524,9 @@ def convert_to_focus_1_4(
     )
     if validate:
         for name, rows in produced.items():
-            report = lint_focus_1_4_structure(
-                name, rows, profile=capabilities,
-                source_absent_columns=source_absent_columns(name, source_cols),
-            )
+            # A conditional column the source lacked is omitted from ``rows``, so the lint
+            # treats it as absent without being told.
+            report = lint_focus_1_4_structure(name, rows, profile=capabilities)
             result.reports[name] = report
             entry = result.manifest["datasets"][name]
             # Only a factual dataset advertises a lint conclusion; set it now that the
