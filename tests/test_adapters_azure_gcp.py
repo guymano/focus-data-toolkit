@@ -40,108 +40,239 @@ def test_all_adapters_registered():
 # --------------------------------------------------------------------------- #
 # Azure commitment order adapters (REST shape: {"value": [...]} with nested properties)
 # --------------------------------------------------------------------------- #
-RI_ORDER = "/providers/Microsoft.Capacity/reservationOrders/1e6407ba-0000-4000-8000-00000000a001"
-SP_ORDER = "/providers/microsoft.billingbenefits/savingsPlanOrders/20000000-0000-4000-8000-00000000b001"
+RI_BASE = "/providers/Microsoft.Capacity/reservationOrders/1e6407ba-0000-4000-8000-00000000"
+SP_BASE = "/providers/microsoft.billingbenefits/savingsPlanOrders/20000000-0000-4000-8000-00000000"
+NEXT_LINK = "https://management.azure.com/providers/Microsoft.Capacity/reservationOrders?$skiptoken=x"
 
 
-def azure_reservation_orders_json() -> dict:
-    def order(oid: str, term: str, plan: str, state: str) -> dict:
-        return {"id": oid, "name": oid.rsplit("/", 1)[1], "type": "Microsoft.Capacity/reservationOrders",
-                "properties": {"term": term, "billingPlan": plan, "provisioningState": state,
-                               "originalQuantity": 2, "createdDateTime": "2026-04-30T21:22:56.8541664Z",
-                               "benefitStartTime": "2026-05-01T00:00:00Z",
-                               "reservations": [{"id": f"{oid}/reservations/r-1"}]}}
-    return {"value": [
-        order(RI_ORDER, "P1Y", "Upfront", "Succeeded"),
-        order(RI_ORDER[:-4] + "a002", "P3Y", "Monthly", "Cancelled"),
-        order(RI_ORDER[:-4] + "a003", "P5Y", "Monthly", "Failed"),
-    ], "nextLink": None}
+def ri_order(n: int, *, term: str = "P1Y", plan: str = "Upfront",
+             state: str = "Succeeded") -> dict:
+    # ReservationOrderResponse (reservations.json 2022-11-01), as Microsoft's List sample.
+    oid = f"{RI_BASE}{n:04d}"
+    return {"id": oid, "name": oid.rsplit("/", 1)[1], "type": "Microsoft.Capacity/reservationOrders",
+            "etag": 3,
+            "properties": {"displayName": "VM_RI_04-30-2026_14-20", "term": term,
+                           "billingPlan": plan, "provisioningState": state,
+                           "originalQuantity": 2, "requestDateTime": "2026-04-30T21:20:11.0335512Z",
+                           "createdDateTime": "2026-04-30T21:22:56.8541664Z",
+                           "benefitStartTime": "2026-05-01T00:00:00Z",
+                           "expiryDateTime": "2027-05-01T00:00:00Z",
+                           "reservations": [{"id": f"{oid}/reservations/r-1"}]}}
 
 
-def azure_savings_plan_orders_json() -> dict:
-    return {"value": [
-        {"id": SP_ORDER, "name": SP_ORDER.rsplit("/", 1)[1],
-         "properties": {"term": "P3Y", "billingPlan": "P1M", "provisioningState": "Succeeded",
-                        "benefitStartTime": "2026-05-01T00:00:00Z",
-                        "savingsPlans": [SP_ORDER.replace("microsoft.billingbenefits",
-                                                          "Microsoft.BillingBenefits") + "/savingsPlans/s-1"]},
-         "sku": {"name": "Compute_Savings_Plan"}},
-        {"id": SP_ORDER[:-4] + "b002", "name": "b002",
-         "properties": {"term": "P1Y", "provisioningState": "Expired", "savingsPlans": []}},
-    ]}
+def sp_order(n: int, *, term: str = "P3Y", plan: str | None = "P1M",
+             state: str = "Succeeded") -> dict:
+    # SavingsPlanOrderModel (billingbenefits.json 2022-11-01); savingsPlans is optional.
+    oid = f"{SP_BASE}{n:04d}"
+    properties = {"displayName": "Compute_SavingsPlan_10-05-2026", "term": term,
+                  "provisioningState": state, "benefitStartTime": "2026-05-01T00:00:00Z",
+                  "expiryDateTime": "2029-05-01T00:00:00Z",
+                  "billingScopeId": "/subscriptions/00000000-0000-0000-0000-000000000000"}
+    if plan is not None:
+        properties["billingPlan"] = plan
+    return {"id": oid, "name": oid.rsplit("/", 1)[1],
+            "type": "microsoft.billingbenefits/savingsPlanOrders",
+            "sku": {"name": "Compute_Savings_Plan"}, "properties": properties}
 
 
-def _load(tmp_path: Path, name: str, data: dict):
+def _load(tmp_path: Path, name: str, orders: list[dict]):
     path = tmp_path / name
-    path.write_text(json.dumps(data), encoding="utf-8")
+    path.write_text(json.dumps({"value": orders, "nextLink": NEXT_LINK}), encoding="utf-8")
     return SupplementBundle.load([SupplementFileSpec(path=path)]).get("contract_commitment")
 
 
-def test_azure_reservation_orders_adapter(tmp_path):
-    table = _load(tmp_path, "ri_orders.json", azure_reservation_orders_json())
+def _mapped(table, orders: list[dict], column: str) -> list[str]:
+    return [table.value((order["id"].lower(),), column) for order in orders]
+
+
+# Every spec enum value, plus off-enum and differently cased values (the enums are
+# modelAsString, so anything else may arrive and must be dropped, never guessed).
+RI_TERMS = {"P1Y": "1 Year", "P3Y": "3 Years", "P5Y": "5 Years", "P2Y": "", "p1y": ""}
+RI_PLANS = {"Upfront": ("All Upfront", "One-Time"), "Monthly": ("No Upfront", "Monthly"),
+            "upfront": ("", ""), "Quarterly": ("", "")}
+RI_STATES = {
+    "Creating": "Pending", "PendingResourceHold": "Pending", "ConfirmedResourceHold": "Pending",
+    "PendingBilling": "Pending", "ConfirmedBilling": "Pending", "Created": "Pending",
+    "Cancelled": "Canceled", "Expired": "Expired",
+    # Provisioning finished says nothing about the term (running, or an exhausted pool).
+    "Succeeded": "",
+    # No FOCUS lifecycle value.
+    "BillingFailed": "", "Failed": "", "Split": "", "Merged": "",
+    "expired": "", "Exhausted": "",
+}
+SP_TERMS = {"P1M": "1 Month", "P1Y": "1 Year", "P3Y": "3 Years", "P5Y": "5 Years", "P2Y": ""}
+SP_PLANS = {"P1M": ("No Upfront", "Monthly"), None: ("", ""), "Upfront": ("", ""), "p1m": ("", "")}
+SP_STATES = {
+    "Creating": "Pending", "PendingBilling": "Pending", "ConfirmedBilling": "Pending",
+    "Created": "Pending", "Cancelled": "Canceled", "Expired": "Expired",
+    "Succeeded": "", "Failed": "", "cancelled": "",
+}
+
+
+def test_azure_reservation_order_terms(tmp_path):
+    orders = [ri_order(n, term=t) for n, t in enumerate(RI_TERMS)]
+    table = _load(tmp_path, "ri.json", orders)
+    assert _mapped(table, orders, "ContractCommitmentDurationType") == list(RI_TERMS.values())
+
+
+def test_azure_reservation_order_billing_plans(tmp_path):
+    orders = [ri_order(n, plan=p) for n, p in enumerate(RI_PLANS)]
+    table = _load(tmp_path, "ri.json", orders)
+    assert _mapped(table, orders, "ContractCommitmentPaymentModel") == [
+        model for model, _ in RI_PLANS.values()
+    ]
+    assert _mapped(table, orders, "ContractCommitmentPaymentInterval") == [
+        interval for _, interval in RI_PLANS.values()
+    ]
+
+
+def test_azure_reservation_order_states(tmp_path):
+    orders = [ri_order(n, state=s) for n, s in enumerate(RI_STATES)]
+    table = _load(tmp_path, "ri.json", orders)
+    assert _mapped(table, orders, "ContractCommitmentLifecycleStatus") == list(RI_STATES.values())
+
+
+def test_azure_reservation_order_facts(tmp_path):
+    table = _load(tmp_path, "ri_orders.json", [ri_order(1)])
     assert table.adapter == "azure-reservation-orders@1"
-    key = (RI_ORDER.lower(),)  # ARM ids are case-insensitive: keyed lowercased
-    assert table.value(key, "ContractCommitmentDurationType") == "12 Months"
-    assert table.value(key, "ContractCommitmentPaymentModel") == "All Upfront"
-    assert table.value(key, "ContractCommitmentPaymentInterval") == "One-Time"
-    assert table.value(key, "ContractCommitmentLifecycleStatus") == "Active"
+    key = (f"{RI_BASE}0001".lower(),)  # ARM ids are case-insensitive: keyed lowercased
     assert table.value(key, "ContractCommitmentCreated") == "2026-04-30T21:22:56.854166Z"
     assert table.value(key, "ContractCommitmentBenefitCategory") == "Discount"
-    assert table.value(key, "ContractCommitmentModel") == "Continuous"
-    monthly = (RI_ORDER[:-4].lower() + "a002",)
-    assert table.value(monthly, "ContractCommitmentDurationType") == "36 Months"
-    assert table.value(monthly, "ContractCommitmentPaymentModel") == "No Upfront"
-    assert table.value(monthly, "ContractCommitmentPaymentInterval") == "Monthly"
-    assert table.value(monthly, "ContractCommitmentLifecycleStatus") == "Canceled"
-    # 'Failed' has no FOCUS lifecycle value: left for the client, never guessed.
-    failed = (RI_ORDER[:-4].lower() + "a003",)
-    assert table.value(failed, "ContractCommitmentLifecycleStatus") == ""
-    assert table.value(failed, "ContractCommitmentDurationType") == "60 Months"
     # Not determinable from an order: never emitted.
-    for column in ("ContractCommitmentFulfillmentInterval", "ContractCommitmentOfferCategory",
-                   "ContractCommitmentDiscountPercentage", "InvoiceIssuerName"):
+    for column in ("ContractCommitmentModel", "ContractCommitmentFulfillmentInterval",
+                   "ContractCommitmentOfferCategory", "ContractCommitmentDiscountPercentage",
+                   "ContractCommitmentLastUpdated", "ContractCommitmentApplicability",
+                   "InvoiceIssuerName"):
         assert column not in table.fact_columns, column
 
 
-def test_azure_savings_plan_orders_adapter(tmp_path):
-    table = _load(tmp_path, "sp_orders.json", azure_savings_plan_orders_json())
-    assert table.adapter == "azure-savings-plan-orders@1"
-    key = (SP_ORDER.lower(),)
-    assert table.value(key, "ContractCommitmentDurationType") == "36 Months"
-    assert table.value(key, "ContractCommitmentPaymentModel") == "No Upfront"
-    assert table.value(key, "ContractCommitmentPaymentInterval") == "Monthly"
-    assert table.value(key, "ContractCommitmentLifecycleStatus") == "Active"
+def test_azure_savings_plan_order_terms(tmp_path):
+    orders = [sp_order(n, term=t) for n, t in enumerate(SP_TERMS)]
+    table = _load(tmp_path, "sp.json", orders)
+    assert _mapped(table, orders, "ContractCommitmentDurationType") == list(SP_TERMS.values())
+
+
+def test_azure_savings_plan_order_billing_plans(tmp_path):
     # No billingPlan: the API says it is required only for monthly plans, but never that its
     # absence means upfront, so the payment terms are left for the client.
-    upfront = (SP_ORDER[:-4].lower() + "b002",)
-    assert table.value(upfront, "ContractCommitmentPaymentModel") == ""
-    assert table.value(upfront, "ContractCommitmentLifecycleStatus") == "Expired"
-    for column in ("ContractCommitmentFulfillmentInterval", "ContractCommitmentCreated"):
+    orders = [sp_order(n, plan=p) for n, p in enumerate(SP_PLANS)]
+    table = _load(tmp_path, "sp.json", orders)
+    assert _mapped(table, orders, "ContractCommitmentPaymentModel") == [
+        model for model, _ in SP_PLANS.values()
+    ]
+    assert _mapped(table, orders, "ContractCommitmentPaymentInterval") == [
+        interval for _, interval in SP_PLANS.values()
+    ]
+
+
+def test_azure_savings_plan_order_states(tmp_path):
+    orders = [sp_order(n, state=s) for n, s in enumerate(SP_STATES)]
+    table = _load(tmp_path, "sp.json", orders)
+    assert _mapped(table, orders, "ContractCommitmentLifecycleStatus") == list(SP_STATES.values())
+
+
+def test_azure_savings_plan_order_facts(tmp_path):
+    table = _load(tmp_path, "sp_orders.json", [sp_order(1)])
+    assert table.adapter == "azure-savings-plan-orders@1"
+    key = (f"{SP_BASE}0001".lower(),)
+    assert table.value(key, "ContractCommitmentBenefitCategory") == "Discount"
+    # The commitment grain (Hourly or FullTerm) is on the plan, not the order.
+    for column in ("ContractCommitmentModel", "ContractCommitmentFulfillmentInterval",
+                   "ContractCommitmentCreated", "ContractCommitmentOfferCategory",
+                   "ContractCommitmentLastUpdated", "ContractCommitmentApplicability",
+                   "InvoiceIssuerName"):
         assert column not in table.fact_columns, column
+
+
+def _header(record: dict) -> list[str]:
+    from focus_data_toolkit.supplement.loader import _flatten
+
+    return list(_flatten(record))
 
 
 def test_azure_order_adapters_are_told_apart_by_header():
-    ri = detect_adapter(["id", "name", "properties.term", "properties.originalQuantity",
-                         "properties.reservations", "properties.billingPlan"])
-    sp = detect_adapter(["id", "name", "properties.term", "properties.savingsPlans",
-                         "properties.billingPlan"])
-    assert ri is not None and ri.name == "azure-reservation-orders"
-    assert sp is not None and sp.name == "azure-savings-plan-orders"
+    assert detect_adapter(_header(ri_order(1))).name == "azure-reservation-orders"
+    sp = sp_order(1)
+    assert detect_adapter(_header(sp)).name == "azure-savings-plan-orders"
+    # The optional savingsPlans list is not required.
+    assert "properties.savingsPlans" not in _header(sp)
+    with_plans = {**sp, "properties": {**sp["properties"], "savingsPlans": ["x"]}}
+    assert detect_adapter(_header(with_plans)).name == "azure-savings-plan-orders"
 
 
-def test_azure_order_adapter_enriches_a_contract_commitment_keyed_by_order(tmp_path, source_tables):
-    # SightPilot-style 1.3 Contract Commitment keyed by the lowercased order ARM id.
+def test_plan_and_reservation_level_lists_are_not_orders():
+    # SavingsPlanModel and ReservationResponse also carry id, sku, term and billingPlan.
+    plan = {"id": "/providers/Microsoft.BillingBenefits/savingsPlanOrders/o/savingsPlans/p",
+            "sku": {"name": "Compute_Savings_Plan"},
+            "properties": {"term": "P3Y", "billingPlan": "P1M", "provisioningState": "Succeeded",
+                           "displayProvisioningState": "Succeeded", "appliedScopeType": "Shared",
+                           "commitment": {"grain": "Hourly", "currencyCode": "USD", "amount": 0.1},
+                           "benefitStartTime": "2026-05-01T00:00:00Z"}}
+    reservation = {"id": "/providers/Microsoft.Capacity/reservationOrders/o/reservations/r",
+                   "sku": {"name": "Standard_D2s_v3"},
+                   "properties": {"reservedResourceType": "VirtualMachines", "quantity": 1,
+                                  "term": "P1Y", "billingPlan": "Monthly",
+                                  "provisioningState": "Succeeded",
+                                  "benefitStartTime": "2026-05-01T00:00:00Z"}}
+    assert detect_adapter(_header(plan)) is None
+    assert detect_adapter(_header(reservation)) is None
+
+
+def _commitment_source(source_tables, order_id: str) -> tuple[list, list]:
+    # A 1.3 Contract Commitment keyed by the lowercased order ARM id; the period spans a
+    # whole year, so the duration below is derived unless the adapter supplies it.
     cau, cc = source_tables[("azure", "1.3")]
-    cc = [dict(r) for r in cc[:1]]
-    cc[0]["ContractCommitmentId"] = RI_ORDER.lower()
-    table_path = tmp_path / "ri_orders.json"
-    table_path.write_text(json.dumps(azure_reservation_orders_json()), encoding="utf-8")
-    bundle = SupplementBundle.load([SupplementFileSpec(path=table_path)])
+    row = dict(cc[0])
+    row["ContractCommitmentId"] = order_id.lower()
+    return cau, [row]
+
+
+def test_azure_reservation_order_enriches_end_to_end(tmp_path, source_tables):
+    order = ri_order(1, term="P3Y", plan="Monthly", state="Cancelled")
+    cau, cc = _commitment_source(source_tables, order["id"])
+    path = tmp_path / "ri_orders.json"
+    path.write_text(json.dumps({"value": [order]}), encoding="utf-8")
+    bundle = SupplementBundle.load([SupplementFileSpec(path=path)])
     result = convert_to_focus_1_4(cau, cc, mode=Mode.SYNTHETIC, supplements=bundle)
     [row] = result.datasets["Contract Commitment"]
-    assert row["ContractCommitmentPaymentModel"] == "All Upfront"
-    assert row["ContractCommitmentDurationType"] == "12 Months"
-    assert row["ContractCommitmentLifecycleStatus"] == "Active"
+    # Each expected value differs from both the derived value and the synthetic default.
+    assert row["ContractCommitmentDurationType"] == "3 Years"
+    assert row["ContractCommitmentPaymentModel"] == "No Upfront"
+    assert row["ContractCommitmentLifecycleStatus"] == "Canceled"
+    columns = result.manifest["datasets"]["Contract Commitment"]["columns"]
+    source = "supplement:azure-reservation-orders@1:ri_orders.json"
+    for column in ("ContractCommitmentDurationType", "ContractCommitmentLifecycleStatus"):
+        assert columns[column]["lineage"] == "ENRICHED", column
+        assert columns[column]["source"] == source, column
+
+
+def test_azure_savings_plan_order_with_client_terms_end_to_end(tmp_path, source_tables):
+    # The order cannot tell the commitment grain; a client file supplies the model and the
+    # fulfillment interval for the same key, without conflicting with the adapter.
+    order = sp_order(1, term="P5Y", state="Expired")
+    cau, cc = _commitment_source(source_tables, order["id"])
+    orders = tmp_path / "sp_orders.json"
+    orders.write_text(json.dumps({"value": [order]}), encoding="utf-8")
+    terms = write_csv(tmp_path / "terms.csv", [{
+        "ContractCommitmentId": order["id"].lower(),
+        "ContractCommitmentModel": "Discontinuous",
+        "ContractCommitmentFulfillmentInterval": "Full Period",
+    }])
+    bundle = SupplementBundle.load(
+        [SupplementFileSpec(path=orders), SupplementFileSpec(path=terms)]
+    )
+    result = convert_to_focus_1_4(cau, cc, mode=Mode.SYNTHETIC, supplements=bundle)
+    [row] = result.datasets["Contract Commitment"]
+    assert row["ContractCommitmentDurationType"] == "5 Years"
+    assert row["ContractCommitmentLifecycleStatus"] == "Expired"
+    assert row["ContractCommitmentPaymentModel"] == "No Upfront"
+    assert row["ContractCommitmentModel"] == "Discontinuous"
+    assert row["ContractCommitmentFulfillmentInterval"] == "Full Period"
+    columns = result.manifest["datasets"]["Contract Commitment"]["columns"]
+    assert columns["ContractCommitmentDurationType"]["source"] == (
+        "supplement:azure-savings-plan-orders@1:sp_orders.json"
+    )
+    assert columns["ContractCommitmentModel"]["source"] == "supplement:contract_commitment:terms.csv"
 
 
 # --------------------------------------------------------------------------- #

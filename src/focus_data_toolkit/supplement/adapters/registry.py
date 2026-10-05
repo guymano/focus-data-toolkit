@@ -117,9 +117,15 @@ class Adapter:
     fields: tuple[FieldMapping, ...]
     provenance: Mapping[str, str]
 
+    # Fields that identify a sibling export sharing the required ones (e.g. a provider's
+    # plan-level list next to its order-level list): any of them present rules this out.
+    detect_none_of: tuple[str, ...] = ()
+
     def matches(self, header: Sequence[str]) -> bool:
         present = set(header)
         if not set(self.detect_all_of) <= present:
+            return False
+        if present & set(self.detect_none_of):
             return False
         return not self.detect_any_of or bool(present & set(self.detect_any_of))
 
@@ -164,6 +170,7 @@ def _parse_adapter(name: str, data: dict) -> Adapter:
             detect_any_of=tuple(data["detect"].get("any_of", ())),
             fields=fields,
             provenance=data.get("provenance", {}),
+            detect_none_of=tuple(data["detect"].get("none_of", ())),
         )
     except (KeyError, TypeError) as exc:
         raise AdapterError(f"adapter {name!r}: malformed mapping table ({exc})") from exc
@@ -232,6 +239,8 @@ def near_miss_adapters(header: Sequence[str]) -> list[tuple[Adapter, tuple[str, 
         if not missing or len(missing) == len(adapter.detect_all_of):
             continue
         if adapter.detect_any_of and not present & set(adapter.detect_any_of):
+            continue
+        if present & set(adapter.detect_none_of):
             continue
         out.append((adapter, missing))
     return out

@@ -7,7 +7,7 @@
     "doc_url": "https://learn.microsoft.com/en-us/rest/api/reserved-vm-instances/reservation-order/list?view=rest-reserved-vm-instances-2022-11-01",
     "field_names_from": "Azure/azure-rest-api-specs specification/reservations/resource-manager/Microsoft.Capacity/Reservations/stable/2022-11-01/reservations.json (ReservationOrderProperties, ReservationTerm P1Y/P3Y/P5Y, ReservationBillingPlan Upfront/Monthly, ProvisioningState)",
     "retrieved": "2026-10-05",
-    "notes": "REST shape: the order JSON is flattened so 'properties.*' become dot-path columns (e.g. az rest --method get --url '/providers/Microsoft.Capacity/reservationOrders?api-version=2022-11-01'). One row per reservation ORDER: the order is the purchase (it carries the term, billing plan and price) and splits/merges stay inside it, so ContractCommitmentId is the order's ARM id, lowercased because Azure ARM ids are case-insensitive and Microsoft's own exports mix casings; a Contract Commitment source must key the same way. term maps to the FOCUS duration; billingPlan to the payment model and interval (Upfront = one payment, Monthly = no upfront). provisioningState maps without a clock: Succeeded=Active, Expired, Cancelled=Canceled, creation/billing states=Pending; Failed, BillingFailed, Split and Merged have no FOCUS lifecycle value and are left for the client. BenefitCategory=Discount and Model=Continuous are invariant for reservations (FOCUS 1.4 glossary: a commitment discount). Not emitted, because the order does not determine them: FulfillmentInterval (pre-purchase plans such as Databricks are not hourly and the order does not carry the reserved resource type), OfferCategory (EA prices may be negotiated), LastUpdated, Applicability, DiscountPercentage and InvoiceIssuerName (a CSP/MPA partner may issue the invoice)."
+    "notes": "REST shape: the order JSON is flattened so 'properties.*' become dot-path columns (e.g. az rest --method get --url '/providers/Microsoft.Capacity/reservationOrders?api-version=2022-11-01'). The list is paged: each response holds one page in 'value' and a 'nextLink' to the next; pass every page (concatenated, or one supplement file per page: files of one kind are merged). One row per reservation ORDER: the order is the purchase (it carries the term, billing plan and price) and splits/merges stay inside it, so ContractCommitmentId is the order's ARM id, lowercased because Azure ARM ids are case-insensitive and Microsoft's own exports mix casings; a Contract Commitment source must key the same way. term maps to the FOCUS duration; billingPlan to the payment model and interval (Upfront = one payment, Monthly = no upfront). provisioningState maps without a clock: Expired, Cancelled=Canceled, creation/billing states=Pending. Succeeded only says that provisioning finished; it cannot tell a running term from an exhausted pre-purchase pool (FOCUS Exhausted), so it is left for the client, as are Failed, BillingFailed, Split and Merged, which have no FOCUS lifecycle value. BenefitCategory=Discount is invariant for reservations (FOCUS 1.4 glossary: a commitment discount). Not emitted, because the order does not determine them: Model and FulfillmentInterval (pre-purchase plans such as Databricks draw down a pool over the term rather than resetting hourly, and the order does not carry the reserved resource type), OfferCategory (EA prices may be negotiated), LastUpdated, Applicability, DiscountPercentage and InvoiceIssuerName (a CSP/MPA partner may issue the invoice)."
   },
   "detect": {
     "all_of": ["id", "properties.term", "properties.originalQuantity"],
@@ -16,18 +16,17 @@
   "fields": [
     {"target": "ContractCommitmentId", "source": "id", "transform": "lower"},
     {"target": "ContractCommitmentDurationType", "source": "properties.term",
-     "value_map": {"P1Y": "12 Months", "P3Y": "36 Months", "P5Y": "60 Months"}},
+     "value_map": {"P1Y": "1 Year", "P3Y": "3 Years", "P5Y": "5 Years"}},
     {"target": "ContractCommitmentPaymentModel", "source": "properties.billingPlan",
      "value_map": {"Upfront": "All Upfront", "Monthly": "No Upfront"}},
     {"target": "ContractCommitmentPaymentInterval", "source": "properties.billingPlan",
      "value_map": {"Upfront": "One-Time", "Monthly": "Monthly"}},
     {"target": "ContractCommitmentLifecycleStatus", "source": "properties.provisioningState",
-     "value_map": {"Succeeded": "Active", "Expired": "Expired", "Cancelled": "Canceled",
+     "value_map": {"Expired": "Expired", "Cancelled": "Canceled",
                    "Creating": "Pending", "PendingResourceHold": "Pending",
                    "ConfirmedResourceHold": "Pending", "PendingBilling": "Pending",
                    "ConfirmedBilling": "Pending", "Created": "Pending"}},
     {"target": "ContractCommitmentCreated", "source": "properties.createdDateTime", "transform": "date_to_utc"},
-    {"target": "ContractCommitmentBenefitCategory", "const": "Discount"},
-    {"target": "ContractCommitmentModel", "const": "Continuous"}
+    {"target": "ContractCommitmentBenefitCategory", "const": "Discount"}
   ]
 }

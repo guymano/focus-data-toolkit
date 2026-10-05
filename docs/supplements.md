@@ -117,10 +117,19 @@ The Azure order adapters key each commitment by the **order**, the purchase that
 the term, billing plan and price; splits and merges stay inside it. The ARM id is
 lowercased because Azure ids are case-insensitive and Microsoft's APIs and exports mix
 casings. A Contract Commitment source must use the same key. They emit the term
-(`ContractCommitmentDurationType`), the payment model and interval, the lifecycle status
-(from `provisioningState`, without a clock) and the invariant commitment-discount facts.
-They leave out what an order does not determine: the fulfillment interval, the offer
-category, `LastUpdated`, applicability, the discount percentage and the invoice issuer.
+(`ContractCommitmentDurationType`: `1 Year`, `3 Years`, `5 Years`), the payment model and
+interval, the lifecycle status and the benefit category (`Discount`). The lifecycle status
+comes from `provisioningState`, without a clock: `Expired`, `Cancelled` and the creation and
+billing states map; `Succeeded` does not, because finished provisioning cannot tell a
+running term from an exhausted pre-purchase pool. They leave out what an order does not
+determine: the commitment model and fulfillment interval (the commitment grain belongs to
+the plan or the reserved resource), the offer category, `LastUpdated`, applicability, the
+discount percentage and the invoice issuer. Supply those in a `contract_commitment` file
+keyed the same way; it merges with the adapter's columns.
+
+The two list operations are paged: each response holds one page in `value` and a
+`nextLink` to the next. Export every page, then pass the pages concatenated into one
+`value` array, or each page as its own supplement file (files of one kind are merged).
 
 Then just pass the export straight to `convert` / `supplements validate`:
 
