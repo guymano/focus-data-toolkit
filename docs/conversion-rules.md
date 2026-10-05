@@ -68,6 +68,9 @@ Every refusal is a `ConversionError`, and the CLI exits with code 2. The `FDT-MI
   column, emitted null. A copied price or quantity beside it breaks the "MUST be null when
   `SkuPriceId` is null" rules (C-009 to C-016). The converter cannot tell a provider without SKU
   prices from a missing column, so this is a known non-conformance of such outputs.
+- **Amounts with an exponent beyond ±1000.** They are not money, and exact bookkeeping on them
+  could need billions of digits. A Tax row carrying one is copied as is, like an unparseable
+  amount, instead of being migrated by `FDT-MIG-001`.
 - **Columns that cannot be derived.** `CommitmentProgramEligibilityDetails`, `InvoiceDetailId`,
   and an `InvoiceId` the source omits are emitted null. `InvoiceDetailId` can come from an
   `invoice_line` supplement.
