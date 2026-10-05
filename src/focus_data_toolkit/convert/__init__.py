@@ -45,6 +45,7 @@ from focus_data_toolkit.convert.cost_and_usage import (
     convert_cost_and_usage,
     cost_and_usage_provenance,
     migration_diagnostics,
+    source_header,
 )
 from focus_data_toolkit.convert.detect import detect_focus_version
 from focus_data_toolkit.convert.exceptions import ConversionCancelled, ConversionError
@@ -341,7 +342,9 @@ def convert_to_focus_1_4(
         cau_rows[0].keys(), source_version=source_version, source_dataset=source_dataset, mode=mode
     )
     synthetic = mode is Mode.SYNTHETIC
-    source_cols = set(cau_rows[0].keys())
+    # Every column any row carries: in-memory rows may differ in keys, and a column only some
+    # rows carry is still present in the source (a row without the key has a null value).
+    source_cols = set(source_header(cau_rows))
 
     # Provider/issuer context is derived from the whole source, never the first row. A single
     # representative is needed only to enrich synthetic Contract Commitment (whose 1.3 source
@@ -449,7 +452,7 @@ def convert_to_focus_1_4(
     cu_migrations = CostAndUsageMigrations()
     cu_rows = convert_cost_and_usage(
         cau_rows, version, invoice_detail_ids=id_mapping, counters=cu_counters,
-        legacy_keys=ca_legacy, migrations=cu_migrations,
+        legacy_keys=ca_legacy, migrations=cu_migrations, source_columns=source_cols,
     )
     lineage_counts["Cost and Usage"] = cu_counters
     cu_prov = cost_and_usage_provenance(source_cols, version, invoice_detail_linked=linked)
@@ -521,6 +524,8 @@ def convert_to_focus_1_4(
     )
     if validate:
         for name, rows in produced.items():
+            # A conditional column the source lacked is omitted from ``rows``, so the lint
+            # treats it as absent without being told.
             report = lint_focus_1_4_structure(name, rows, profile=capabilities)
             result.reports[name] = report
             entry = result.manifest["datasets"][name]

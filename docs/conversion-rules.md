@@ -15,6 +15,16 @@ v1.4 requirements model (`specification/requirements_model/releases/1.4`).
 - Columns new in 1.3 or 1.4 that the source does not carry are emitted null, for example
   `CommitmentProgramEligibilityDetails` and `InvoiceDetailId`. The manifest records them as
   `UNAVAILABLE`.
+- A unit-price column the source does not carry is **omitted** instead: `ListUnitPrice`,
+  `ContractedUnitPrice`, `PricingCurrencyListUnitPrice` and
+  `PricingCurrencyContractedUnitPrice`.
+  - These conditional columns MUST NOT be null when `SkuPriceId` is set
+    (CAU-ListUnitPrice-C-013, CAU-ContractedUnitPrice-C-015, and C-012 of both pricing-currency
+    unit prices).
+  - A source that does not carry one has not met its presence condition, and an all-null
+    column would fail those rules in any validator.
+  - A column counts as carried when any source row carries it.
+  - The manifest lists no rule for an omitted column.
 
 ## Values migrated to a 1.4 rule
 

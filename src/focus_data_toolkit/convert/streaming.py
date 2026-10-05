@@ -55,6 +55,7 @@ from focus_data_toolkit.convert.cost_and_usage import (
     contract_applied_legacy_diagnostic,
     convert_cost_and_usage_row,
     cost_and_usage_provenance,
+    emitted_cost_and_usage_columns,
     migration_diagnostics,
 )
 from focus_data_toolkit.convert.invoice_detail import PROVENANCE as INVOICE_DETAIL_PROVENANCE
@@ -587,7 +588,7 @@ def convert_files(
             """Scratch DB location: the per-run WORK_DIR subdir if set, else inside staging."""
             return (work_run / name) if work_run is not None else out.path_for(name)
 
-        cu_columns = dataset_columns("Cost and Usage")
+        cu_columns = emitted_cost_and_usage_columns(source_cols)
         cu_partition = partition_map.get("Cost and Usage")
         cu_file = _output_filename(
             "Cost and Usage", provenance, synthetic, output_format, partitioned=bool(cu_partition)

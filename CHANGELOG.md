@@ -19,6 +19,47 @@ policy.
 
 ### Changed
 
+- The FOCUS 1.4 linter now enforces more of the static Cost and Usage rules of the v1.4
+  requirements model. Output that passed before can now fail the lint, and strict
+  publication refuses it:
+  - Tax and Credit `EffectiveCost` equals `BilledCost` (CAU-EffectiveCost-C-017);
+  - `ListCost` and `ContractedCost` equal unit price × `PricingQuantity` when both are
+    present, Correction rows included (C-011). The relative tolerance is the official
+    focus-validator's (1e-9 × max(|cost|, 1)), and the arithmetic is exact whatever the
+    caller's Decimal context. An operand whose exponent lies beyond ±1000 is reported as
+    not computable instead of being computed;
+  - a unit is null exactly when its quantity is (`PricingUnit`, `ConsumedUnit`,
+    `CommitmentDiscountUnit`, C-005/C-006);
+  - `ListUnitPrice` and `ContractedUnitPrice` are present when `SkuPriceId` is set
+    (C-013/C-015). This applies in every profile, as these rules have no applicability
+    criteria, except for a column the source did not carry.
+    `lint_focus_1_4_structure(source_absent_columns=...)` lets a producer name such
+    columns that it writes all null, and a column missing from the rows counts as absent;
+  - under a declared `SupportsUnitPricing` condition, the pricing and quantity columns
+    are null when `SkuPriceId` is null (C-009 to C-016).
+
+  Other static rules of the model are not checked. These include the pricing-currency
+  unit prices' C-012, whose presence is not visible on a row and whose model condition
+  for `PricingCurrencyContractedUnitPrice` contradicts its text.
+  **Upgrade note:** expect refusals for:
+  - provider costs rounded to the cent (exact identity), and 1.2 Correction rows, which
+    1.2 exempted from the identity;
+  - Credit rows whose `EffectiveCost` differs from `BilledCost` (C-017), which the
+    converter copies as is (Tax rows are migrated, `FDT-MIG-001`);
+  - rows with a `SkuPriceId` but a null `ListUnitPrice` or `ContractedUnitPrice` in a
+    column the source carries (C-013/C-015).
+- **Breaking (output layout):** a unit-price column the source does not carry
+  (`ListUnitPrice`, `ContractedUnitPrice`, `PricingCurrencyListUnitPrice`,
+  `PricingCurrencyContractedUnitPrice`) is no longer written all null into the 1.4 Cost
+  and Usage output; it is omitted, as Invoice Detail already omits its unfilled
+  conditional columns. Its presence condition is not met, and written null it would break
+  the "MUST NOT be null when SkuPriceId is not null" rules in any validator, including
+  `focus-toolkit validate` on the published file. A column counts as carried when any
+  source row carries it. Sources that carry all four columns, such as the generated
+  samples, are unchanged.
+- The client-like test fixture violated the cost identity by a factor of 1000; its
+  quantities are corrected. Its Tax row no longer carries a pricing quantity, and its
+  pricing-currency effective cost now matches its effective cost.
 - **New byte baseline for conversion manifests.** On sources that can trigger those
   migrations, `EffectiveCost` and the `SkuPriceId`-dependent columns are now labelled
   `DERIVED` at column level. This follows the "weakest lineage the rule can produce"
