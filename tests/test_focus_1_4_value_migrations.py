@@ -1,7 +1,9 @@
 """1.2/1.3 values migrated (or refused) to meet FOCUS 1.4 Cost and Usage rules.
 
 Each case is a hand-made row derived from a generated 1.2 source row, so the expected
-output follows from the FOCUS 1.4 rule alone, never from the converter under test.
+output follows from the FOCUS 1.4 rule alone, never from the converter under test. The
+column lists below are written out from the v1.4 requirements model on purpose: they are
+the oracle, so they must not be imported from the code they check.
 """
 
 from __future__ import annotations
@@ -9,15 +11,28 @@ from __future__ import annotations
 import pytest
 
 from focus_data_toolkit.convert import ConversionError, convert_to_focus_1_4
-from focus_data_toolkit.convert.cost_and_usage import (
-    NULL_WHEN_SKU_PRICE_ID_NULL,
-    UNIT_OF_QUANTITY,
-    CostAndUsageMigrationError,
-)
+from focus_data_toolkit.convert.cost_and_usage import CostAndUsageMigrationError
 from focus_data_toolkit.validate.codes import CATALOG
 
 CU = "Cost and Usage"
-_CASCADE = (*NULL_WHEN_SKU_PRICE_ID_NULL, *UNIT_OF_QUANTITY.values())
+# v1.4 requirements model: "<column> MUST be null when SkuPriceId is null".
+NULL_WITHOUT_SKU_PRICE_ID = {
+    "ListUnitPrice": "CAU-ListUnitPrice-C-012-C",
+    "ContractedUnitPrice": "CAU-ContractedUnitPrice-C-014-C",
+    "PricingCurrencyListUnitPrice": "CAU-PricingCurrencyListUnitPrice-C-011-C",
+    "PricingCurrencyContractedUnitPrice": "CAU-PricingCurrencyContractedUnitPrice-C-011-C",
+    "PricingCategory": "CAU-PricingCategory-C-012-C",
+    "PricingQuantity": "CAU-PricingQuantity-C-011-C",
+    "ConsumedQuantity": "CAU-ConsumedQuantity-C-009-C",
+    "CommitmentDiscountQuantity": "CAU-CommitmentDiscountQuantity-C-016-C",
+}
+# v1.4 requirements model: "<unit> MUST be null when <quantity> is null" (C-005).
+UNIT_OF_QUANTITY = {
+    "PricingQuantity": "PricingUnit",
+    "ConsumedQuantity": "ConsumedUnit",
+    "CommitmentDiscountQuantity": "CommitmentDiscountUnit",
+}
+CASCADE = (*NULL_WITHOUT_SKU_PRICE_ID, *UNIT_OF_QUANTITY.values())
 
 
 @pytest.fixture
@@ -41,7 +56,7 @@ def tax_row(usage_row) -> dict[str, str]:
         "SkuPriceDetails": "", "BilledCost": "10", "EffectiveCost": "7.5",
         "PricingCurrency": row["BillingCurrency"], "PricingCurrencyEffectiveCost": "7.5",
     })
-    for col in _CASCADE:
+    for col in CASCADE:
         row[col] = ""  # isolate the Tax rule from the SkuPriceId cascade
     return row
 
@@ -56,7 +71,8 @@ def _one(result, code: str):
 
 
 def test_every_migration_code_is_catalogued():
-    for code in ("FDT-MIG-001", "FDT-MIG-002", "FDT-MIG-003", "FDT-MIG-010", "FDT-MIG-011"):
+    for code in ("FDT-MIG-001", "FDT-MIG-002", "FDT-MIG-003", "FDT-MIG-004",
+                 "FDT-MIG-010", "FDT-MIG-011"):
         assert code in CATALOG
 
 
@@ -79,6 +95,16 @@ def test_tax_effective_cost_is_set_to_billed_cost(usage_row, tax_row):
     assert result.reports[CU].ok, result.reports[CU].messages()[:5]
 
 
+def test_tax_delta_is_exact_beyond_the_default_decimal_precision(tax_row):
+    # 31 significant digits: the default 28-digit context would round the reported delta.
+    tax_row.update({"BilledCost": "1.0000000000000000000000000000001",
+                    "EffectiveCost": "0.0000000000000000000000000000002",
+                    "PricingCurrencyEffectiveCost": ""})
+    result = convert_to_focus_1_4([tax_row], mode="strict")
+    delta = _one(result, "FDT-MIG-001").context["effective_cost_delta_by_currency"]
+    assert delta == f"{tax_row['BillingCurrency']}:0.9999999999999999999999999999999"
+
+
 def test_null_tax_effective_cost_takes_billed_cost(tax_row):
     tax_row.update({"EffectiveCost": "", "PricingCurrencyEffectiveCost": ""})
     result = convert_to_focus_1_4([tax_row], mode="strict")
@@ -96,9 +122,10 @@ def test_numerically_equal_tax_amounts_keep_their_source_text(tax_row):
 
 
 def test_credit_effective_cost_is_not_rewritten(tax_row):
-    # FOCUS 1.4 also requires EffectiveCost == BilledCost for Credit, but that already held in
-    # 1.2/1.3 for charges unrelated to others: a violation is a source defect to report, not a
-    # value to migrate.
+    # CAU-EffectiveCost-C-017 covers Credit as well as Tax. 1.2/1.3 tied the equivalent rule
+    # to whether a charge relates to other charges (Credit was only an example), which a row
+    # does not reveal, so rewriting a credit would be a guess: the value is copied and the
+    # violation is left for the linter to report.
     tax_row.update({"ChargeCategory": "Credit", "BilledCost": "-10"})
     result = convert_to_focus_1_4([tax_row], mode="strict")
     [credit] = result.datasets[CU]
@@ -122,16 +149,29 @@ def test_null_pricing_effective_cost_is_not_backfilled_across_currencies(usage_r
         convert_to_focus_1_4([usage_row], mode="strict")
 
 
-def test_pricing_columns_are_nulled_where_sku_price_id_is_null(usage_row):
-    credit = dict(usage_row)
-    credit.update({"ChargeCategory": "Credit", "SkuPriceId": "", "SkuPriceDetails": ""})
-    carried = [c for c in NULL_WHEN_SKU_PRICE_ID_NULL if credit.get(c)]
+def test_null_pricing_effective_cost_is_not_backfilled_without_a_billing_currency(usage_row):
+    # The billing currency of EffectiveCost is unknown: copying it under PricingCurrency would
+    # label an amount of unknown currency.
+    usage_row.update({"BillingCurrency": "", "PricingCurrencyEffectiveCost": ""})
+    with pytest.raises(CostAndUsageMigrationError, match="FDT-MIG-011"):
+        convert_to_focus_1_4([usage_row], mode="strict")
+
+
+@pytest.mark.parametrize(
+    ("charge", "charge_class"),
+    [("Credit", ""), ("Adjustment", ""), ("Usage", "Correction"), ("Purchase", "Correction")],
+)
+def test_pricing_columns_are_nulled_where_sku_price_id_is_null(usage_row, charge, charge_class):
+    row = dict(usage_row)
+    row.update({"ChargeCategory": charge, "ChargeClass": charge_class,
+                "SkuPriceId": "", "SkuPriceDetails": ""})
+    carried = [c for c in NULL_WITHOUT_SKU_PRICE_ID if row.get(c)]
     assert {"ListUnitPrice", "PricingQuantity", "ConsumedQuantity"} <= set(carried)
-    result = convert_to_focus_1_4([usage_row, credit], mode="strict")
+    result = convert_to_focus_1_4([usage_row, row], mode="synthetic", validate=False)
     kept, nulled = result.datasets[CU]
-    for col in _CASCADE:
+    for col in CASCADE:
         assert nulled[col] == "", col
-    # A unit follows its quantity; a row with a SkuPriceId keeps every value.
+    # A row with a SkuPriceId keeps every value.
     for col in carried:
         assert kept[col] == usage_row[col], col
     counts = dict(
@@ -139,11 +179,26 @@ def test_pricing_columns_are_nulled_where_sku_price_id_is_null(usage_row):
         for part in _one(result, "FDT-MIG-002").context["values_by_column"].split("; ")
     )
     expected = set(carried) | {
-        UNIT_OF_QUANTITY[q] for q in carried if q in UNIT_OF_QUANTITY and credit.get(UNIT_OF_QUANTITY[q])
+        UNIT_OF_QUANTITY[q] for q in carried if q in UNIT_OF_QUANTITY and row.get(UNIT_OF_QUANTITY[q])
     }
     assert set(counts) == expected and set(counts.values()) == {"1"}
+    assert "FDT-MIG-004" not in _codes(result)
     summary = result.manifest["datasets"][CU]["lineage_summary"]
     assert summary["PricingQuantity"] == {"DERIVED": 1, "OBSERVED": 1}
+
+
+@pytest.mark.parametrize("charge", ["Usage", "Purchase"])
+def test_usage_and_purchase_rows_without_sku_price_id_keep_their_values(usage_row, charge):
+    # On a Usage/Purchase row that is not a correction, FOCUS 1.4 requires these columns to
+    # be non-null (e.g. CAU-PricingQuantity-C-005-C) as well as null without a SkuPriceId:
+    # nothing can meet both, so real consumption is kept and the conflict is reported.
+    row = dict(usage_row, ChargeCategory=charge, ChargeClass="", SkuPriceId="", SkuPriceDetails="")
+    result = convert_to_focus_1_4([row], mode="synthetic", validate=False)
+    [out] = result.datasets[CU]
+    for col in CASCADE:
+        assert out[col] == row.get(col, ""), col
+    assert "FDT-MIG-002" not in _codes(result)
+    assert _one(result, "FDT-MIG-004").context == {"rows_by_charge_category": f"{charge}:1"}
 
 
 def test_no_cascade_when_the_source_has_no_sku_price_id_column(usage_row):
@@ -151,7 +206,7 @@ def test_no_cascade_when_the_source_has_no_sku_price_id_column(usage_row):
     result = convert_to_focus_1_4([row], mode="strict")
     [out] = result.datasets[CU]
     assert out["PricingQuantity"] == usage_row["PricingQuantity"]
-    assert "FDT-MIG-002" not in _codes(result)
+    assert not {"FDT-MIG-002", "FDT-MIG-004"} & set(_codes(result))
     assert "PricingQuantity" not in result.manifest["datasets"][CU]["lineage_summary"]
 
 

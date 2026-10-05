@@ -22,7 +22,9 @@ the value deterministically, the row is migrated and the change is counted
 * a Tax charge's ``EffectiveCost`` equals its ``BilledCost`` (1.4
   CAU-EffectiveCost-C-017; 1.3 derived it from the related charges' effective cost);
 * the pricing and quantity columns are null when ``SkuPriceId`` is null (1.3 made this
-  explicit, 1.2 only said they "MAY be null"); a unit follows its quantity.
+  explicit, 1.2 only said they "MAY be null"); a unit follows its quantity. On a Usage or
+  Purchase row that is not a correction, the same columns MUST NOT be null, so FOCUS
+  cannot be met there: those values are kept and the conflict is reported instead.
 
 A value that cannot be migrated without inventing a fact raises
 :class:`CostAndUsageMigrationError`, so nothing partial is published.
@@ -33,7 +35,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
+from decimal import MAX_EMAX, MAX_PREC, MIN_EMIN, Context, Decimal, InvalidOperation
 
 from focus_data_toolkit.convert.contract_applied import migrate_1_3_to_1_4
 from focus_data_toolkit.convert.exceptions import ConversionError
@@ -70,6 +72,24 @@ UNIT_OF_QUANTITY: dict[str, str] = {
 _SKU_PRICE_CASCADE: tuple[str, ...] = NULL_WHEN_SKU_PRICE_ID_NULL + tuple(
     UNIT_OF_QUANTITY.values()
 )
+# Exact arithmetic for migration bookkeeping: source amounts may carry more digits than the
+# default 28-digit context, and a reported delta must never be rounded.
+_EXACT = Context(prec=MAX_PREC, Emax=MAX_EMAX, Emin=MIN_EMIN)
+
+
+def _is_conflicting_usage(converted: Mapping[str, str]) -> bool:
+    """Whether FOCUS 1.4 requires the pricing/quantity columns to be non-null on this row.
+
+    For Usage and Purchase charges that are not corrections, ``ListUnitPrice`` (C-005),
+    ``ContractedUnitPrice`` (C-006), ``PricingCategory`` (C-004), ``PricingQuantity``
+    (C-005), ``ConsumedQuantity`` (C-006), ``CommitmentDiscountQuantity`` (C-005) and the
+    pricing-currency unit prices (C-005) MUST NOT be null, which contradicts nulling them
+    because ``SkuPriceId`` is null.
+    """
+    charge = (converted.get("ChargeCategory") or "").strip()
+    return charge in ("Usage", "Purchase") and (
+        (converted.get("ChargeClass") or "").strip() != "Correction"
+    )
 
 
 class CostAndUsageMigrationError(ConversionError):
@@ -90,6 +110,9 @@ class CostAndUsageMigrations:
     tax_effective_cost_delta: dict[str, Decimal] = field(default_factory=dict)
     # Values nulled because SkuPriceId is null, per column.
     nulled_without_sku_price: Counter[str] = field(default_factory=Counter)
+    # Usage/Purchase rows (not corrections) without SkuPriceId whose pricing values were
+    # kept, per ChargeCategory: FOCUS 1.4 requires them both null and non-null there.
+    kept_without_sku_price: Counter[str] = field(default_factory=Counter)
     # Null values in a pricing-currency column the source does carry, backfilled from the
     # billing-currency value. FOCUS 1.2 already required those values to be non-null.
     backfilled_source_nulls: Counter[str] = field(default_factory=Counter)
@@ -98,6 +121,7 @@ class CostAndUsageMigrations:
         return bool(
             self.tax_effective_cost_rows
             or self.nulled_without_sku_price
+            or self.kept_without_sku_price
             or self.backfilled_source_nulls
         )
 
@@ -137,14 +161,36 @@ def migration_diagnostics(migrations: CostAndUsageMigrations) -> list[Diagnostic
                 code="FDT-MIG-002",
                 severity=Severity.WARNING,
                 message=(
-                    f"{values} value(s) nulled where SkuPriceId is null "
-                    "(FOCUS 1.3+ requires these columns to be null; a unit follows its quantity)"
+                    f"{values} value(s) nulled where SkuPriceId is null on Tax, Credit, "
+                    "Adjustment or Correction rows (FOCUS 1.3+ requires these columns to be "
+                    "null there; a unit follows its quantity)"
                 ),
                 datasets=(DATASET,),
                 column="SkuPriceId",
                 context={
                     "values_by_column": "; ".join(
                         f"{c}:{n}" for c, n in sorted(migrations.nulled_without_sku_price.items())
+                    )
+                },
+            )
+        )
+    if migrations.kept_without_sku_price:
+        rows = sum(migrations.kept_without_sku_price.values())
+        out.append(
+            Diagnostic(
+                code="FDT-MIG-004",
+                severity=Severity.WARNING,
+                message=(
+                    f"{rows} Usage/Purchase row(s) that are not corrections have no SkuPriceId: "
+                    "their pricing and quantity values are kept. FOCUS 1.4 requires those "
+                    "columns to be null without a SkuPriceId and non-null on such rows, so "
+                    "the rows cannot meet both; the source omits a SkuPriceId it should carry"
+                ),
+                datasets=(DATASET,),
+                column="SkuPriceId",
+                context={
+                    "rows_by_charge_category": "; ".join(
+                        f"{c}:{n}" for c, n in sorted(migrations.kept_without_sku_price.items())
                     )
                 },
             )
@@ -255,7 +301,10 @@ def cost_and_usage_provenance(
             rules[col] = ColumnRule(
                 Lineage.DERIVED,
                 f"CostAndUsage.{col}",
-                note="nulled where SkuPriceId is null (FOCUS 1.3+)",
+                note=(
+                    "nulled where SkuPriceId is null, except on Usage/Purchase rows that are "
+                    "not corrections, where FOCUS also requires them non-null (FDT-MIG-004)"
+                ),
             )
         elif col in present:
             rules[col] = ColumnRule(Lineage.OBSERVED, f"CostAndUsage.{col}")
@@ -335,8 +384,9 @@ def _migrate_tax_effective_cost(
     if migrations is not None:
         currency = (converted.get("BillingCurrency") or "").strip()
         migrations.tax_effective_cost_rows[currency] += 1
-        migrations.tax_effective_cost_delta[currency] = (
-            migrations.tax_effective_cost_delta.get(currency, Decimal(0)) + billed - effective
+        migrations.tax_effective_cost_delta[currency] = _EXACT.add(
+            migrations.tax_effective_cost_delta.get(currency, Decimal(0)),
+            _EXACT.subtract(billed, effective),
         )
     return True
 
@@ -347,10 +397,18 @@ def _null_without_sku_price(
     """Null the columns FOCUS 1.4 requires to be null when ``SkuPriceId`` is null.
 
     Applies only when the source carries a ``SkuPriceId`` column: a provider without SKU
-    prices does not supply it, and its absence is not a null SKU price. Returns the columns
-    whose value was removed.
+    prices does not supply it, and its absence is not a null SKU price. On a Usage or
+    Purchase row that is not a correction FOCUS also requires those columns to be non-null,
+    so no output can meet both: the values are kept (real consumption is never discarded)
+    and the row is counted for ``FDT-MIG-004``. Returns the columns whose value was removed.
     """
     if "SkuPriceId" not in row or (row.get("SkuPriceId") or "").strip():
+        return frozenset()
+    if _is_conflicting_usage(converted):
+        if migrations is not None and any(
+            (converted.get(col) or "").strip() for col in NULL_WHEN_SKU_PRICE_ID_NULL
+        ):
+            migrations.kept_without_sku_price[(converted.get("ChargeCategory") or "").strip()] += 1
         return frozenset()
     nulled: set[str] = set()
     for col in NULL_WHEN_SKU_PRICE_ID_NULL:
@@ -443,9 +501,9 @@ def convert_cost_and_usage_row(
             if col == "PricingCurrencyEffectiveCost":
                 billing = (converted.get("BillingCurrency") or "").strip()
                 pricing = (converted.get("PricingCurrency") or "").strip()
-                if billing and pricing and pricing != billing:
-                    # EffectiveCost is denominated in BillingCurrency: copying it would label
-                    # a billing-currency amount with another currency.
+                if pricing and pricing != billing:
+                    # EffectiveCost is denominated in BillingCurrency (unknown when it is
+                    # null): copying it would label that amount with another currency.
                     raise CostAndUsageMigrationError(
                         "FDT-MIG-011: PricingCurrencyEffectiveCost is null but cannot be "
                         f"backfilled from EffectiveCost: PricingCurrency {pricing!r} differs from "

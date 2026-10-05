@@ -121,8 +121,8 @@ def test_streaming_invoice_detail_reconciles(tmp_path):
 
 def test_streaming_migrations_match_eager(tmp_path):
     # Rows that trigger every FOCUS 1.4 value migration (Tax EffectiveCost, SkuPriceId
-    # cascade, source pricing-currency nulls) must convert byte-identically in both pipelines
-    # and report the same FDT-MIG-* diagnostics.
+    # cascade, kept Usage values without SkuPriceId, source pricing-currency nulls) must
+    # convert byte-identically in both pipelines and report the same FDT-MIG-* diagnostics.
     cau, _ = _source(tmp_path, n=60)
     rows = read_csv_rows(cau)
     base = next(r for r in rows if r["ChargeCategory"] == "Usage" and r["SkuPriceId"])
@@ -130,16 +130,19 @@ def test_streaming_migrations_match_eager(tmp_path):
                BilledCost="10", EffectiveCost="7.5", PricingCurrency=base["BillingCurrency"],
                PricingCurrencyEffectiveCost="7.5", PricingCategory="")
     credit = dict(base, ChargeCategory="Credit", SkuPriceId="", SkuPriceDetails="")
+    usage_without_sku_price = dict(base, SkuPriceId="", SkuPriceDetails="")
     null_pricing = dict(base, PricingCurrency="", PricingCurrencyEffectiveCost="")
     src = tmp_path / "migrations.csv"
     with open(src, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
         writer.writeheader()
-        writer.writerows([*rows, tax, credit, null_pricing])
+        writer.writerows([*rows, tax, credit, usage_without_sku_price, null_pricing])
 
     ref = tmp_path / "ref"
     eager = convert_to_focus_1_4(read_csv_rows(src), mode="strict")
-    assert {"FDT-MIG-001", "FDT-MIG-002", "FDT-MIG-003"} <= {d.code for d in eager.diagnostics}
+    assert {"FDT-MIG-001", "FDT-MIG-002", "FDT-MIG-003", "FDT-MIG-004"} <= {
+        d.code for d in eager.diagnostics
+    }
     write_result(eager, ref)
     streamed = tmp_path / "streamed"
     convert_files(str(src), str(streamed), mode="strict")
