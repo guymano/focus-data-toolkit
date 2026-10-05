@@ -64,6 +64,22 @@ _DERIVED_FROM_1_2 = {
 }
 
 
+# Conditional unit-price columns whose rules depend on their presence: "MUST NOT be null when
+# SkuPriceId is not null" (CAU-ListUnitPrice-C-013, CAU-ContractedUnitPrice-C-015) holds only
+# where the column exists. A source without the column has not met its presence condition,
+# so the 1.4 output omits it too; written all null, it would fail any validator.
+OMITTED_WHEN_ABSENT_FROM_SOURCE: tuple[str, ...] = ("ListUnitPrice", "ContractedUnitPrice")
+
+
+def emitted_cost_and_usage_columns(source_columns: Iterable[str]) -> tuple[str, ...]:
+    """The 1.4 Cost and Usage columns written for a source carrying ``source_columns``."""
+    present = set(source_columns)
+    return tuple(
+        c for c in dataset_columns(DATASET)
+        if c in present or c not in OMITTED_WHEN_ABSENT_FROM_SOURCE
+    )
+
+
 def cost_and_usage_provenance(
     source_columns: Iterable[str], source_version: str, *, invoice_detail_linked: bool
 ) -> dict[str, ColumnRule]:
@@ -71,10 +87,11 @@ def cost_and_usage_provenance(
 
     ``invoice_detail_linked`` is True when an (synthetic) Invoice Detail dataset is being
     produced, so ``InvoiceDetailId`` carries the back-link (assumed); otherwise it is null.
+    Columns the output omits (see :func:`emitted_cost_and_usage_columns`) have no rule.
     """
     present = set(source_columns)
     rules: dict[str, ColumnRule] = {}
-    for col in dataset_columns(DATASET):
+    for col in emitted_cost_and_usage_columns(present):
         if col == "ContractApplied":
             rules[col] = (
                 ColumnRule(Lineage.DERIVED, "ContractApplied migrated 1.3->1.4")
@@ -190,14 +207,19 @@ def convert_cost_and_usage(
     invoice_detail_ids: dict[GrainKey, str] | None = None,
     counters: LineageCounters | None = None,
     legacy_keys: set[str] | None = None,
+    source_columns: Iterable[str] | None = None,
 ) -> list[dict[str, str]]:
     """Return ``rows`` reshaped to the FOCUS 1.4 Cost and Usage column set.
 
     ``invoice_detail_ids`` maps each Invoice Detail business-grain key to the
     ``InvoiceDetailId`` assigned by the Invoice Detail builder, so converted rows link back
-    to their invoice line item on exactly the same key.
+    to their invoice line item on exactly the same key. ``source_columns`` (the source
+    header; by default the first row's columns) decides which conditional columns are
+    omitted (:func:`emitted_cost_and_usage_columns`).
     """
-    target = dataset_columns(DATASET)
+    if source_columns is None:
+        source_columns = rows[0].keys() if rows else ()
+    target = emitted_cost_and_usage_columns(source_columns)
     ids = invoice_detail_ids or {}
     return [
         convert_cost_and_usage_row(

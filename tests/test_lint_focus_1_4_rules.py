@@ -12,7 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from focus_data_toolkit.convert import convert_files, convert_to_focus_1_4, read_csv_rows
+from focus_data_toolkit.convert import (
+    convert_files,
+    convert_to_focus_1_4,
+    read_csv_rows,
+    write_result,
+)
 from focus_data_toolkit.model.capabilities import CapabilityProfile
 from focus_data_toolkit.model.validator import (
     COND_UNIT_PRICING,
@@ -236,12 +241,41 @@ def test_streaming_tells_the_linter_which_columns_its_source_lacked(tmp_path, so
     convert_files(_write(tmp_path / "without.csv", without_column), tmp_path / "out1",
                   mode="strict")
     assert (tmp_path / "out1" / "focus_1_4_manifest.json").exists()
+    assert "ContractedUnitPrice" not in read_csv_rows(
+        tmp_path / "out1" / "focus_1_4_cost_and_usage.csv"
+    )[0]
     with_null = [dict(r) for r in cau]
     target = next(r for r in with_null if r["ChargeCategory"] == "Usage" and r["SkuPriceId"])
     target["ContractedUnitPrice"] = ""
     with pytest.raises(Exception, match="lint"):
         convert_files(_write(tmp_path / "with.csv", with_null), tmp_path / "out2", mode="strict")
     assert not (tmp_path / "out2" / "focus_1_4_manifest.json").exists()
+
+
+@pytest.mark.parametrize("column", ["ListUnitPrice", "ContractedUnitPrice"])
+def test_a_unit_price_column_the_source_lacked_is_not_written(tmp_path, source_tables, column):
+    # Its presence condition is not met, so the 1.4 output omits it too: written all null, it
+    # would break C-013/C-015 for any validator that cannot know the source lacked it.
+    from focus_data_toolkit.cli import main
+
+    cau, _ = source_tables[("aws", "1.2")]
+    rows = [{k: v for k, v in r.items() if k != column} for r in cau]
+    result = convert_to_focus_1_4(rows, mode="strict")
+    assert result.ok, result.reports[CU].messages()[:5]
+    assert all(column not in r for r in result.datasets[CU])
+    assert column not in result.manifest["datasets"][CU]["columns"]
+    out = tmp_path / "out"
+    write_result(result, out)
+    published = out / "focus_1_4_cost_and_usage.csv"
+    assert column not in read_csv_rows(published)[0]
+    # The toolkit's own validator accepts the published file as is.
+    assert main(["validate", str(published), "--dataset", "cost-and-usage"]) == 0
+
+
+def test_a_unit_price_column_the_source_carries_is_always_written(source_tables):
+    cau, _ = source_tables[("aws", "1.2")]
+    result = convert_to_focus_1_4(cau, mode="strict")
+    assert {"ListUnitPrice", "ContractedUnitPrice"} <= set(result.datasets[CU][0])
 
 
 def test_client_like_fixture_lints_clean_under_unit_pricing():

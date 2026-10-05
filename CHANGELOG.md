@@ -34,7 +34,7 @@ policy.
     (C-013/C-015). This applies in every profile, as these rules have no applicability
     criteria, except for a column the source did not carry.
     `lint_focus_1_4_structure(source_absent_columns=...)` lets a producer name such
-    columns; the converter does so;
+    columns, and a column missing from the rows counts as absent;
   - under a declared `SupportsUnitPricing` condition, the pricing and quantity columns
     are null when `SkuPriceId` is null (C-009 to C-016).
 
@@ -48,6 +48,12 @@ policy.
     that the converter does not migrate to `BilledCost`;
   - rows with a `SkuPriceId` but a null `ListUnitPrice` or `ContractedUnitPrice` in a
     column the source carries (C-013/C-015).
+- **Output layout:** a `ListUnitPrice` or `ContractedUnitPrice` column the source does
+  not carry is no longer written all null into the 1.4 Cost and Usage output; it is
+  omitted, as Invoice Detail already omits its unfilled conditional columns. Its presence
+  condition is not met, and written null it would break C-013/C-015 in any validator,
+  including `focus-toolkit validate` on the published file. Sources that carry both
+  columns, such as the generated samples, are unchanged.
 - The client-like test fixture violated the cost identity by a factor of 1000; its
   quantities are corrected. Its Tax row no longer carries a pricing quantity, and its
   pricing-currency effective cost now matches its effective cost.

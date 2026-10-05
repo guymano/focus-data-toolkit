@@ -109,11 +109,13 @@ def output_filename_for(
 
 
 def source_absent_columns(dataset: str, source_columns: Iterable[str]) -> frozenset[str]:
-    """The Cost and Usage columns the source did not carry (the converter emits them null).
+    """The Cost and Usage columns the source did not carry.
 
-    The linter treats them as absent, so a rule that depends on a column's presence is not
-    evaluated for a column the provider never supplied. Other datasets are derived, not
-    copied from a source, so nothing is reported for them.
+    The converter emits them null, except the unit-price columns it omits altogether
+    (``OMITTED_WHEN_ABSENT_FROM_SOURCE``). The linter treats them as absent, so a rule that
+    depends on a column's presence is not evaluated for a column the provider never
+    supplied. Other datasets are derived, not copied from a source, so nothing is reported
+    for them.
     """
     if dataset != "Cost and Usage":
         return frozenset()
@@ -471,7 +473,7 @@ def convert_to_focus_1_4(
     ca_legacy: set[str] = set()
     cu_rows = convert_cost_and_usage(
         cau_rows, version, invoice_detail_ids=id_mapping, counters=cu_counters,
-        legacy_keys=ca_legacy,
+        legacy_keys=ca_legacy, source_columns=source_cols,
     )
     lineage_counts["Cost and Usage"] = cu_counters
     cu_prov = cost_and_usage_provenance(source_cols, version, invoice_detail_linked=linked)
