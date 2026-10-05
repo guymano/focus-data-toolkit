@@ -11,9 +11,6 @@ policy.
 
 ### Added
 
-- `ContractCommitmentDurationType` is a `contract_commitment` supplement column. A
-  supplied explicit term wins over the derived value.
-
 ### Fixed
 
 - `ContractCommitmentDurationType` is derived only when the commitment period spans a whole
@@ -26,6 +23,17 @@ policy.
   `CommitmentDiscountId` carry. v1 keyed by the bare `savingsPlanId`, so its rows could
   never join. Exports without `savingsPlanArn` are no longer auto-detected. The adapter
   also maps `termDurationInSeconds` (1 and 3 years) to the duration.
+
+### - The supplement API and the documented failures are now public, re-exported from the
+
+  package root: `SupplementBundle`, `SupplementFileSpec`, `load_bundle_dir`,
+  `compute_gaps`, `GapReport`, `Mode`, `ConversionError`, `SupplementError` and
+  `AtomicWriteError`. Library callers no longer import internal modules, which
+  docs/versioning.md leaves free to change. Existing import paths keep working.
+
+### - `ContractCommitmentDurationType` is a `contract_commitment` supplement column. A
+
+  supplied explicit term wins over the derived value.
 
 ### Security
 
