@@ -31,7 +31,8 @@ policy.
 
 - 1.2/1.3 Cost and Usage values that break a FOCUS 1.4 rule the converter can meet without
   inventing a fact are migrated, instead of being copied into non-conformant output. Each
-  migration is counted and reported, and the affected values carry `DERIVED` lineage:
+  migration is counted and reported, and each migrated value counts as `DERIVED` in
+  `lineage_summary`:
   - Tax `EffectiveCost` equals `BilledCost` (CAU-EffectiveCost-C-017), with the exact net
     change per billing currency (`FDT-MIG-001`). Credit rows, also covered by C-017, are not
     rewritten;
@@ -39,7 +40,8 @@ policy.
     Tax, Credit, Adjustment and Correction rows (`FDT-MIG-002`). For a 1.2 source this
     migrates values 1.2 allowed; a 1.3 source already broke its own version's rule;
   - on Usage/Purchase rows that are not corrections, FOCUS 1.4 requires the same columns to
-    be non-null, so their values are kept and the conflict is reported (`FDT-MIG-004`);
+    be non-null, so their values are kept and the conflict is reported (`FDT-MIG-004`); so
+    are rows whose `ChargeCategory` is missing or not an allowed value;
   - null source pricing-currency values are backfilled with a warning (`FDT-MIG-003`).
 - A null `PricingCurrencyEffectiveCost` is no longer backfilled from `EffectiveCost` when
   `PricingCurrency` differs from `BillingCurrency`, or when `BillingCurrency` is null. The

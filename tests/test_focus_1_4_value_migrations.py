@@ -124,8 +124,8 @@ def test_numerically_equal_tax_amounts_keep_their_source_text(tax_row):
 def test_credit_effective_cost_is_not_rewritten(tax_row):
     # CAU-EffectiveCost-C-017 covers Credit as well as Tax. 1.2/1.3 tied the equivalent rule
     # to whether a charge relates to other charges (Credit was only an example), which a row
-    # does not reveal, so rewriting a credit would be a guess: the value is copied and the
-    # violation is left for the linter to report.
+    # does not reveal, so rewriting a credit would be a guess: the value is copied as is, a
+    # known non-conformance listed in docs/conversion-rules.md.
     tax_row.update({"ChargeCategory": "Credit", "BilledCost": "-10"})
     result = convert_to_focus_1_4([tax_row], mode="strict")
     [credit] = result.datasets[CU]
@@ -199,6 +199,20 @@ def test_usage_and_purchase_rows_without_sku_price_id_keep_their_values(usage_ro
         assert out[col] == row.get(col, ""), col
     assert "FDT-MIG-002" not in _codes(result)
     assert _one(result, "FDT-MIG-004").context == {"rows_by_charge_category": f"{charge}:1"}
+
+
+@pytest.mark.parametrize(("charge", "label"), [("", "(null)"), ("Refund", "Refund")])
+def test_rows_with_a_missing_or_unknown_category_are_never_nulled(usage_row, charge, label):
+    # Decision 4 names the rows the cascade applies to (Tax, Credit, Adjustment, corrections).
+    # A category that is missing or outside the 1.4 allowed values cannot tell whether the
+    # columns must be null or non-null, so the values are kept and the row is reported.
+    row = dict(usage_row, ChargeCategory=charge, ChargeClass="", SkuPriceId="", SkuPriceDetails="")
+    result = convert_to_focus_1_4([row], mode="synthetic", validate=False)
+    [out] = result.datasets[CU]
+    for col in CASCADE:
+        assert out[col] == row.get(col, ""), col
+    assert "FDT-MIG-002" not in _codes(result)
+    assert _one(result, "FDT-MIG-004").context == {"rows_by_charge_category": f"{label}:1"}
 
 
 def test_no_cascade_when_the_source_has_no_sku_price_id_column(usage_row):

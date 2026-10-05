@@ -153,6 +153,34 @@ def test_streaming_migrations_match_eager(tmp_path):
     )
 
 
+def test_streaming_keeps_rows_without_a_charge_category_like_eager(tmp_path):
+    # A row whose ChargeCategory is missing or not allowed is never nulled by the SkuPriceId
+    # cascade, in either pipeline. Such a row fails the lint, so both sides skip it here.
+    cau, _ = _source(tmp_path, n=20)
+    rows = read_csv_rows(cau)
+    base = next(r for r in rows if r["ChargeCategory"] == "Usage" and r["SkuPriceId"])
+    odd = [dict(base, ChargeCategory=c, SkuPriceId="", SkuPriceDetails="") for c in ("", "Refund")]
+    src = tmp_path / "odd.csv"
+    with open(src, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows([*rows, *odd])
+
+    eager = convert_to_focus_1_4(read_csv_rows(src), mode="strict", validate=False)
+    [kept] = [d for d in eager.diagnostics if d.code == "FDT-MIG-004"]
+    assert kept.context == {"rows_by_charge_category": "(null):1; Refund:1"}
+    assert all(r["PricingQuantity"] == base["PricingQuantity"] for r in eager.datasets["Cost and Usage"][-2:])
+    ref = tmp_path / "ref"
+    write_result(eager, ref, require_valid=False, validate_bundle=False)
+    streamed = tmp_path / "streamed"
+    convert_files(str(src), str(streamed), mode="strict", validate=False)
+    for name in _csv_files(ref):
+        assert (ref / name).read_bytes() == (streamed / name).read_bytes(), name
+    assert json.loads((ref / "focus_1_4_manifest.json").read_text()) == json.loads(
+        (streamed / "focus_1_4_manifest.json").read_text()
+    )
+
+
 def test_streaming_on_client_like_fixture():
     fixture = Path(__file__).parent / "fixtures" / "client_like" / "consolidated_multi_provider_1_3.csv"
     import tempfile

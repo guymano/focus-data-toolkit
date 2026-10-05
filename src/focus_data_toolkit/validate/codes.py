@@ -49,7 +49,7 @@ CATALOG: dict[str, CodeSpec] = dict([
     _s("FDT-MIG-003", Severity.WARNING,
        "null source pricing-currency values backfilled from billing-currency values"),
     _s("FDT-MIG-004", Severity.WARNING,
-       "Usage/Purchase rows without SkuPriceId keep their pricing values (conflicting 1.4 rules)"),
+       "rows without SkuPriceId outside Tax/Credit/Adjustment/corrections keep their pricing values"),
     _s("FDT-MIG-010", Severity.ERROR,
        "Tax EffectiveCost change cannot be restated in a different PricingCurrency"),
     _s("FDT-MIG-011", Severity.ERROR,

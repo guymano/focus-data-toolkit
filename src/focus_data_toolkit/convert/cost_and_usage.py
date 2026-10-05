@@ -77,19 +77,19 @@ _SKU_PRICE_CASCADE: tuple[str, ...] = NULL_WHEN_SKU_PRICE_ID_NULL + tuple(
 _EXACT = Context(prec=MAX_PREC, Emax=MAX_EMAX, Emin=MIN_EMIN)
 
 
-def _is_conflicting_usage(converted: Mapping[str, str]) -> bool:
-    """Whether FOCUS 1.4 requires the pricing/quantity columns to be non-null on this row.
+def _cascade_applies(converted: Mapping[str, str]) -> bool:
+    """Whether nulling the ``SkuPriceId``-dependent columns is consistent with FOCUS 1.4 here.
 
-    For Usage and Purchase charges that are not corrections, ``ListUnitPrice`` (C-005),
-    ``ContractedUnitPrice`` (C-006), ``PricingCategory`` (C-004), ``PricingQuantity``
-    (C-005), ``ConsumedQuantity`` (C-006), ``CommitmentDiscountQuantity`` (C-005) and the
-    pricing-currency unit prices (C-005) MUST NOT be null, which contradicts nulling them
-    because ``SkuPriceId`` is null.
+    Only on Tax, Credit and Adjustment charges and on corrections. For Usage and Purchase
+    charges that are not corrections, ``ListUnitPrice`` (C-005), ``ContractedUnitPrice``
+    (C-006), ``PricingCategory`` (C-004), ``PricingQuantity`` (C-005), ``ConsumedQuantity``
+    (C-006), ``CommitmentDiscountQuantity`` (C-005) and the pricing-currency unit prices
+    (C-005) MUST NOT be null, which contradicts nulling them; a missing or unknown
+    ``ChargeCategory`` cannot tell which rule applies. Both keep their values.
     """
-    charge = (converted.get("ChargeCategory") or "").strip()
-    return charge in ("Usage", "Purchase") and (
-        (converted.get("ChargeClass") or "").strip() != "Correction"
-    )
+    if (converted.get("ChargeClass") or "").strip() == "Correction":
+        return True
+    return (converted.get("ChargeCategory") or "").strip() in ("Tax", "Credit", "Adjustment")
 
 
 class CostAndUsageMigrationError(ConversionError):
@@ -110,8 +110,9 @@ class CostAndUsageMigrations:
     tax_effective_cost_delta: dict[str, Decimal] = field(default_factory=dict)
     # Values nulled because SkuPriceId is null, per column.
     nulled_without_sku_price: Counter[str] = field(default_factory=Counter)
-    # Usage/Purchase rows (not corrections) without SkuPriceId whose pricing values were
-    # kept, per ChargeCategory: FOCUS 1.4 requires them both null and non-null there.
+    # Rows without SkuPriceId whose pricing values were kept, per ChargeCategory ("(null)"
+    # when missing): Usage/Purchase rows that are not corrections, where FOCUS 1.4 requires
+    # them both null and non-null, and rows whose category does not tell which rule applies.
     kept_without_sku_price: Counter[str] = field(default_factory=Counter)
     # Null values in a pricing-currency column the source does carry, backfilled from the
     # billing-currency value. FOCUS 1.2 already required those values to be non-null.
@@ -181,10 +182,11 @@ def migration_diagnostics(migrations: CostAndUsageMigrations) -> list[Diagnostic
                 code="FDT-MIG-004",
                 severity=Severity.WARNING,
                 message=(
-                    f"{rows} Usage/Purchase row(s) that are not corrections have no SkuPriceId: "
-                    "their pricing and quantity values are kept. FOCUS 1.4 requires those "
-                    "columns to be null without a SkuPriceId and non-null on such rows, so "
-                    "the rows cannot meet both; the source omits a SkuPriceId it should carry"
+                    f"{rows} row(s) without SkuPriceId keep their pricing and quantity values. "
+                    "On Usage/Purchase rows that are not corrections, FOCUS 1.4 requires those "
+                    "columns to be both null (no SkuPriceId) and non-null, so the source omits a "
+                    "SkuPriceId it should carry; a row with a missing or unknown ChargeCategory "
+                    "is never nulled"
                 ),
                 datasets=(DATASET,),
                 column="SkuPriceId",
@@ -302,8 +304,8 @@ def cost_and_usage_provenance(
                 Lineage.DERIVED,
                 f"CostAndUsage.{col}",
                 note=(
-                    "nulled where SkuPriceId is null, except on Usage/Purchase rows that are "
-                    "not corrections, where FOCUS also requires them non-null (FDT-MIG-004)"
+                    "nulled where SkuPriceId is null on Tax, Credit, Adjustment and correction "
+                    "rows; kept on any other row (FDT-MIG-004)"
                 ),
             )
         elif col in present:
@@ -397,18 +399,19 @@ def _null_without_sku_price(
     """Null the columns FOCUS 1.4 requires to be null when ``SkuPriceId`` is null.
 
     Applies only when the source carries a ``SkuPriceId`` column: a provider without SKU
-    prices does not supply it, and its absence is not a null SKU price. On a Usage or
-    Purchase row that is not a correction FOCUS also requires those columns to be non-null,
-    so no output can meet both: the values are kept (real consumption is never discarded)
-    and the row is counted for ``FDT-MIG-004``. Returns the columns whose value was removed.
+    prices does not supply it, and its absence is not a null SKU price. Only Tax, Credit,
+    Adjustment and correction rows are nulled (see :func:`_cascade_applies`). On any other row
+    the values are kept (real consumption is never discarded) and the row is counted for
+    ``FDT-MIG-004``. Returns the columns whose value was removed.
     """
     if "SkuPriceId" not in row or (row.get("SkuPriceId") or "").strip():
         return frozenset()
-    if _is_conflicting_usage(converted):
+    if not _cascade_applies(converted):
         if migrations is not None and any(
             (converted.get(col) or "").strip() for col in NULL_WHEN_SKU_PRICE_ID_NULL
         ):
-            migrations.kept_without_sku_price[(converted.get("ChargeCategory") or "").strip()] += 1
+            charge = (converted.get("ChargeCategory") or "").strip() or "(null)"
+            migrations.kept_without_sku_price[charge] += 1
         return frozenset()
     nulled: set[str] = set()
     for col in NULL_WHEN_SKU_PRICE_ID_NULL:
