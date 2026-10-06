@@ -38,6 +38,11 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from decimal import MAX_EMAX, MAX_PREC, MIN_EMIN, Context, Decimal, InvalidOperation
 
+from focus_data_toolkit.context.provider import (
+    ProviderRole,
+    ProviderRoleError,
+    service_provider_of_1_2_row,
+)
 from focus_data_toolkit.convert.contract_applied import migrate_1_3_to_1_4
 from focus_data_toolkit.convert.exceptions import ConversionError
 from focus_data_toolkit.convert.invoice_detail import GrainKey, invoice_detail_grain_key
@@ -99,6 +104,46 @@ class CostAndUsageMigrationError(ConversionError):
     """A 1.2/1.3 value cannot be brought to a FOCUS 1.4 rule without inventing a fact."""
 
 
+_PUBLISHER_SAMPLE_CAP = 25
+
+
+@dataclass
+class PublisherTally:
+    """Rows counted per publisher, in bounded memory.
+
+    Only the first ``_PUBLISHER_SAMPLE_CAP`` distinct publishers (in source order, so the eager
+    and streaming pipelines agree) keep a count; any further publisher only sets ``more``.
+    The streaming converter promises memory bounded by supplement-scale cardinalities, and a
+    file can name a new publisher on every row.
+    """
+
+    rows: int = 0
+    sample: dict[str, int] = field(default_factory=dict)
+    more: bool = False
+
+    def add(self, publisher: str) -> None:
+        self.rows += 1
+        if publisher in self.sample:
+            self.sample[publisher] += 1
+        elif len(self.sample) < _PUBLISHER_SAMPLE_CAP:
+            self.sample[publisher] = 1
+        else:
+            self.more = True
+
+    def __bool__(self) -> bool:
+        return self.rows > 0
+
+    def context(self) -> dict[str, str]:
+        """Diagnostic context: the row count and ``publisher:rows`` for the sampled publishers."""
+        out = {
+            "rows": str(self.rows),
+            "rows_by_publisher": "; ".join(f"{p}:{n}" for p, n in self.sample.items()),
+        }
+        if self.more:
+            out["more_publishers"] = "true"
+        return out
+
+
 @dataclass
 class CostAndUsageMigrations:
     """Counts of the row values migrated to the FOCUS 1.4 rules during one conversion.
@@ -121,11 +166,11 @@ class CostAndUsageMigrations:
     # billing-currency value. FOCUS 1.2 already required those values to be non-null.
     backfilled_source_nulls: Counter[str] = field(default_factory=Counter)
     # FOCUS 1.2 rows treated as Marketplace charges under the declared provider role "csp"
-    # (ServiceProviderName = PublisherName, the seller), per PublisherName.
-    marketplace_publishers: Counter[str] = field(default_factory=Counter)
+    # (ServiceProviderName = PublisherName, the seller).
+    marketplace_publishers: PublisherTally = field(default_factory=PublisherTally)
     # FOCUS 1.2 rows whose PublisherName differs from ProviderName (and is no declared
-    # first-party publisher) while no provider role was declared, per PublisherName.
-    undeclared_publishers: Counter[str] = field(default_factory=Counter)
+    # first-party publisher) while no provider role was declared.
+    undeclared_publishers: PublisherTally = field(default_factory=PublisherTally)
 
     def __bool__(self) -> bool:
         return bool(
@@ -228,7 +273,7 @@ def migration_diagnostics(migrations: CostAndUsageMigrations) -> list[Diagnostic
             )
         )
     if migrations.marketplace_publishers:
-        rows = sum(migrations.marketplace_publishers.values())
+        rows = migrations.marketplace_publishers.rows
         out.append(
             Diagnostic(
                 code="FDT-MIG-005",
@@ -241,11 +286,11 @@ def migration_diagnostics(migrations: CostAndUsageMigrations) -> list[Diagnostic
                 ),
                 datasets=(DATASET,),
                 column="ServiceProviderName",
-                context={"rows_by_publisher": _publisher_sample(migrations.marketplace_publishers)},
+                context=migrations.marketplace_publishers.context(),
             )
         )
     if migrations.undeclared_publishers:
-        rows = sum(migrations.undeclared_publishers.values())
+        rows = migrations.undeclared_publishers.rows
         out.append(
             Diagnostic(
                 code="FDT-CTX-005",
@@ -259,19 +304,10 @@ def migration_diagnostics(migrations: CostAndUsageMigrations) -> list[Diagnostic
                 ),
                 datasets=(DATASET,),
                 column="ServiceProviderName",
-                context={"rows_by_publisher": _publisher_sample(migrations.undeclared_publishers)},
+                context=migrations.undeclared_publishers.context(),
             )
         )
     return out
-
-
-def _publisher_sample(counts: Counter[str]) -> str:
-    """``publisher:rows`` pairs, the most frequent first, capped for a readable diagnostic."""
-    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
-    return "; ".join(f"{p}:{n}" for p, n in ranked[:_PUBLISHER_SAMPLE_CAP])
-
-
-_PUBLISHER_SAMPLE_CAP = 25
 
 
 def _decimal(text: str) -> Decimal | None:
@@ -321,89 +357,35 @@ def contract_applied_legacy_diagnostic(legacy_keys: set[str]) -> Diagnostic | No
 # The deprecated PublisherName is never taken as the host.
 _DERIVED_FROM_1_2 = ("ServiceProviderName", "HostProviderName")
 
-PROVIDER_ROLES: tuple[str, ...] = ("csp", "msp")
+
+def declare_provider_role(
+    role: str | None = None, first_party_publishers: Iterable[str] = ()
+) -> ProviderRole:
+    """Validate a caller's :class:`ProviderRole` declaration (``ConversionError`` if invalid)."""
+    try:
+        return ProviderRole.declare(role, first_party_publishers)
+    except ProviderRoleError as exc:
+        raise ConversionError(str(exc)) from exc
 
 
-@dataclass(frozen=True)
-class ProviderRole:
-    """Who issued a FOCUS 1.2 source, as declared by the caller (FOCUS 1.2 does not say it).
-
-    In FOCUS 1.2, a ``PublisherName`` that differs from ``ProviderName`` means two opposite
-    things (FOCUS 1.2 appendix "Origination of Cost Data"): a cloud marketplace purchase
-    (Provider = cloud provider, Publisher = the seller; scenarios 3.1-3.3) or cloud services
-    bought through an MSP (Provider = MSP, Publisher = cloud provider; scenario 2.1). FOCUS 1.4
-    makes the seller the Service Provider in the first case and the MSP in the second
-    (ServiceProviderName notes; appendix "Participating Entity Identification" 2.1-2.2 and
-    3.1.1-3.3.2), and a row alone cannot tell them apart:
-
-    * ``csp`` - the file comes from a cloud provider: a row is a Marketplace charge when its
-      ``PublisherName`` is neither its ``ProviderName`` nor one of ``first_party_publishers``
-      (the provider's own publisher names, e.g. "Microsoft" next to "Microsoft Azure"), and
-      its Service Provider is that ``PublisherName``;
-    * ``msp`` - the file comes from an MSP or reseller: the Service Provider is ``ProviderName``;
-    * none - ``ProviderName`` is kept and such rows are reported (``FDT-CTX-005``).
-
-    Only the official FOCUS 1.2 columns are read; provider-specific ``x_`` columns are not.
-    """
-
-    role: str | None = None
-    first_party_publishers: frozenset[str] = frozenset()  # case-folded
-
-    @classmethod
-    def declare(
-        cls, role: str | None = None, first_party_publishers: Iterable[str] = ()
-    ) -> ProviderRole:
-        """Validate a caller's declaration (``ConversionError`` on an invalid one)."""
-        names = frozenset(n.strip().casefold() for n in first_party_publishers if n.strip())
-        if role is not None and role not in PROVIDER_ROLES:
-            raise ConversionError(
-                f"unknown provider role {role!r}; expected one of {', '.join(PROVIDER_ROLES)}"
-            )
-        if names and role != "csp":
-            raise ConversionError(
-                "first-party publisher names apply only to the provider role 'csp' (a file "
-                "issued by the cloud provider)"
-            )
-        return cls(role, names)
-
-    def publisher_differs(self, row: Mapping[str, str]) -> bool:
-        """Whether a 1.2 row names a publisher other than its provider and first-party names."""
-        publisher = (row.get("PublisherName") or "").strip().casefold()
-        provider = (row.get("ProviderName") or "").strip().casefold()
-        return bool(publisher) and publisher != provider and (
-            publisher not in self.first_party_publishers
-        )
-
-    def describe(self) -> str:
-        """The declaration as recorded in the manifest provenance."""
-        if self.role != "csp" or not self.first_party_publishers:
-            return f"declared provider role {self.role!r}"
-        names = ", ".join(sorted(self.first_party_publishers))
-        return f"declared provider role 'csp'; first-party publishers: {names}"
-
-
-def service_provider_of_1_2_row(
+def _service_provider_of_1_2(
     row: Mapping[str, str],
     declared: ProviderRole,
-    migrations: CostAndUsageMigrations | None = None,
+    migrations: CostAndUsageMigrations | None,
 ) -> str:
-    """``ServiceProviderName`` (and so ``HostProviderName``) of a FOCUS 1.2 row.
+    """The row's 1.2 Service Provider, counting the rows whose publisher differs.
 
-    ``ProviderName`` by default (its 1.3 replacement); ``PublisherName`` for a Marketplace
-    row of a file issued by a cloud provider (``csp``). Rows whose publisher differs are
-    counted in ``migrations`` for ``FDT-MIG-005`` (role ``csp``) or ``FDT-CTX-005`` (no role).
+    Counted for ``FDT-MIG-005`` (role ``csp``: the seller became the Service Provider) or
+    ``FDT-CTX-005`` (no role declared); ``msp`` keeps ``ProviderName`` silently.
     """
-    provider = row.get("ProviderName", "") or ""
-    if not declared.publisher_differs(row):
-        return provider
-    publisher = row.get("PublisherName", "") or ""
-    if declared.role == "csp":
-        if migrations is not None:
-            migrations.marketplace_publishers[publisher.strip()] += 1
-        return publisher
-    if declared.role is None and migrations is not None:
-        migrations.undeclared_publishers[publisher.strip()] += 1
-    return provider
+    value = service_provider_of_1_2_row(row, declared)
+    if migrations is not None and declared.role != "msp" and declared.publisher_differs(row):
+        tally = (
+            migrations.marketplace_publishers if declared.role == "csp"
+            else migrations.undeclared_publishers
+        )
+        tally.add((row.get("PublisherName") or "").strip())
+    return value
 
 
 # Conditional unit-price columns whose rules depend on their presence: "MUST NOT be null when
@@ -652,7 +634,7 @@ def convert_cost_and_usage_row(
     """
     columns = target if target is not None else dataset_columns(DATASET)
     service_provider = (
-        service_provider_of_1_2_row(row, provider_role or ProviderRole(), migrations)
+        _service_provider_of_1_2(row, provider_role or ProviderRole(), migrations)
         if source_version == "1.2" else ""
     )
     converted: dict[str, str] = {}

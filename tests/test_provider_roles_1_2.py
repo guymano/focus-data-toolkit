@@ -65,7 +65,7 @@ def test_without_a_role_provider_name_is_kept_and_the_rows_are_reported(base_row
     assert _entities(result) == [("AWS", "AWS")] * 3
     diag = _one(result, "FDT-CTX-005")
     assert diag.severity.value == "WARNING"
-    assert diag.context == {"rows_by_publisher": "Datadog:1; datadog:1"}
+    assert diag.context == {"rows": "2", "rows_by_publisher": "Datadog:1; datadog:1"}
     # Nothing is refused: Cost and Usage is produced in strict mode.
     assert result.manifest["datasets"][CU]["status"] == "PRODUCED"
     rule = result.manifest["datasets"][CU]["columns"]["ServiceProviderName"]
@@ -81,7 +81,7 @@ def test_csp_role_names_the_marketplace_seller(base_row):
                                  ("datadog ", "datadog ")]
     diag = _one(result, "FDT-MIG-005")
     assert diag.severity.value == "INFO"
-    assert diag.context == {"rows_by_publisher": "Datadog:1; datadog:1"}
+    assert diag.context == {"rows": "2", "rows_by_publisher": "Datadog:1; datadog:1"}
     assert "FDT-CTX-005" not in _codes(result)
     columns = result.manifest["datasets"][CU]["columns"]
     assert columns["ServiceProviderName"]["source"] == (
@@ -101,9 +101,40 @@ def test_first_party_publishers_are_not_marketplace_sellers(base_row):
     assert _entities(result) == [("Microsoft Azure", "Microsoft Azure"),
                                  ("Contoso", "Contoso"),
                                  ("Microsoft Azure", "Microsoft Azure")]
-    assert _one(result, "FDT-MIG-005").context == {"rows_by_publisher": "Contoso:1"}
+    assert _one(result, "FDT-MIG-005").context == {"rows": "1", "rows_by_publisher": "Contoso:1"}
     note = result.manifest["datasets"][CU]["columns"]["ServiceProviderName"]["note"]
     assert "first-party publishers: microsoft" in note
+
+
+def test_csp_role_applies_to_the_context_summary_not_to_commitments(source_tables):
+    # The manifest's provider summary describes the converted rows (Codex review of #65);
+    # the Contract Commitment representative stays the provider that issued the file.
+    cau, cc = source_tables[("aws", "1.3")]
+    base = dict(next(r for r in source_tables[("aws", "1.2")][0] if r["ChargeCategory"] == "Usage"))
+    rows = _rows(base, ("AWS", "AWS"), ("AWS", "Zebra Analytics"))
+    plain = convert_to_focus_1_4(rows, cc, mode="synthetic", validate=False)
+    declared = convert_to_focus_1_4(rows, cc, mode="synthetic", validate=False,
+                                    provider_role="csp")
+    assert plain.manifest["contexts"]["multi_provider"] is False
+    summary = declared.manifest["contexts"]
+    assert summary["multi_provider"] is True
+    assert {p["service_provider_name"] for p in summary["providers"]["sample"]} == {
+        "AWS", "Zebra Analytics"
+    }
+    for result in (plain, declared):
+        assert {r["ServiceProviderName"] for r in result.datasets["Contract Commitment"]} == {"AWS"}
+        assert "FDT-CTX-001" not in _codes(result)
+
+
+def test_publisher_tracking_is_bounded(base_row):
+    # A new publisher on every row: only the first 25 keep a count, the total stays exact.
+    rows = _rows(base_row, *(("AWS", f"Seller {n:02d}") for n in range(40)))
+    result = convert_to_focus_1_4(rows, mode="strict", provider_role="csp")
+    context = _one(result, "FDT-MIG-005").context
+    assert context["rows"] == "40"
+    assert context["more_publishers"] == "true"
+    sample = context["rows_by_publisher"].split("; ")
+    assert sample == [f"Seller {n:02d}:1" for n in range(25)]
 
 
 def test_msp_role_keeps_the_msp_as_service_provider(base_row):

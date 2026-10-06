@@ -55,10 +55,10 @@ from focus_data_toolkit.convert.contract_commitment import (
 )
 from focus_data_toolkit.convert.cost_and_usage import (
     CostAndUsageMigrations,
-    ProviderRole,
     contract_applied_legacy_diagnostic,
     convert_cost_and_usage_row,
     cost_and_usage_provenance,
+    declare_provider_role,
     emitted_cost_and_usage_columns,
     migration_diagnostics,
 )
@@ -394,7 +394,7 @@ def convert_files(
     from focus_data_toolkit import __version__
     from focus_data_toolkit.convert import _resolve_source_version
 
-    declared_role = ProviderRole.declare(provider_role, first_party_publishers)
+    declared_role = declare_provider_role(provider_role, first_party_publishers)
     if output_format not in OUTPUT_FORMATS:
         raise ConversionError(
             f"unsupported output format {output_format!r}; choose one of {', '.join(OUTPUT_FORMATS)}"
@@ -627,7 +627,11 @@ def convert_files(
             # on the success path is harmless.
             stack.callback(index.close)
 
+        # Providers the converted rows carry (declared role applied: the context summary), and
+        # the file's providers (the Contract Commitment representative, never a seller); the
+        # two differ only for a 1.2 source declared "csp".
         provider_seen: dict[tuple[str, str], ProviderContext] = {}
+        issuer_seen = provider_seen if declared_role.role != "csp" else {}
         billing_seen: dict[tuple, BillingContext] = {}
         cu_counters = LineageCounters()
         ca_legacy: set[str] = set()
@@ -639,8 +643,11 @@ def convert_files(
         try:
             for record in reader:
                 row = record.values
-                pctx = provider_context_of_row(row, version)
+                pctx = provider_context_of_row(row, version, declared_role)
                 provider_seen[(pctx.service_provider_name, pctx.host_provider_name)] = pctx
+                if issuer_seen is not provider_seen:
+                    ictx = provider_context_of_row(row, version)
+                    issuer_seen[(ictx.service_provider_name, ictx.host_provider_name)] = ictx
                 bctx = billing_context_of_row(row)
                 billing_seen[astuple(bctx)] = bctx
 
@@ -773,8 +780,8 @@ def convert_files(
             row_counts["Billing Period"] = len(bp_rows)
 
             if cc_rows:
-                providers = [provider_seen[k] for k in sorted(provider_seen)]
-                provider_ctx, provider_ambiguous = representative_from_contexts(providers)
+                file_providers = [issuer_seen[k] for k in sorted(issuer_seen)]
+                provider_ctx, provider_ambiguous = representative_from_contexts(file_providers)
                 issuers = sorted(
                     {b.invoice_issuer_name for b in billing_seen.values() if b.invoice_issuer_name}
                 )

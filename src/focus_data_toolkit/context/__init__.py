@@ -11,6 +11,7 @@ from focus_data_toolkit.context.billing import (
 )
 from focus_data_toolkit.context.provider import (
     ProviderContext,
+    ProviderRole,
     distinct_provider_contexts,
     provider_context_of_row,
     representative_from_contexts,
@@ -60,23 +61,28 @@ def summarize_contexts(
 
 
 def describe_source_contexts(
-    rows: Iterable[Mapping[str, str]], source_version: str
+    rows: Iterable[Mapping[str, str]],
+    source_version: str,
+    provider_role: ProviderRole | None = None,
 ) -> dict:
     """A bounded, JSON-serialisable summary of the contexts present in a source.
 
     Reports distinct providers, issuers, accounts, currencies and periods, and boolean
     ``multi_*`` flags — enough for the manifest to show that (e.g.) the source mixed two
-    issuers and three currencies, without embedding the full cross-product.
+    issuers and three currencies, without embedding the full cross-product. The providers are
+    those the converted rows carry, so a declared ``provider_role`` applies (1.2 sources).
     """
     rows = list(rows)
     return summarize_contexts(
-        distinct_provider_contexts(rows, source_version), distinct_billing_contexts(rows)
+        distinct_provider_contexts(rows, source_version, provider_role),
+        distinct_billing_contexts(rows),
     )
 
 
 __all__ = [
     "BillingContext",
     "ProviderContext",
+    "ProviderRole",
     "billing_context_of_row",
     "describe_source_contexts",
     "distinct_billing_contexts",

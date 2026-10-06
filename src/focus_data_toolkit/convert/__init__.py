@@ -44,10 +44,10 @@ from focus_data_toolkit.convert.contract_commitment import (
 )
 from focus_data_toolkit.convert.cost_and_usage import (
     CostAndUsageMigrations,
-    ProviderRole,
     contract_applied_legacy_diagnostic,
     convert_cost_and_usage,
     cost_and_usage_provenance,
+    declare_provider_role,
     migration_diagnostics,
     source_header,
 )
@@ -346,7 +346,7 @@ def convert_to_focus_1_4(
     """
     if not cau_rows:
         raise ConversionError("no Cost and Usage rows to convert")
-    declared_role = ProviderRole.declare(provider_role, first_party_publishers)
+    declared_role = declare_provider_role(provider_role, first_party_publishers)
     mode = Mode(mode)
     version, detection = _resolve_source_version(
         cau_rows[0].keys(), source_version=source_version, source_dataset=source_dataset, mode=mode
@@ -359,7 +359,9 @@ def convert_to_focus_1_4(
     # Provider/issuer context is derived from the whole source, never the first row. A single
     # representative is needed only to enrich synthetic Contract Commitment (whose 1.3 source
     # carries no provider); ambiguity is surfaced as a diagnostic, never resolved silently.
-    contexts = describe_source_contexts(cau_rows, version)
+    # The summary describes the providers the converted rows carry (declared role applied);
+    # the Contract Commitment representative is the file's provider, never a seller.
+    contexts = describe_source_contexts(cau_rows, version, provider_role=declared_role)
     provider_ctx, provider_ambiguous = representative_provider(cau_rows, version)
     issuers = sorted(
         {(r.get("InvoiceIssuerName") or "").strip() for r in cau_rows}
