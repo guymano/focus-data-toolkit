@@ -19,7 +19,7 @@ import json
 import os
 import shutil
 import time
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from contextlib import ExitStack
 from dataclasses import astuple, replace
 from datetime import UTC, datetime
@@ -55,6 +55,7 @@ from focus_data_toolkit.convert.contract_commitment import (
 )
 from focus_data_toolkit.convert.cost_and_usage import (
     CostAndUsageMigrations,
+    ProviderRole,
     contract_applied_legacy_diagnostic,
     convert_cost_and_usage_row,
     cost_and_usage_provenance,
@@ -360,6 +361,8 @@ def convert_files(
     progress: ProgressCallback | None = None,
     cancel: CancelPredicate | None = None,
     progress_interval: int = 5000,
+    provider_role: str | None = None,
+    first_party_publishers: Iterable[str] = (),
 ) -> Path:
     """Stream-convert a Cost and Usage file to the FOCUS 1.4 datasets in ``out_dir``.
 
@@ -385,11 +388,13 @@ def convert_files(
     :class:`~focus_data_toolkit.convert.ConversionCancelled` and the atomic staging directory is
     removed, so **nothing partial is ever published**. Both default to ``None`` (unchanged
     behaviour). ``progress_interval`` is the row cadence (capped at 5000) at which cancel is
-    checked and progress considered.
+    checked and progress considered. ``provider_role`` and ``first_party_publishers`` declare
+    who issued a 1.2 source, as in :func:`~focus_data_toolkit.convert.convert_to_focus_1_4`.
     """
     from focus_data_toolkit import __version__
     from focus_data_toolkit.convert import _resolve_source_version
 
+    declared_role = ProviderRole.declare(provider_role, first_party_publishers)
     if output_format not in OUTPUT_FORMATS:
         raise ConversionError(
             f"unsupported output format {output_format!r}; choose one of {', '.join(OUTPUT_FORMATS)}"
@@ -554,7 +559,9 @@ def convert_files(
         )
         linked = bool(supp_keys.invoice_grains) and (synthetic or not invd_blocked)
 
-    cu_prov = cost_and_usage_provenance(source_cols, version, invoice_detail_linked=linked)
+    cu_prov = cost_and_usage_provenance(
+        source_cols, version, invoice_detail_linked=linked, provider_role=declared_role
+    )
     if supplements and supp_keys is not None and linked and line_table is not None:
         if "InvoiceDetailId" in line_table.fact_columns:
             id_cov = coverage(line_table, supp_keys.invoice_grains)["InvoiceDetailId"]
@@ -653,7 +660,7 @@ def convert_files(
                     convert_cost_and_usage_row(
                         row, version, detail_id=detail_id, target=cu_columns,
                         counters=cu_counters, legacy_keys=ca_legacy,
-                        migrations=cu_migrations,
+                        migrations=cu_migrations, provider_role=declared_role,
                     )
                 )
                 cu_count += 1

@@ -8,12 +8,13 @@ FOCUS 1.4 Cost and Usage keeps 1.3's 65-column count but:
   (both conditional and nullable).
 
 A 1.2 source is first lifted to the 1.3 shape: ``ServiceProviderName`` is
-derived from ``ProviderName`` (its 1.3 replacement), ``HostProviderName``
-takes the ``ServiceProviderName`` value — FOCUS requires the host to match
-the service provider when the source does not expose the underlying host,
-and a 1.2 source never exposes it. The deprecated ``PublisherName`` ("entity
-that produced the service") is dropped: it does not identify the host. The
-1.3-only columns (Split Cost Allocation set, ``ContractApplied``) are null.
+derived from ``ProviderName`` (its 1.3 replacement), or from ``PublisherName`` on the
+Marketplace rows of a file the caller declares as issued by a cloud provider (see
+:class:`ProviderRole`); ``HostProviderName`` takes the ``ServiceProviderName`` value — FOCUS
+requires the host to match the service provider when the source does not expose the
+underlying host, and a 1.2 source never exposes it. ``PublisherName`` is dropped and is never
+taken as the host. The 1.3-only columns (Split Cost Allocation set, ``ContractApplied``) are
+null.
 
 Some values that were valid in 1.2/1.3 are not valid in 1.4. Where the 1.4 rule fixes
 the value deterministically, the row is migrated and the change is counted
@@ -119,6 +120,12 @@ class CostAndUsageMigrations:
     # Null values in a pricing-currency column the source does carry, backfilled from the
     # billing-currency value. FOCUS 1.2 already required those values to be non-null.
     backfilled_source_nulls: Counter[str] = field(default_factory=Counter)
+    # FOCUS 1.2 rows treated as Marketplace charges under the declared provider role "csp"
+    # (ServiceProviderName = PublisherName, the seller), per PublisherName.
+    marketplace_publishers: Counter[str] = field(default_factory=Counter)
+    # FOCUS 1.2 rows whose PublisherName differs from ProviderName (and is no declared
+    # first-party publisher) while no provider role was declared, per PublisherName.
+    undeclared_publishers: Counter[str] = field(default_factory=Counter)
 
     def __bool__(self) -> bool:
         return bool(
@@ -126,6 +133,8 @@ class CostAndUsageMigrations:
             or self.nulled_without_sku_price
             or self.kept_without_sku_price
             or self.backfilled_source_nulls
+            or self.marketplace_publishers
+            or self.undeclared_publishers
         )
 
 
@@ -218,7 +227,51 @@ def migration_diagnostics(migrations: CostAndUsageMigrations) -> list[Diagnostic
                 },
             )
         )
+    if migrations.marketplace_publishers:
+        rows = sum(migrations.marketplace_publishers.values())
+        out.append(
+            Diagnostic(
+                code="FDT-MIG-005",
+                severity=Severity.INFO,
+                message=(
+                    f"{rows} FOCUS 1.2 row(s) treated as Marketplace charges (declared provider "
+                    "role 'csp'): ServiceProviderName and HostProviderName take PublisherName, "
+                    "the seller (FOCUS 1.4 ServiceProviderName; Participating Entity "
+                    "Identification 3.1.1-3.3.2)"
+                ),
+                datasets=(DATASET,),
+                column="ServiceProviderName",
+                context={"rows_by_publisher": _publisher_sample(migrations.marketplace_publishers)},
+            )
+        )
+    if migrations.undeclared_publishers:
+        rows = sum(migrations.undeclared_publishers.values())
+        out.append(
+            Diagnostic(
+                code="FDT-CTX-005",
+                severity=Severity.WARNING,
+                message=(
+                    f"{rows} FOCUS 1.2 row(s) have a PublisherName that differs from ProviderName; "
+                    "ServiceProviderName keeps ProviderName. In FOCUS 1.2 this means a Marketplace "
+                    "charge in a file issued by the cloud provider (FOCUS 1.4 then names the seller) "
+                    "or services resold by an MSP (FOCUS 1.4 names the MSP). Declare the provider "
+                    "role ('csp' or 'msp') and, for 'csp', the first-party publisher names"
+                ),
+                datasets=(DATASET,),
+                column="ServiceProviderName",
+                context={"rows_by_publisher": _publisher_sample(migrations.undeclared_publishers)},
+            )
+        )
     return out
+
+
+def _publisher_sample(counts: Counter[str]) -> str:
+    """``publisher:rows`` pairs, the most frequent first, capped for a readable diagnostic."""
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    return "; ".join(f"{p}:{n}" for p, n in ranked[:_PUBLISHER_SAMPLE_CAP])
+
+
+_PUBLISHER_SAMPLE_CAP = 25
 
 
 def _decimal(text: str) -> Decimal | None:
@@ -260,16 +313,97 @@ def contract_applied_legacy_diagnostic(legacy_keys: set[str]) -> Diagnostic | No
         column="ContractApplied",
     )
 
-# 1.2 -> 1.3/1.4 participant-entity derivations. Both columns derive from
-# ProviderName: FOCUS 1.3 replaced ProviderName with ServiceProviderName, and the
-# HostProviderName rules require the value to match ServiceProviderName when the
-# source does not expose the underlying host (a 1.2 source never does). The
-# deprecated PublisherName is NOT a host equivalent and is dropped with the other
-# removed 1.2 columns.
-_DERIVED_FROM_1_2 = {
-    "ServiceProviderName": "ProviderName",
-    "HostProviderName": "ProviderName",
-}
+# 1.2 -> 1.3/1.4 participant-entity derivations. Both columns derive from the row's
+# service provider (see service_provider_of_1_2_row): FOCUS 1.3 introduced
+# ServiceProviderName as the replacement for ProviderName, and HostProviderName MUST match
+# ServiceProviderName unless the customer selected the host or the service provider exposes
+# it (FOCUS 1.4 HostProviderName); a 1.2 source has no host column, so it never exposes one.
+# The deprecated PublisherName is never taken as the host.
+_DERIVED_FROM_1_2 = ("ServiceProviderName", "HostProviderName")
+
+PROVIDER_ROLES: tuple[str, ...] = ("csp", "msp")
+
+
+@dataclass(frozen=True)
+class ProviderRole:
+    """Who issued a FOCUS 1.2 source, as declared by the caller (FOCUS 1.2 does not say it).
+
+    In FOCUS 1.2, a ``PublisherName`` that differs from ``ProviderName`` means two opposite
+    things (FOCUS 1.2 appendix "Origination of Cost Data"): a cloud marketplace purchase
+    (Provider = cloud provider, Publisher = the seller; scenarios 3.1-3.3) or cloud services
+    bought through an MSP (Provider = MSP, Publisher = cloud provider; scenario 2.1). FOCUS 1.4
+    makes the seller the Service Provider in the first case and the MSP in the second
+    (ServiceProviderName notes; appendix "Participating Entity Identification" 2.1-2.2 and
+    3.1.1-3.3.2), and a row alone cannot tell them apart:
+
+    * ``csp`` - the file comes from a cloud provider: a row is a Marketplace charge when its
+      ``PublisherName`` is neither its ``ProviderName`` nor one of ``first_party_publishers``
+      (the provider's own publisher names, e.g. "Microsoft" next to "Microsoft Azure"), and
+      its Service Provider is that ``PublisherName``;
+    * ``msp`` - the file comes from an MSP or reseller: the Service Provider is ``ProviderName``;
+    * none - ``ProviderName`` is kept and such rows are reported (``FDT-CTX-005``).
+
+    Only the official FOCUS 1.2 columns are read; provider-specific ``x_`` columns are not.
+    """
+
+    role: str | None = None
+    first_party_publishers: frozenset[str] = frozenset()  # case-folded
+
+    @classmethod
+    def declare(
+        cls, role: str | None = None, first_party_publishers: Iterable[str] = ()
+    ) -> ProviderRole:
+        """Validate a caller's declaration (``ConversionError`` on an invalid one)."""
+        names = frozenset(n.strip().casefold() for n in first_party_publishers if n.strip())
+        if role is not None and role not in PROVIDER_ROLES:
+            raise ConversionError(
+                f"unknown provider role {role!r}; expected one of {', '.join(PROVIDER_ROLES)}"
+            )
+        if names and role != "csp":
+            raise ConversionError(
+                "first-party publisher names apply only to the provider role 'csp' (a file "
+                "issued by the cloud provider)"
+            )
+        return cls(role, names)
+
+    def publisher_differs(self, row: Mapping[str, str]) -> bool:
+        """Whether a 1.2 row names a publisher other than its provider and first-party names."""
+        publisher = (row.get("PublisherName") or "").strip().casefold()
+        provider = (row.get("ProviderName") or "").strip().casefold()
+        return bool(publisher) and publisher != provider and (
+            publisher not in self.first_party_publishers
+        )
+
+    def describe(self) -> str:
+        """The declaration as recorded in the manifest provenance."""
+        if self.role != "csp" or not self.first_party_publishers:
+            return f"declared provider role {self.role!r}"
+        names = ", ".join(sorted(self.first_party_publishers))
+        return f"declared provider role 'csp'; first-party publishers: {names}"
+
+
+def service_provider_of_1_2_row(
+    row: Mapping[str, str],
+    declared: ProviderRole,
+    migrations: CostAndUsageMigrations | None = None,
+) -> str:
+    """``ServiceProviderName`` (and so ``HostProviderName``) of a FOCUS 1.2 row.
+
+    ``ProviderName`` by default (its 1.3 replacement); ``PublisherName`` for a Marketplace
+    row of a file issued by a cloud provider (``csp``). Rows whose publisher differs are
+    counted in ``migrations`` for ``FDT-MIG-005`` (role ``csp``) or ``FDT-CTX-005`` (no role).
+    """
+    provider = row.get("ProviderName", "") or ""
+    if not declared.publisher_differs(row):
+        return provider
+    publisher = row.get("PublisherName", "") or ""
+    if declared.role == "csp":
+        if migrations is not None:
+            migrations.marketplace_publishers[publisher.strip()] += 1
+        return publisher
+    if declared.role is None and migrations is not None:
+        migrations.undeclared_publishers[publisher.strip()] += 1
+    return provider
 
 
 # Conditional unit-price columns whose rules depend on their presence: "MUST NOT be null when
@@ -307,14 +441,20 @@ def emitted_cost_and_usage_columns(source_columns: Iterable[str]) -> tuple[str, 
 
 
 def cost_and_usage_provenance(
-    source_columns: Iterable[str], source_version: str, *, invoice_detail_linked: bool
+    source_columns: Iterable[str],
+    source_version: str,
+    *,
+    invoice_detail_linked: bool,
+    provider_role: ProviderRole | None = None,
 ) -> dict[str, ColumnRule]:
     """Return the per-column lineage of a converted Cost and Usage dataset.
 
     ``invoice_detail_linked`` is True when an (synthetic) Invoice Detail dataset is being
     produced, so ``InvoiceDetailId`` carries the back-link (assumed); otherwise it is null.
-    Columns the output omits (see :func:`emitted_cost_and_usage_columns`) have no rule.
+    Columns the output omits (see :func:`emitted_cost_and_usage_columns`) have no rule. A
+    declared ``provider_role`` (1.2 sources) is recorded in the participant-entity rules.
     """
+    declared = provider_role if provider_role is not None and provider_role.role else None
     present = set(source_columns)
     sku_price_cascade = "SkuPriceId" in present
     rules: dict[str, ColumnRule] = {}
@@ -355,6 +495,18 @@ def cost_and_usage_provenance(
             )
         elif col in present:
             rules[col] = ColumnRule(Lineage.OBSERVED, f"CostAndUsage.{col}")
+        elif source_version == "1.2" and col == "ServiceProviderName" and declared is not None:
+            rules[col] = ColumnRule(
+                Lineage.DERIVED,
+                (
+                    "ProviderName; PublisherName on Marketplace rows"
+                    if declared.role == "csp" else "ProviderName"
+                ),
+                note=(
+                    f"{declared.describe()}; FOCUS 1.4 names the Marketplace seller (csp) or "
+                    "the MSP (msp) as the Service Provider"
+                ),
+            )
         elif source_version == "1.2" and col == "ServiceProviderName":
             rules[col] = ColumnRule(
                 Lineage.DERIVED,
@@ -364,7 +516,9 @@ def cost_and_usage_provenance(
         elif source_version == "1.2" and col == "HostProviderName":
             rules[col] = ColumnRule(
                 Lineage.DERIVED,
-                "ServiceProviderName (from ProviderName)",
+                "ServiceProviderName" if declared is not None else (
+                    "ServiceProviderName (from ProviderName)"
+                ),
                 note=(
                     "host not exposed by a 1.2 source; FOCUS requires "
                     "HostProviderName to match ServiceProviderName in that case"
@@ -482,6 +636,7 @@ def convert_cost_and_usage_row(
     counters: LineageCounters | None = None,
     legacy_keys: set[str] | None = None,
     migrations: CostAndUsageMigrations | None = None,
+    provider_role: ProviderRole | None = None,
 ) -> dict[str, str]:
     """Convert one source row to the FOCUS 1.4 Cost and Usage shape (pure function).
 
@@ -491,10 +646,15 @@ def convert_cost_and_usage_row(
     rule varies by row (the migrated columns and the pricing-currency backfill pair);
     ``legacy_keys`` (optional) collects legacy pre-erratum ``ContractApplied`` identifier
     casings that were normalized; ``migrations`` (optional) counts the values migrated to
-    the FOCUS 1.4 rules. Raises :class:`CostAndUsageMigrationError` when a 1.4 rule cannot
+    the FOCUS 1.4 rules; ``provider_role`` is the caller's declaration for a 1.2 source (see
+    :class:`ProviderRole`). Raises :class:`CostAndUsageMigrationError` when a 1.4 rule cannot
     be met without inventing a value.
     """
     columns = target if target is not None else dataset_columns(DATASET)
+    service_provider = (
+        service_provider_of_1_2_row(row, provider_role or ProviderRole(), migrations)
+        if source_version == "1.2" else ""
+    )
     converted: dict[str, str] = {}
     for col in columns:
         if col == "ContractApplied":
@@ -502,7 +662,7 @@ def convert_cost_and_usage_row(
         elif col in row:
             converted[col] = row[col]
         elif source_version == "1.2" and col in _DERIVED_FROM_1_2:
-            converted[col] = row.get(_DERIVED_FROM_1_2[col], "")
+            converted[col] = service_provider
         elif col == "InvoiceDetailId":
             converted[col] = detail_id
         else:
@@ -578,6 +738,7 @@ def convert_cost_and_usage(
     legacy_keys: set[str] | None = None,
     migrations: CostAndUsageMigrations | None = None,
     source_columns: Iterable[str] | None = None,
+    provider_role: ProviderRole | None = None,
 ) -> list[dict[str, str]]:
     """Return ``rows`` reshaped to the FOCUS 1.4 Cost and Usage column set.
 
@@ -586,6 +747,7 @@ def convert_cost_and_usage(
     to their invoice line item on exactly the same key. ``source_columns`` (the source
     header; by default every column any row carries, see :func:`source_header`) decides which
     conditional columns are omitted (:func:`emitted_cost_and_usage_columns`).
+    ``provider_role`` is the caller's declaration for a 1.2 source (:class:`ProviderRole`).
     """
     if source_columns is None:
         source_columns = source_header(rows)
@@ -600,6 +762,7 @@ def convert_cost_and_usage(
             counters=counters,
             legacy_keys=legacy_keys,
             migrations=migrations,
+            provider_role=provider_role,
         )
         for row in rows
     ]

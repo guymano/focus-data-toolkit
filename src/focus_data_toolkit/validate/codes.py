@@ -54,6 +54,8 @@ CATALOG: dict[str, CodeSpec] = dict([
        "null source pricing-currency values backfilled from billing-currency values"),
     _s("FDT-MIG-004", Severity.WARNING,
        "rows without SkuPriceId outside Tax/Credit/Adjustment/corrections keep their pricing values"),
+    _s("FDT-MIG-005", Severity.INFO,
+       "1.2 Marketplace rows take PublisherName as ServiceProviderName (declared role 'csp')"),
     _s("FDT-MIG-010", Severity.ERROR,
        "Tax EffectiveCost change cannot be restated in a different PricingCurrency"),
     _s("FDT-MIG-011", Severity.ERROR,
@@ -63,6 +65,8 @@ CATALOG: dict[str, CodeSpec] = dict([
     _s("FDT-CTX-002", Severity.WARNING, "source carries multiple invoice issuers"),
     _s("FDT-CTX-003", Severity.WARNING, "source carries multiple billing currencies"),
     _s("FDT-CTX-004", Severity.INFO, "a representative context was chosen for enrichment"),
+    _s("FDT-CTX-005", Severity.WARNING,
+       "1.2 rows whose PublisherName differs from ProviderName, with no provider role declared"),
     # --- cross-dataset referential integrity & reconciliation --------------------
     _s("FDT-CROSS-001", Severity.ERROR, "duplicate identifier where uniqueness is required"),
     _s("FDT-CROSS-002", Severity.ERROR, "identifier collides across datasets"),

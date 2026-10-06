@@ -11,7 +11,8 @@ v1.4 requirements model (`specification/requirements_model/releases/1.4`).
 - Every 1.4 column present in the source is copied verbatim. Allowed values did not change between
   1.2 and 1.4 for any enumerated column, so enum values are never rewritten.
 - `ProviderName` and `PublisherName` (deprecated in 1.3, removed in 1.4) are dropped. For a 1.2
-  source, `ServiceProviderName` and `HostProviderName` are derived from `ProviderName`.
+  source, `ServiceProviderName` and `HostProviderName` are derived as described in
+  [Participating entities of a 1.2 source](#participating-entities-of-a-12-source).
 - Columns new in 1.3 or 1.4 that the source does not carry are emitted null, for example
   `CommitmentProgramEligibilityDetails` and `InvoiceDetailId`. The manifest records them as
   `UNAVAILABLE`.
@@ -25,6 +26,57 @@ v1.4 requirements model (`specification/requirements_model/releases/1.4`).
     column would fail those rules in any validator.
   - A column counts as carried when any source row carries it.
   - The manifest lists no rule for an omitted column.
+
+## Participating entities of a 1.2 source
+
+FOCUS 1.2 has `ProviderName`, `PublisherName` and `InvoiceIssuerName`. FOCUS 1.3 introduced
+`ServiceProviderName` "as a replacement for ProviderName", added `HostProviderName`, and
+deprecated `ProviderName` and `PublisherName`. FOCUS 1.4 removes those two; there
+`ServiceProviderName` is Mandatory and not nullable, and `HostProviderName` is Mandatory and
+nullable. Only these official columns are read; provider-specific `x_` columns are not.
+
+**What the specification says.**
+
+- FOCUS 1.2 appendix *Origination of Cost Data*: when `PublisherName` differs from
+  `ProviderName`, the row is either a cloud marketplace purchase (Provider = the cloud provider,
+  Publisher = the seller; scenarios 3.1 to 3.3) or cloud services bought through an MSP
+  (Provider = the MSP, Publisher = the cloud provider; scenario 2.1).
+- FOCUS 1.4 `ServiceProviderName`: "In marketplace scenarios, the Service Provider represents the
+  seller rather than the marketplace operator"; a reseller of white-labeled services is the
+  Service Provider. The appendix *Participating Entity Identification* gives the Marketplace
+  Seller in scenarios 3.1.1 to 3.3.2 and the MSP in scenarios 2.1 and 2.2.
+- FOCUS 1.4 `HostProviderName` MUST reflect the host when the customer selected it or the
+  service provider exposes it, and MUST match `ServiceProviderName` in all other cases.
+
+**What the converter does.** A 1.2 row cannot tell the marketplace case from the MSP case, so the
+caller declares who issued the file (`provider_role`, CLI `--provider-role`):
+
+| Declaration | Row whose `PublisherName` differs from `ProviderName` | Code |
+|---|---|---|
+| none (default) | `ServiceProviderName` = `ProviderName`, as before; the rows are counted | `FDT-CTX-005` (warning) |
+| `csp`: a cloud provider issued the file | Marketplace charge: `ServiceProviderName` = `PublisherName` (the seller) | `FDT-MIG-005` (info) |
+| `msp`: an MSP or reseller issued the file | `ServiceProviderName` = `ProviderName` (the MSP) | none |
+
+- **First-party publishers.** A cloud provider may spell itself differently in the two columns (for
+  example `ProviderName` "Microsoft Azure" and `PublisherName` "Microsoft"). With `csp`, such names
+  are declared as first-party publishers (`first_party_publishers`, CLI
+  `--first-party-publisher`, case-insensitive), and their rows are not treated as Marketplace
+  charges. The comparison with `ProviderName` is case-insensitive as well.
+- **Nothing is refused.** Without a declaration, strict mode still produces the dataset; the
+  warning names the publishers concerned.
+- **1.3 sources.** They carry `ServiceProviderName` themselves; the declaration does not apply.
+- **Manifest.** The declaration is recorded in the `ServiceProviderName` provenance note.
+
+**`HostProviderName` is an interpretation.** A 1.2 source has no host column, so it never exposes
+the host, and `HostProviderName` takes the `ServiceProviderName` value. The specification does
+not settle this for a 1.2 source, and the true 1.4 value can differ in two cases:
+
+- a Marketplace offering that runs on the cloud provider's infrastructure, or that exposes its
+  host, has the cloud provider as host (appendix 3.1.x and 3.2.x), where the converter writes the
+  seller (3.3.x, without visibility);
+- in an MSP file, the 1.2 `PublisherName` is the cloud provider, which could be read as exposing
+  the host (appendix 2.1), where the converter writes the MSP (2.2). The publisher is never taken
+  as the host.
 
 ## Values migrated to a 1.4 rule
 

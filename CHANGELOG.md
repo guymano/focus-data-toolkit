@@ -36,6 +36,19 @@ policy.
   recognised by its `sku.name`; a new `none_of` detection clause rules out the plan- and
   reservation-level lists, which share it. A `lower` adapter transform supports
   case-insensitive provider identifiers.
+- A FOCUS 1.2 source can declare who issued it (`provider_role="csp"` or `"msp"`, CLI
+  `--provider-role`), with the cloud provider's own publisher names
+  (`first_party_publishers`, CLI `--first-party-publisher`).
+  - With `csp`, a row whose `PublisherName` differs from `ProviderName` and is no declared
+    first-party name is a Marketplace charge. Its `ServiceProviderName` and
+    `HostProviderName` become the seller, as FOCUS 1.4 requires (`FDT-MIG-005`).
+  - With `msp`, they stay `ProviderName`, the MSP.
+  - Without a declaration, `ProviderName` is kept as before, and those rows are reported
+    (`FDT-CTX-005`). Nothing is refused.
+  - Only official FOCUS columns are read. See
+    [conversion rules](docs/conversion-rules.md#participating-entities-of-a-12-source),
+    including why `HostProviderName` = `ServiceProviderName` is an interpretation for a 1.2
+    source.
 
 ### Changed
 
@@ -99,6 +112,8 @@ policy.
 
 ### Fixed
 
+- `focus-toolkit convert --stream` printed each diagnostic as `note None:`; it now prints
+  its code, as the eager path does.
 - `ContractCommitmentDurationType` is no longer rounded from `days / 30.44`, which turned
   any span into a plausible-looking term. It is derived (`DERIVED`) only when the
   commitment period spans a whole number of calendar months, the day clamped at month

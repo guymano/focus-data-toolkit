@@ -44,6 +44,7 @@ from focus_data_toolkit.convert.contract_commitment import (
 )
 from focus_data_toolkit.convert.cost_and_usage import (
     CostAndUsageMigrations,
+    ProviderRole,
     contract_applied_legacy_diagnostic,
     convert_cost_and_usage,
     cost_and_usage_provenance,
@@ -326,6 +327,8 @@ def convert_to_focus_1_4(
     validate: bool = True,
     capabilities: CapabilityProfile | None = None,
     supplements: SupplementBundle | None = None,
+    provider_role: str | None = None,
+    first_party_publishers: Iterable[str] = (),
 ) -> ConversionResult:
     """Convert FOCUS 1.2/1.3 rows into the FOCUS 1.4 datasets for the given ``mode``.
 
@@ -333,13 +336,17 @@ def convert_to_focus_1_4(
     FOCUS 1.3 Contract Commitment table. ``source_version`` / ``source_dataset`` force schema
     detection. ``supplements`` is an optional loaded supplement bundle: supplied facts are
     validated against the source, applied with ``ENRICHED`` lineage, and — at full coverage —
-    let **strict** mode produce the derived datasets factually. Returns a
-    :class:`ConversionResult` carrying the produced datasets, per-column provenance, the
-    detected schema, a per-row context summary, diagnostics, a manifest and (when
-    ``validate``) lint reports.
+    let **strict** mode produce the derived datasets factually. ``provider_role`` (``"csp"``
+    or ``"msp"``) and ``first_party_publishers`` declare who issued a 1.2 source, which
+    decides ``ServiceProviderName`` where ``PublisherName`` differs from ``ProviderName``
+    (see :class:`~focus_data_toolkit.convert.cost_and_usage.ProviderRole`); a 1.3 source
+    carries ``ServiceProviderName`` itself. Returns a :class:`ConversionResult` carrying the
+    produced datasets, per-column provenance, the detected schema, a per-row context
+    summary, diagnostics, a manifest and (when ``validate``) lint reports.
     """
     if not cau_rows:
         raise ConversionError("no Cost and Usage rows to convert")
+    declared_role = ProviderRole.declare(provider_role, first_party_publishers)
     mode = Mode(mode)
     version, detection = _resolve_source_version(
         cau_rows[0].keys(), source_version=source_version, source_dataset=source_dataset, mode=mode
@@ -465,9 +472,12 @@ def convert_to_focus_1_4(
     cu_rows = convert_cost_and_usage(
         cau_rows, version, invoice_detail_ids=id_mapping, counters=cu_counters,
         legacy_keys=ca_legacy, migrations=cu_migrations, source_columns=source_cols,
+        provider_role=declared_role,
     )
     lineage_counts["Cost and Usage"] = cu_counters
-    cu_prov = cost_and_usage_provenance(source_cols, version, invoice_detail_linked=linked)
+    cu_prov = cost_and_usage_provenance(
+        source_cols, version, invoice_detail_linked=linked, provider_role=declared_role
+    )
     if supplements and supp_keys is not None and linked:
         # Real, fully-covering issuer-assigned ids from an invoice_line supplement make
         # the Cost and Usage back-link factual instead of a locally generated id.
