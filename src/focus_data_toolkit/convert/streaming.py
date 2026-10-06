@@ -19,7 +19,7 @@ import json
 import os
 import shutil
 import time
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from contextlib import ExitStack
 from dataclasses import astuple, replace
 from datetime import UTC, datetime
@@ -58,6 +58,7 @@ from focus_data_toolkit.convert.cost_and_usage import (
     contract_applied_legacy_diagnostic,
     convert_cost_and_usage_row,
     cost_and_usage_provenance,
+    declare_provider_role,
     emitted_cost_and_usage_columns,
     migration_diagnostics,
 )
@@ -360,6 +361,8 @@ def convert_files(
     progress: ProgressCallback | None = None,
     cancel: CancelPredicate | None = None,
     progress_interval: int = 5000,
+    provider_role: str | None = None,
+    first_party_publishers: Iterable[str] = (),
 ) -> Path:
     """Stream-convert a Cost and Usage file to the FOCUS 1.4 datasets in ``out_dir``.
 
@@ -385,11 +388,13 @@ def convert_files(
     :class:`~focus_data_toolkit.convert.ConversionCancelled` and the atomic staging directory is
     removed, so **nothing partial is ever published**. Both default to ``None`` (unchanged
     behaviour). ``progress_interval`` is the row cadence (capped at 5000) at which cancel is
-    checked and progress considered.
+    checked and progress considered. ``provider_role`` and ``first_party_publishers`` declare
+    who issued a 1.2 source, as in :func:`~focus_data_toolkit.convert.convert_to_focus_1_4`.
     """
     from focus_data_toolkit import __version__
     from focus_data_toolkit.convert import _resolve_source_version
 
+    declared_role = declare_provider_role(provider_role, first_party_publishers)
     if output_format not in OUTPUT_FORMATS:
         raise ConversionError(
             f"unsupported output format {output_format!r}; choose one of {', '.join(OUTPUT_FORMATS)}"
@@ -554,7 +559,9 @@ def convert_files(
         )
         linked = bool(supp_keys.invoice_grains) and (synthetic or not invd_blocked)
 
-    cu_prov = cost_and_usage_provenance(source_cols, version, invoice_detail_linked=linked)
+    cu_prov = cost_and_usage_provenance(
+        source_cols, version, invoice_detail_linked=linked, provider_role=declared_role
+    )
     if supplements and supp_keys is not None and linked and line_table is not None:
         if "InvoiceDetailId" in line_table.fact_columns:
             id_cov = coverage(line_table, supp_keys.invoice_grains)["InvoiceDetailId"]
@@ -620,7 +627,11 @@ def convert_files(
             # on the success path is harmless.
             stack.callback(index.close)
 
+        # Providers the converted rows carry (declared role applied: the context summary), and
+        # the file's providers (the Contract Commitment representative, never a seller); the
+        # two differ only for a 1.2 source declared "csp".
         provider_seen: dict[tuple[str, str], ProviderContext] = {}
+        issuer_seen = provider_seen if declared_role.role != "csp" else {}
         billing_seen: dict[tuple, BillingContext] = {}
         cu_counters = LineageCounters()
         ca_legacy: set[str] = set()
@@ -632,8 +643,11 @@ def convert_files(
         try:
             for record in reader:
                 row = record.values
-                pctx = provider_context_of_row(row, version)
+                pctx = provider_context_of_row(row, version, declared_role)
                 provider_seen[(pctx.service_provider_name, pctx.host_provider_name)] = pctx
+                if issuer_seen is not provider_seen:
+                    ictx = provider_context_of_row(row, version)
+                    issuer_seen[(ictx.service_provider_name, ictx.host_provider_name)] = ictx
                 bctx = billing_context_of_row(row)
                 billing_seen[astuple(bctx)] = bctx
 
@@ -653,7 +667,7 @@ def convert_files(
                     convert_cost_and_usage_row(
                         row, version, detail_id=detail_id, target=cu_columns,
                         counters=cu_counters, legacy_keys=ca_legacy,
-                        migrations=cu_migrations,
+                        migrations=cu_migrations, provider_role=declared_role,
                     )
                 )
                 cu_count += 1
@@ -766,8 +780,8 @@ def convert_files(
             row_counts["Billing Period"] = len(bp_rows)
 
             if cc_rows:
-                providers = [provider_seen[k] for k in sorted(provider_seen)]
-                provider_ctx, provider_ambiguous = representative_from_contexts(providers)
+                file_providers = [issuer_seen[k] for k in sorted(issuer_seen)]
+                provider_ctx, provider_ambiguous = representative_from_contexts(file_providers)
                 issuers = sorted(
                     {b.invoice_issuer_name for b in billing_seen.values() if b.invoice_issuer_name}
                 )

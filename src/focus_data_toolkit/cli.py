@@ -302,6 +302,8 @@ def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
                 supplements=_load_supplements(args),
                 progress=progress,
                 cancel=cancel_event.is_set,
+                provider_role=args.provider_role,
+                first_party_publishers=args.first_party_publisher or (),
             )
     except ConversionCancelled:
         # Subclass of ConversionError — must be caught first. Nothing was published.
@@ -338,7 +340,8 @@ def _cmd_convert_stream(args: argparse.Namespace, mode: Mode) -> int:
         )
     manifest = json.loads(published_manifest.read_text(encoding="utf-8"))
     for diag in manifest.get("diagnostics", []):
-        print(f"note {diag.get('code')}: {diag.get('message')}", file=sys.stderr)
+        # Manifest diagnostics carry the code as "rule_id" (Diagnostic.as_dict).
+        print(f"note {diag.get('rule_id')}: {diag.get('message')}", file=sys.stderr)
     print(f"wrote {out}/ (format {args.output_format}, mode {mode})")
     for name, entry in manifest["datasets"].items():
         if entry.get("status") == NOT_PRODUCED:
@@ -388,6 +391,8 @@ def _cmd_convert(args: argparse.Namespace) -> int:
             validate=not args.no_validate,
             capabilities=_capabilities(args),
             supplements=_load_supplements(args),
+            provider_role=args.provider_role,
+            first_party_publishers=args.first_party_publisher or (),
         )
     except SupplementError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -824,6 +829,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--target-file-size",
         help="Parquet only: approximate max part-file size per partition (e.g. 128MB); rolls to "
         "a new part file once exceeded",
+    )
+    conv.add_argument(
+        "--provider-role",
+        choices=("csp", "msp"),
+        help="FOCUS 1.2 sources only: who issued the file. csp (a cloud provider): a row whose "
+        "PublisherName differs from ProviderName is a Marketplace charge and its "
+        "ServiceProviderName is the seller (PublisherName); msp (an MSP or reseller): "
+        "ServiceProviderName stays ProviderName. Without it, such rows keep ProviderName "
+        "and are reported (FDT-CTX-005)",
+    )
+    conv.add_argument(
+        "--first-party-publisher",
+        action="append",
+        metavar="NAME",
+        help="with --provider-role csp: a PublisherName that is the cloud provider itself (e.g. "
+        "'Microsoft' next to ProviderName 'Microsoft Azure'), so its rows are not Marketplace; "
+        "repeatable, case-insensitive",
     )
     conv.set_defaults(func=_cmd_convert)
 
