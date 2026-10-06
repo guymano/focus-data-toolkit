@@ -48,33 +48,15 @@ from focus_data_toolkit.convert.exceptions import ConversionError
 from focus_data_toolkit.convert.invoice_detail import GrainKey, invoice_detail_grain_key
 from focus_data_toolkit.errors import Diagnostic, Severity
 from focus_data_toolkit.model import dataset_columns
+from focus_data_toolkit.model.validator import NULL_WHEN_SKU_PRICE_ID_NULL, UNIT_OF_QUANTITY
 from focus_data_toolkit.provenance import ColumnRule, Lineage, LineageCounters
 
 DATASET = "Cost and Usage"
 
-# Columns FOCUS 1.4 requires to be null when SkuPriceId is null (CAU-ListUnitPrice-C-012,
-# CAU-ContractedUnitPrice-C-014, CAU-PricingCurrencyListUnitPrice-C-011,
-# CAU-PricingCurrencyContractedUnitPrice-C-011, CAU-PricingCategory-C-012,
-# CAU-PricingQuantity-C-011, CAU-ConsumedQuantity-C-009,
-# CAU-CommitmentDiscountQuantity-C-016). FOCUS 1.2 allowed values there.
-NULL_WHEN_SKU_PRICE_ID_NULL: tuple[str, ...] = (
-    "ListUnitPrice",
-    "ContractedUnitPrice",
-    "PricingCurrencyListUnitPrice",
-    "PricingCurrencyContractedUnitPrice",
-    "PricingCategory",
-    "PricingQuantity",
-    "ConsumedQuantity",
-    "CommitmentDiscountQuantity",
-)
-# A unit MUST be null exactly when its quantity is (CAU-PricingUnit-C-005/006,
-# CAU-ConsumedUnit-C-005/006, CAU-CommitmentDiscountUnit-C-005/006), so a quantity
-# nulled above takes its unit with it.
-UNIT_OF_QUANTITY: dict[str, str] = {
-    "PricingQuantity": "PricingUnit",
-    "ConsumedQuantity": "ConsumedUnit",
-    "CommitmentDiscountQuantity": "CommitmentDiscountUnit",
-}
+# The columns FOCUS 1.4 requires to be null when SkuPriceId is null (FOCUS 1.2 allowed values
+# there) and their units, which follow their quantities: one definition, shared with the
+# linter (NULL_WHEN_SKU_PRICE_ID_NULL, UNIT_OF_QUANTITY), so a quantity nulled here takes its
+# unit with it exactly as the lint expects.
 _SKU_PRICE_CASCADE: tuple[str, ...] = NULL_WHEN_SKU_PRICE_ID_NULL + tuple(
     UNIT_OF_QUANTITY.values()
 )

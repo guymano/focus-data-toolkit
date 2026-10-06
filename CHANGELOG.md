@@ -9,6 +9,23 @@ policy.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-10-06
+
+FOCUS 1.2/1.3 to 1.4 conversion follows the specification more closely, and commitment
+terms and provider-native commitment inventories can complete the 1.4 datasets.
+
+- **Breaking:**
+  - the `aws-savings-plans` adapter (v2) is keyed by `savingsPlanArn`;
+  - a unit-price column the source does not carry is omitted from the 1.4 Cost and Usage
+    output instead of being written null.
+- **New byte baselines for converted output:**
+  - conversion manifests label migrated columns `DERIVED`;
+  - `ContractCommitmentDurationType` is written in whole years (`1 Year`, `3 Years`).
+
+  Generated samples are unchanged.
+- **Stricter lint:** output that passed with 0.13.0 can now be refused; see the upgrade
+  notes under Changed.
+
 ### Added
 
 - The supplement API and the documented failures are now public, re-exported from the
@@ -867,7 +884,8 @@ conformance defects.
 
 <!-- Reference links. 0.2.0/0.3.0 were pre-release development milestones and were never tagged
      or published, so only the first public release (0.9.0) has a tag link. -->
-[Unreleased]: https://github.com/guymano/focus-data-toolkit/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/guymano/focus-data-toolkit/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.11.0rc1...v0.11.0
