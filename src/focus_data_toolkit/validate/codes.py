@@ -6,6 +6,7 @@ downstream tooling can key on them across releases. Namespaces:
 * ``FDT-DET-*``   — schema / version detection
 * ``FDT-CA-*``    — ContractApplied parsing / migration normalizations
 * ``FDT-CC-*``    — Contract Commitment 1.3 -> 1.4 expansion
+* ``FDT-MIG-*``   — 1.2/1.3 values migrated (or refused) to meet a FOCUS 1.4 rule
 * ``FDT-CROSS-*`` — inter-dataset referential integrity & reconciliation
 * ``FDT-ALLOC-*`` — split cost allocation
 * ``FDT-CORR-*``  — corrections / credits / billing lifecycle
@@ -44,6 +45,19 @@ CATALOG: dict[str, CodeSpec] = dict([
     # --- Contract Commitment 1.3 -> 1.4 expansion --------------------------------
     _s("FDT-CC-001", Severity.WARNING,
        "DurationType neither derivable from the commitment period nor supplied"),
+    # --- value migrations to FOCUS 1.4 rules --------------------------------------
+    _s("FDT-MIG-001", Severity.WARNING,
+       "Tax EffectiveCost set to BilledCost (FOCUS 1.4 CAU-EffectiveCost-C-017)"),
+    _s("FDT-MIG-002", Severity.WARNING,
+       "pricing/quantity values nulled where SkuPriceId is null (FOCUS 1.3+)"),
+    _s("FDT-MIG-003", Severity.WARNING,
+       "null source pricing-currency values backfilled from billing-currency values"),
+    _s("FDT-MIG-004", Severity.WARNING,
+       "rows without SkuPriceId outside Tax/Credit/Adjustment/corrections keep their pricing values"),
+    _s("FDT-MIG-010", Severity.ERROR,
+       "Tax EffectiveCost change cannot be restated in a different PricingCurrency"),
+    _s("FDT-MIG-011", Severity.ERROR,
+       "null PricingCurrencyEffectiveCost cannot be backfilled into another or unknown currency"),
     # --- multi-provider / context ------------------------------------------------
     _s("FDT-CTX-001", Severity.WARNING, "source carries multiple provider contexts"),
     _s("FDT-CTX-002", Severity.WARNING, "source carries multiple invoice issuers"),
