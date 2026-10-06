@@ -38,6 +38,54 @@ policy.
 - **New byte baseline:** `ContractCommitmentDurationType` is written in whole years when
   the term is a multiple of 12 months (`1 Year`, `3 Years`), as in the specification's
   examples, instead of `12 Months` / `36 Months`. Other terms stay in months.
+- The FOCUS 1.4 linter now enforces more of the static Cost and Usage rules of the v1.4
+  requirements model. Output that passed before can now fail the lint, and strict
+  publication refuses it:
+  - Tax and Credit `EffectiveCost` equals `BilledCost` (CAU-EffectiveCost-C-017);
+  - `ListCost` and `ContractedCost` equal unit price × `PricingQuantity` when both are
+    present, Correction rows included (C-011). The relative tolerance is the official
+    focus-validator's (1e-9 × max(|cost|, 1)), and the arithmetic is exact whatever the
+    caller's Decimal context. An operand whose exponent lies beyond ±1000 is reported as
+    not computable instead of being computed;
+  - a unit is null exactly when its quantity is (`PricingUnit`, `ConsumedUnit`,
+    `CommitmentDiscountUnit`, C-005/C-006);
+  - `ListUnitPrice` and `ContractedUnitPrice` are present when `SkuPriceId` is set
+    (C-013/C-015). This applies in every profile, as these rules have no applicability
+    criteria, except for a column the source did not carry.
+    `lint_focus_1_4_structure(source_absent_columns=...)` lets a producer name such
+    columns that it writes all null, and a column missing from the rows counts as absent;
+  - under a declared `SupportsUnitPricing` condition, the pricing and quantity columns
+    are null when `SkuPriceId` is null (C-009 to C-016).
+
+  Other static rules of the model are not checked. These include the pricing-currency
+  unit prices' C-012, whose presence is not visible on a row and whose model condition
+  for `PricingCurrencyContractedUnitPrice` contradicts its text.
+  **Upgrade note:** expect refusals for:
+  - provider costs rounded to the cent (exact identity), and 1.2 Correction rows, which
+    1.2 exempted from the identity;
+  - Credit rows whose `EffectiveCost` differs from `BilledCost` (C-017), which the
+    converter copies as is (Tax rows are migrated, `FDT-MIG-001`);
+  - rows with a `SkuPriceId` but a null `ListUnitPrice` or `ContractedUnitPrice` in a
+    column the source carries (C-013/C-015).
+- **Breaking (output layout):** a unit-price column the source does not carry
+  (`ListUnitPrice`, `ContractedUnitPrice`, `PricingCurrencyListUnitPrice`,
+  `PricingCurrencyContractedUnitPrice`) is no longer written all null into the 1.4 Cost
+  and Usage output; it is omitted, as Invoice Detail already omits its unfilled
+  conditional columns. Its presence condition is not met, and written null it would break
+  the "MUST NOT be null when SkuPriceId is not null" rules in any validator, including
+  `focus-toolkit validate` on the published file. A column counts as carried when any
+  source row carries it. Sources that carry all four columns, such as the generated
+  samples, are unchanged.
+- The client-like test fixture violated the cost identity by a factor of 1000; its
+  quantities are corrected. Its Tax row no longer carries a pricing quantity, and its
+  pricing-currency effective cost now matches its effective cost.
+- **New byte baseline for conversion manifests.** On sources that can trigger those
+  migrations, `EffectiveCost` and the `SkuPriceId`-dependent columns are now labelled
+  `DERIVED` at column level. This follows the "weakest lineage the rule can produce"
+  convention, and `lineage_summary` records the per-value mix. Converted values of the
+  generated samples are unchanged.
+- `ConversionError` and `ConversionCancelled` are defined in `focus_data_toolkit.convert.exceptions`
+  and re-exported unchanged from `focus_data_toolkit.convert`.
 
 ### Fixed
 
@@ -52,6 +100,26 @@ policy.
   counts as supplied, the terms derived for the rows it does not cover.
 - A naive commitment timestamp is read as UTC, as FOCUS requires, instead of failing to
   compare with an offset one; months are counted in the start's frame.
+- 1.2/1.3 Cost and Usage values that break a FOCUS 1.4 rule the converter can meet without
+  inventing a fact are migrated, instead of being copied into non-conformant output. Each
+  migration is counted and reported, and each migrated value counts as `DERIVED` in
+  `lineage_summary`:
+  - Tax `EffectiveCost` equals `BilledCost` (CAU-EffectiveCost-C-017), with the exact net
+    change per billing currency (`FDT-MIG-001`). Credit rows, also covered by C-017, are not
+    rewritten;
+  - pricing and quantity columns and their units are nulled where `SkuPriceId` is null, on
+    Tax, Credit, Adjustment and Correction rows (`FDT-MIG-002`). For a 1.2 source this
+    migrates values 1.2 allowed; a 1.3 source already broke its own version's rule;
+  - on Usage/Purchase rows that are not corrections, FOCUS 1.4 requires the same columns to
+    be non-null, so their values are kept and the conflict is reported (`FDT-MIG-004`); so
+    are rows whose `ChargeCategory` is missing or not an allowed value;
+  - null source pricing-currency values are backfilled with a warning (`FDT-MIG-003`).
+- A null `PricingCurrencyEffectiveCost` is no longer backfilled from `EffectiveCost` when
+  `PricingCurrency` differs from `BillingCurrency`, or when `BillingCurrency` is null. The
+  copy labelled a billing-currency amount with another, or an unknown, currency.
+  **Upgrade note:** a multi-currency source with such nulls used to convert; it now stops
+  with `FDT-MIG-011` (CLI exit 2). A Tax restatement across currencies stops with
+  `FDT-MIG-010`. See [conversion rules](docs/conversion-rules.md).
 
 ### Security
 
@@ -63,7 +131,6 @@ policy.
 - Lock `urllib3` 2.8.0 (PYSEC-2026-4175, -4176, -4177). It reaches the lock only
   transitively, through the optional `validator` extra (`focus-validator` -> `requests`)
   and the release tooling (`twine`); the core toolkit has no runtime dependency.
-
 ## [0.13.0] — 2026-09-05
 
 Prepared in source; publishing is a separate release step.
