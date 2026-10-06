@@ -78,6 +78,15 @@ Affected monetary Parquet columns widen to `decimal128(38,17)` (21 integer digit
 values exceeding the precision or scale fail rather than rounding. Existing CSV
 columns remain unchanged. See [the migration evidence](generator-corrections.md).
 
+The 0.14.0 release changes converted output in documented ways:
+- values migrated to FOCUS 1.4 rules, with `DERIVED` manifest labels;
+- `ContractCommitmentDurationType` in whole years;
+- a unit-price column the source lacks is omitted, a breaking change to the output layout;
+- the `aws-savings-plans` adapter is keyed by `savingsPlanArn`, also breaking.
+
+Generated sample bytes are unchanged. See [CHANGELOG.md](../CHANGELOG.md) and the
+[conversion rules](conversion-rules.md).
+
 The toolkit's own version is independent of the FOCUS specification versions it
 supports (generate 1.2/1.3, convert toward 1.4, detect 1.2/1.3/1.4). The FOCUS
 version support matrix and the FOCUS compatibility policy live in

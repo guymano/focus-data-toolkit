@@ -84,7 +84,8 @@ COND_UNIT_PRICING = "SupportsUnitPricing"
 # CAU-ContractedUnitPrice-C-014, CAU-PricingCurrencyListUnitPrice-C-011,
 # CAU-PricingCurrencyContractedUnitPrice-C-011, CAU-PricingCategory-C-012,
 # CAU-PricingQuantity-C-011, CAU-ConsumedQuantity-C-009, CAU-CommitmentDiscountQuantity-C-016).
-_NULL_WITHOUT_SKU_PRICE_ID: tuple[str, ...] = (
+# The single source for the linter and the converter's 1.2/1.3 value migration.
+NULL_WHEN_SKU_PRICE_ID_NULL: tuple[str, ...] = (
     "ListUnitPrice",
     "ContractedUnitPrice",
     "PricingCurrencyListUnitPrice",
@@ -94,12 +95,13 @@ _NULL_WITHOUT_SKU_PRICE_ID: tuple[str, ...] = (
     "ConsumedQuantity",
     "CommitmentDiscountQuantity",
 )
-# (quantity, unit) pairs: a unit is null exactly when its quantity is (CAU-*Unit-C-005/006).
-_UNIT_OF_QUANTITY: tuple[tuple[str, str], ...] = (
-    ("PricingQuantity", "PricingUnit"),
-    ("ConsumedQuantity", "ConsumedUnit"),
-    ("CommitmentDiscountQuantity", "CommitmentDiscountUnit"),
-)
+# A unit is null exactly when its quantity is (CAU-PricingUnit-C-005/006,
+# CAU-ConsumedUnit-C-005/006, CAU-CommitmentDiscountUnit-C-005/006).
+UNIT_OF_QUANTITY: dict[str, str] = {
+    "PricingQuantity": "PricingUnit",
+    "ConsumedQuantity": "ConsumedUnit",
+    "CommitmentDiscountQuantity": "CommitmentDiscountUnit",
+}
 # Relative tolerance of the cost = unit price x quantity identity, the official
 # focus-validator's (ColumnByColumnEqualsColumnValue: |a x b - r| <= 1e-9 x max(|r|, 1)).
 # It exists to absorb representation rounding; being relative, it also accepts an absolute
@@ -412,7 +414,7 @@ def _cost_and_usage(
     if empty("PricingQuantity") and not empty("PricingUnit"):
         out.append(("PricingUnit", "unit_without_quantity",
                     "PricingUnit must be null when PricingQuantity is null"))
-    for quantity_col, unit_col in _UNIT_OF_QUANTITY:
+    for quantity_col, unit_col in UNIT_OF_QUANTITY.items():
         if not empty(quantity_col) and empty(unit_col):
             out.append((unit_col, "quantity_without_unit",
                         f"{unit_col} must not be null when {quantity_col} is not null"))
@@ -457,7 +459,7 @@ def _cost_and_usage(
         # The null cascade (C-009 to C-016) applies only to a provider that declares unit
         # pricing, SkuPriceId's presence condition: an undeclared condition is never evaluated.
         if COND_UNIT_PRICING in supported:
-            for col in _NULL_WITHOUT_SKU_PRICE_ID:
+            for col in NULL_WHEN_SKU_PRICE_ID_NULL:
                 if not empty(col):
                     out.append((col, "must_be_null_without_sku_price_id",
                                 f"{col} must be null when SkuPriceId is null"))

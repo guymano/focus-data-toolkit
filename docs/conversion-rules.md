@@ -109,6 +109,38 @@ Conversion stops with a `ConversionError` and publishes nothing:
 Every refusal is a `ConversionError`, and the CLI exits with code 2. The `FDT-MIG-010` and
 `FDT-MIG-011` messages start with the code and name the first offending row.
 
+## 1.4 rules the linter checks on the output
+
+Besides the column formats, the linter enforces these static rules of the v1.4 requirements model
+on every Cost and Usage row. Strict publication (`write_result`, `convert_files`) refuses output
+that breaks them.
+
+| Rule (v1.4 model) | Lint rule | When |
+|---|---|---|
+| CAU-EffectiveCost-C-017 | `effective_cost_differs_from_billed` | `ChargeCategory` is "Tax" or "Credit" |
+| CAU-ListCost-C-011, CAU-ContractedCost-C-011 | `cost_not_unit_price_times_quantity`, `cost_identity_not_computable` | unit price and `PricingQuantity` both present, Correction rows included |
+| CAU-PricingUnit/ConsumedUnit/CommitmentDiscountUnit-C-005/006 | `unit_without_quantity`, `quantity_without_unit` | always |
+| CAU-ListUnitPrice-C-013, CAU-ContractedUnitPrice-C-015 | `required_with_sku_price_id` | `SkuPriceId` is set and the column is present |
+| C-009 to C-016 ("MUST be null when `SkuPriceId` is null") | `must_be_null_without_sku_price_id` | the caller declares the `SupportsUnitPricing` condition |
+
+- **Cost identity.** The tolerance is the official focus-validator's:
+  `|unit price × quantity − cost| ≤ 1e-9 × max(|cost|, 1)`. The arithmetic is exact whatever the
+  caller's Decimal context. An operand whose exponent lies beyond ±1000 is reported as not
+  computable rather than computed.
+- **Unit prices.** C-013 and C-015 carry no applicability criteria in the model, so they apply
+  in every profile. A unit-price column the source lacks is omitted from the output (see above)
+  and is therefore not evaluated.
+- **Not enforced.** The two pricing-currency unit prices' C-012 is not enforced. Their presence
+  depends on conditions a row does not show. In addition, the model's condition for
+  `CAU-PricingCurrencyContractedUnitPrice-C-012-C` contradicts its own text. That defect is
+  reported for 1.3 in
+  [FOCUS_Spec#2598](https://github.com/FinOps-Open-Cost-and-Usage-Spec/FOCUS_Spec/issues/2598) and
+  is still present in the 1.4 model.
+- **Contract Commitment.** `ContractCommitmentDurationType` follows the 1.4 recommended format
+  ("[positive integer] [unit]", e.g. `1 Year`) when the converter derives it or a supplement
+  supplies it. That format is a SHOULD (CCT-ContractCommitmentDurationType-C-004-O/C-005-O), so
+  the lint does not refuse another form in a 1.4 file it did not produce.
+
 ## 1.4 rules the converter cannot verify or meet
 
 - **Meaning shifts that the row data cannot reveal.**
