@@ -5,6 +5,7 @@ downstream tooling can key on them across releases. Namespaces:
 
 * ``FDT-DET-*``   — schema / version detection
 * ``FDT-CA-*``    — ContractApplied parsing / migration normalizations
+* ``FDT-CC-*``    — Contract Commitment 1.3 -> 1.4 expansion
 * ``FDT-MIG-*``   — 1.2/1.3 values migrated (or refused) to meet a FOCUS 1.4 rule
 * ``FDT-CROSS-*`` — inter-dataset referential integrity & reconciliation
 * ``FDT-ALLOC-*`` — split cost allocation
@@ -41,6 +42,9 @@ CATALOG: dict[str, CodeSpec] = dict([
     # --- ContractApplied parsing / migration --------------------------------------
     _s("FDT-CA-001", Severity.WARNING,
        "legacy FOCUS 1.3 ContractApplied identifier casing normalized (erratum #3)"),
+    # --- Contract Commitment 1.3 -> 1.4 expansion --------------------------------
+    _s("FDT-CC-001", Severity.WARNING,
+       "DurationType neither derivable from the commitment period nor supplied"),
     # --- value migrations to FOCUS 1.4 rules --------------------------------------
     _s("FDT-MIG-001", Severity.WARNING,
        "Tax EffectiveCost set to BilledCost (FOCUS 1.4 CAU-EffectiveCost-C-017)"),

@@ -49,7 +49,10 @@ from focus_data_toolkit.convert.billing_period import billing_period_row
 from focus_data_toolkit.convert.contract_commitment import (
     PROVENANCE as CONTRACT_COMMITMENT_PROVENANCE,
 )
-from focus_data_toolkit.convert.contract_commitment import convert_contract_commitment
+from focus_data_toolkit.convert.contract_commitment import (
+    convert_contract_commitment,
+    settle_duration_type,
+)
 from focus_data_toolkit.convert.cost_and_usage import (
     CostAndUsageMigrations,
     contract_applied_legacy_diagnostic,
@@ -568,6 +571,7 @@ def convert_files(
         "Invoice Detail": INVOICE_DETAIL_PROVENANCE,
     }
     row_counts = dict.fromkeys(load_model()["datasets"], 0)
+    duration_diag: Diagnostic | None = None
 
     with ExitStack() as stack:
         out = stack.enter_context(
@@ -768,11 +772,13 @@ def convert_files(
                     {b.invoice_issuer_name for b in billing_seen.values() if b.invoice_issuer_name}
                 )
                 issuer = issuers[0] if issuers else provider_ctx.service_provider_name
+                duration_lineages: list[Lineage] = []
                 cc_out = convert_contract_commitment(
                     cc_rows,
                     service_provider_name=provider_ctx.service_provider_name,
                     invoice_issuer_name=issuer,
-                    diagnostics=diagnostics,
+                    synthetic=synthetic,
+                    duration_lineages=duration_lineages,
                 )
                 if supplements and supp_keys is not None and cc_out:
                     cc_applied = apply_contract_commitments(
@@ -782,6 +788,11 @@ def convert_files(
                     cc_out = cc_applied.rows or []
                     provenance["Contract Commitment"] = cc_applied.provenance
                     lineage_counts["Contract Commitment"] = cc_applied.counters
+                provenance["Contract Commitment"], duration_diag = settle_duration_type(
+                    cc_out, duration_lineages, provenance["Contract Commitment"],
+                    table=supplements.get("contract_commitment") if supplements else None,
+                    synthetic=synthetic, counters=lineage_counts.get("Contract Commitment"),
+                )
                 cc_columns = dataset_columns("Contract Commitment")
                 cc_file = _output_filename(
                     "Contract Commitment", provenance, synthetic, output_format
@@ -818,6 +829,8 @@ def convert_files(
             "Billing Period": True,
             "Invoice Detail": True,
         }
+        if duration_diag is not None:
+            diagnostics.append(duration_diag)
         legacy_diag = contract_applied_legacy_diagnostic(ca_legacy)
         if legacy_diag is not None:
             diagnostics.append(legacy_diag)

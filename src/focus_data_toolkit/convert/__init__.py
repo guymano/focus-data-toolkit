@@ -38,7 +38,10 @@ from focus_data_toolkit.convert.billing_period import build_billing_periods
 from focus_data_toolkit.convert.contract_commitment import (
     PROVENANCE as CONTRACT_COMMITMENT_PROVENANCE,
 )
-from focus_data_toolkit.convert.contract_commitment import convert_contract_commitment
+from focus_data_toolkit.convert.contract_commitment import (
+    convert_contract_commitment,
+    settle_duration_type,
+)
 from focus_data_toolkit.convert.cost_and_usage import (
     CostAndUsageMigrations,
     contract_applied_legacy_diagnostic,
@@ -377,6 +380,7 @@ def convert_to_focus_1_4(
     # Detail / Contract Commitment are never strictly producible from a Cost-and-Usage
     # source alone); with supplements they also run in strict mode — whether each
     # dataset is then actually produced is decided by its (supplemented) provenance.
+    duration_lineages: list[Lineage] = []
     if synthetic or supplements:
         invoice_rows, id_mapping = build_invoice_details(cau_rows)
         billing_rows = build_billing_periods(cau_rows)
@@ -385,7 +389,8 @@ def convert_to_focus_1_4(
                 cc_rows,
                 service_provider_name=provider_ctx.service_provider_name,
                 invoice_issuer_name=issuer,
-                diagnostics=diagnostics,
+                synthetic=synthetic,
+                duration_lineages=duration_lineages,
             )
             if provider_ambiguous:
                 diagnostics.append(
@@ -445,6 +450,13 @@ def convert_to_focus_1_4(
             invd_prov, load_model()["datasets"]["Invoice Detail"]["columns"]
         ):
             id_mapping = {}
+    duration_diag = None
+    if commitment_rows is not None:
+        cc_prov, duration_diag = settle_duration_type(
+            commitment_rows, duration_lineages, cc_prov,
+            table=supplements.get("contract_commitment") if supplements else None,
+            synthetic=synthetic, counters=lineage_counts.get("Contract Commitment"),
+        )
 
     linked = bool(id_mapping)
     cu_counters = LineageCounters()
@@ -489,6 +501,8 @@ def convert_to_focus_1_4(
     }
     row_counts = {name: len(built_rows[name] or []) for name in FOCUS_1_4_DATASETS}
 
+    if duration_diag is not None:
+        diagnostics.append(duration_diag)
     legacy_diag = contract_applied_legacy_diagnostic(ca_legacy)
     if legacy_diag is not None:
         diagnostics.append(legacy_diag)

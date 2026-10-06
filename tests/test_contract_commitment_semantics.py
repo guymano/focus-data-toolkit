@@ -3,8 +3,8 @@
 * The synthetic ``ContractCommitmentApplicability`` object must satisfy the official
   object schema: without a scope flag, ``Inclusions``/``InclusionOperator`` are
   required, so the minimal conformant synthetic object declares ``IsComplexScope``.
-* An unparseable commitment period must never yield a fabricated ``"12 Months"``
-  duration: the value stays empty and an ``FDT-CC-001`` WARNING reports the rows.
+* An unparseable commitment period must never yield a fabricated duration: the value
+  stays empty and an ``FDT-CC-001`` WARNING reports the rows.
 """
 
 from __future__ import annotations
@@ -13,10 +13,13 @@ import json
 
 from focus_data_toolkit.convert.contract_commitment import (
     _APPLICABILITY,
+    PROVENANCE,
     _duration_type,
     convert_contract_commitment,
+    settle_duration_type,
 )
 from focus_data_toolkit.errors import Diagnostic, Severity
+from focus_data_toolkit.provenance import Lineage
 
 
 def cc_row(**over: str) -> dict[str, str]:
@@ -40,12 +43,19 @@ def cc_row(**over: str) -> dict[str, str]:
 
 
 def _convert(rows: list[dict[str, str]], diagnostics: list[Diagnostic] | None = None):
-    return convert_contract_commitment(
+    lineages: list[Lineage] = []
+    out = convert_contract_commitment(
         rows,
         service_provider_name="AWS",
         invoice_issuer_name="AWS",
-        diagnostics=diagnostics,
+        duration_lineages=lineages,
     )
+    _prov, diag = settle_duration_type(
+        out, lineages, dict(PROVENANCE), table=None, synthetic=False, counters=None
+    )
+    if diagnostics is not None and diag is not None:
+        diagnostics.append(diag)
+    return out
 
 
 def test_synthetic_applicability_declares_a_scope():
@@ -59,8 +69,8 @@ def test_synthetic_applicability_declares_a_scope():
 
 def test_duration_type_from_valid_periods():
     assert _duration_type("2026-05-01T00:00:00Z", "2026-06-01T00:00:00Z") == "1 Month"
-    assert _duration_type("2026-05-01T00:00:00Z", "2027-05-01T00:00:00Z") == "12 Months"
-    assert _duration_type("2026-05-01T00:00:00Z", "2029-05-01T00:00:00Z") == "36 Months"
+    assert _duration_type("2026-05-01T00:00:00Z", "2027-05-01T00:00:00Z") == "1 Year"
+    assert _duration_type("2026-05-01T00:00:00Z", "2029-05-01T00:00:00Z") == "3 Years"
 
 
 def test_duration_type_never_fabricated():
@@ -76,7 +86,7 @@ def test_unparseable_period_reports_fdt_cc_001():
         [cc_row(), cc_row(ContractCommitmentId="CC-2", ContractCommitmentPeriodStart="garbage")],
         diagnostics,
     )
-    assert out[0]["ContractCommitmentDurationType"] == "12 Months"
+    assert out[0]["ContractCommitmentDurationType"] == "1 Year"
     assert out[1]["ContractCommitmentDurationType"] == ""
     assert len(diagnostics) == 1
     diag = diagnostics[0]

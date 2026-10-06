@@ -1,20 +1,20 @@
 {
   "adapter": "aws-savings-plans",
-  "version": "1",
+  "version": "2",
   "target_kind": "contract_commitment",
   "provenance": {
     "source": "AWS Savings Plans API — SavingsPlan (DescribeSavingsPlans)",
     "doc_url": "https://docs.aws.amazon.com/savingsplans/latest/APIReference/API_SavingsPlan.html",
     "field_names_from": "botocore savingsplans service model, apiVersion 2019-06-28",
-    "retrieved": "2026-07-17",
-    "notes": "Maps only fields genuinely determinable from a Savings Plans inventory. paymentOption uses the same vocabulary as FOCUS ContractCommitmentPaymentModel. The three constants are invariant facts of the Savings Plans product: it is a discount commitment (BenefitCategory=Discount), applies continuously to eligible usage (Model=Continuous), and commits to an hourly spend rate (FulfillmentInterval=Hourly). ContractCommitmentLastUpdated and ContractCommitmentApplicability are NOT emitted (not present in the export) — the client supplies them and coverage reporting shows the residual gap. OfferCategory is left out because a Savings Plan may be public or under a negotiated agreement, which the export does not distinguish."
+    "retrieved": "2026-10-05",
+    "notes": "Maps only fields genuinely determinable from a Savings Plans inventory. The join key is savingsPlanArn, the fully qualified identifier (arn:aws:savingsplans::<account>:savingsplan/<uuid>) that FOCUS recommends for CommitmentDiscountId/ContractCommitmentId; version 1 used the bare savingsPlanId and could never join a Contract Commitment keyed by ARN. paymentOption uses the same vocabulary as FOCUS ContractCommitmentPaymentModel. termDurationInSeconds maps the two offered terms (1 and 3 years) to the FOCUS duration format; any other value is left for the client. The three constants are invariant facts of the Savings Plans product: it is a discount commitment (BenefitCategory=Discount), applies continuously to eligible usage (Model=Continuous), and commits to an hourly spend rate (FulfillmentInterval=Hourly). ContractCommitmentLastUpdated and ContractCommitmentApplicability are NOT emitted (not present in the export) — the client supplies them and coverage reporting shows the residual gap. OfferCategory is left out because a Savings Plan may be public or under a negotiated agreement, which the export does not distinguish."
   },
   "detect": {
-    "all_of": ["savingsPlanId", "paymentOption"],
+    "all_of": ["savingsPlanArn", "paymentOption"],
     "any_of": ["state", "savingsPlanType", "commitment", "start"]
   },
   "fields": [
-    {"target": "ContractCommitmentId", "source": "savingsPlanId"},
+    {"target": "ContractCommitmentId", "source": "savingsPlanArn"},
     {"target": "ContractCommitmentPaymentModel", "source": "paymentOption",
      "value_map": {"No Upfront": "No Upfront", "Partial Upfront": "Partial Upfront", "All Upfront": "All Upfront"}},
     {"target": "ContractCommitmentPaymentInterval", "source": "paymentOption",
@@ -23,6 +23,8 @@
      "value_map": {"active": "Active", "payment-pending": "Pending", "payment-failed": "Pending",
                    "queued": "Proposed", "queued-deleted": "Canceled", "retired": "Expired",
                    "pending-return": "Active", "returned": "Canceled"}},
+    {"target": "ContractCommitmentDurationType", "source": "termDurationInSeconds",
+     "value_map": {"31536000": "1 Year", "94608000": "3 Years"}},
     {"target": "ContractCommitmentCreated", "source": "start", "transform": "date_to_utc"},
     {"target": "ContractCommitmentBenefitCategory", "const": "Discount"},
     {"target": "ContractCommitmentModel", "const": "Continuous"},

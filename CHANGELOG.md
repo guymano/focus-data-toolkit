@@ -16,9 +16,28 @@ policy.
   `compute_gaps`, `GapReport`, `Mode`, `ConversionError`, `SupplementError` and
   `AtomicWriteError`. Library callers no longer import internal modules, which
   docs/versioning.md leaves free to change. Existing import paths keep working.
+- `ContractCommitmentDurationType` is a `contract_commitment` supplement column. A
+  supplied term wins over the derived value. It must follow the format v1.4 recommends, a
+  positive whole number and a listed unit (`1 Year`, `3 Years`, `36 Months`); anything
+  else is refused (`FDT-SUPP-004`). That format is a SHOULD in the specification, so the
+  lint of a 1.4 file does not fail on it.
+- `fdt gaps` reports `ContractCommitmentDurationType` as a conditional advisory: it is
+  derived only for periods spanning whole calendar months, so the other terms must be
+  supplied. Without a commitment period in the source it is a blocking gap.
+- A supplement that almost matches a provider adapter now names what it lacks, e.g.
+  `aws-savings-plans@2 requires savingsPlanArn` for an export from the v1 adapter era.
 
 ### Changed
 
+- **Breaking:** the `aws-savings-plans` adapter (now v2) is keyed by `savingsPlanArn`,
+  the fully qualified identifier FOCUS recommends and the one Contract Commitment and
+  `CommitmentDiscountId` carry. v1 keyed by the bare `savingsPlanId`, so its rows could
+  never join. Exports without `savingsPlanArn` are no longer auto-detected; re-export
+  with the ARN (as `describe-savings-plans` returns it). The adapter also maps
+  `termDurationInSeconds` (1 and 3 years) to the duration.
+- **New byte baseline:** `ContractCommitmentDurationType` is written in whole years when
+  the term is a multiple of 12 months (`1 Year`, `3 Years`), as in the specification's
+  examples, instead of `12 Months` / `36 Months`. Other terms stay in months.
 - The FOCUS 1.4 linter now enforces more of the static Cost and Usage rules of the v1.4
   requirements model. Output that passed before can now fail the lint, and strict
   publication refuses it:
@@ -70,6 +89,17 @@ policy.
 
 ### Fixed
 
+- `ContractCommitmentDurationType` is no longer rounded from `days / 30.44`, which turned
+  any span into a plausible-looking term. It is derived (`DERIVED`) only when the
+  commitment period spans a whole number of calendar months, the day clamped at month
+  end. Otherwise strict mode leaves it empty (`UNAVAILABLE`): Contract Commitment is not
+  produced until the term is supplied, and the other datasets are unaffected. Synthetic
+  mode assumes the nearest whole-month value (`ASSUMED`). `FDT-CC-001` lists the
+  commitments concerned, at the same point in the eager and streaming pipelines.
+- The duration's lineage is settled per row. A partial supplement no longer blanks, or
+  counts as supplied, the terms derived for the rows it does not cover.
+- A naive commitment timestamp is read as UTC, as FOCUS requires, instead of failing to
+  compare with an offset one; months are counted in the start's frame.
 - 1.2/1.3 Cost and Usage values that break a FOCUS 1.4 rule the converter can meet without
   inventing a fact are migrated, instead of being copied into non-conformant output. Each
   migration is counted and reported, and each migrated value counts as `DERIVED` in
@@ -101,7 +131,6 @@ policy.
 - Lock `urllib3` 2.8.0 (PYSEC-2026-4175, -4176, -4177). It reaches the lock only
   transitively, through the optional `validator` extra (`focus-validator` -> `requests`)
   and the release tooling (`twine`); the core toolkit has no runtime dependency.
-
 ## [0.13.0] — 2026-09-05
 
 Prepared in source; publishing is a separate release step.
