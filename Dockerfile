@@ -44,8 +44,13 @@ ENV PATH="/opt/venv/bin:${PATH}" \
 # is in the archive. Drop an entry once a base digest bump ships that version or newer.
 # - libpcre2-8-0 10.42-1+deb12u2 (bookworm-security): CVE-2026-103111, HIGH in the
 #   container scan; the base digest ships 10.42-1+deb12u1.
+# - perl-base 5.36.0-7+deb12u4 (bookworm-security): CVE-2026-13221, CVE-2026-42496 and
+#   CVE-2026-8376 (CRITICAL), CVE-2026-42497, CVE-2026-48962, CVE-2026-57432 and
+#   CVE-2026-57433 (HIGH) in the container scan; the base digest ships 5.36.0-7+deb12u3.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends --only-upgrade libpcre2-8-0=10.42-1+deb12u2 \
+ && apt-get install -y --no-install-recommends --only-upgrade \
+      libpcre2-8-0=10.42-1+deb12u2 \
+      perl-base=5.36.0-7+deb12u4 \
  && rm -rf /var/lib/apt/lists/*
 
 # Non-root user. `/input` is intended to be mounted read-only; only `/work` (scratch) and

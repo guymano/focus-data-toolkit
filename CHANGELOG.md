@@ -133,6 +133,10 @@ policy.
 
 ### Security
 
+- The Runner image upgrades `perl-base` to 5.36.0-7+deb12u4 (bookworm-security). The
+  pinned base digest ships 5.36.0-7+deb12u3, which the container scan flags with three
+  CRITICAL (CVE-2026-13221, CVE-2026-42496, CVE-2026-8376) and four HIGH
+  (CVE-2026-42497, CVE-2026-48962, CVE-2026-57432, CVE-2026-57433) vulnerabilities.
 - The Runner image no longer ships the `libpcre2-8-0` 10.42-1 package flagged HIGH by
   the container scan (CVE-2026-103111, CVE-2026-86145, CVE-2026-89157, CVE-2026-89161).
   The base image digest (`python:3.12-slim-bookworm`) is refreshed, bringing
