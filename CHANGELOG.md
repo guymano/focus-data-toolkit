@@ -26,6 +26,16 @@ policy.
   supplied. Without a commitment period in the source it is a blocking gap.
 - A supplement that almost matches a provider adapter now names what it lacks, e.g.
   `aws-savings-plans@2 requires savingsPlanArn` for an export from the v1 adapter era.
+- Azure commitment adapters `azure-reservation-orders` and `azure-savings-plan-orders`
+  (REST shape, api-version 2022-11-01). One row per order, keyed by the lowercased order
+  ARM id. Each provides the term (`1 Year`, `3 Years`, `5 Years`, or `1 Month` for a
+  monthly savings plan), the payment model and interval, the lifecycle status where the
+  provisioning state determines one, the creation time where the response carries it,
+  and the benefit category. The commitment model is
+  not emitted: the order does not carry the commitment grain. A savings plan order is
+  recognised by its `sku.name`; a new `none_of` detection clause rules out the plan- and
+  reservation-level lists, which share it. A `lower` adapter transform supports
+  case-insensitive provider identifiers.
 
 ### Changed
 

@@ -1,6 +1,6 @@
 {
   "description": "Provenance of the vendored provider-native supplement adapters.",
-  "attribution": "Field names are derived from the official provider API documentation and the referenced open-source service models (botocore, Apache-2.0). Mapping tables authored for focus-data-toolkit.",
+  "attribution": "Field names are derived from the official provider API documentation and the referenced open-source service models and specifications (botocore, Apache-2.0; Azure/azure-rest-api-specs, MIT). Mapping tables authored for focus-data-toolkit.",
   "retrieved": "2026-07-17",
   "adapters": [
     {
@@ -26,6 +26,22 @@
       "source": "Azure Billing \u2014 Invoices REST API (Invoice resource)",
       "doc_url": "https://learn.microsoft.com/en-us/rest/api/billing/invoices/get?view=rest-billing-2024-04-01",
       "sha256": "3539beba9d84cab5ae7fa8f7e2c35fb32d3c333e85a01ff887748ad6a4780e85"
+    },
+    {
+      "file": "azure_reservation_orders.json",
+      "adapter": "azure-reservation-orders",
+      "target_kind": "contract_commitment",
+      "source": "Azure Reservations REST API \u2014 ReservationOrderResponse (Microsoft.Capacity reservationOrders, list)",
+      "doc_url": "https://learn.microsoft.com/en-us/rest/api/reserved-vm-instances/reservation-order/list?view=rest-reserved-vm-instances-2022-11-01",
+      "sha256": "da2dc70db4e7fc79324f63833841a754c20df5aef48c8965ca8fa1d854d5dff4"
+    },
+    {
+      "file": "azure_savings_plan_orders.json",
+      "adapter": "azure-savings-plan-orders",
+      "target_kind": "contract_commitment",
+      "source": "Azure Billing Benefits REST API \u2014 SavingsPlanOrderModel (Microsoft.BillingBenefits savingsPlanOrders, list)",
+      "doc_url": "https://learn.microsoft.com/en-us/rest/api/billingbenefits/savings-plan-order/list?view=rest-billingbenefits-2022-11-01",
+      "sha256": "a4f222c3000fd938b78fcfb8d023b598e372ae83ea9ee10cdd1c8fa261031676"
     },
     {
       "file": "gcp_compute_commitments.json",

@@ -1,0 +1,35 @@
+{
+  "adapter": "azure-savings-plan-orders",
+  "version": "1",
+  "target_kind": "contract_commitment",
+  "provenance": {
+    "source": "Azure Billing Benefits REST API — SavingsPlanOrderModel (Microsoft.BillingBenefits savingsPlanOrders, list)",
+    "doc_url": "https://learn.microsoft.com/en-us/rest/api/billingbenefits/savings-plan-order/list?view=rest-billingbenefits-2022-11-01",
+    "field_names_from": "Azure/azure-rest-api-specs specification/billingbenefits/resource-manager/Microsoft.BillingBenefits/BillingBenefits/stable/2022-11-01/billingbenefits.json (SavingsPlanOrderModelProperties, Term P1Y/P3Y/P5Y, BillingPlan P1M, ProvisioningState); P1M as a term is from api-version 2026-06-01",
+    "retrieved": "2026-10-05",
+    "notes": "REST shape: the order JSON is flattened so 'properties.*' become dot-path columns (e.g. az rest --method get --url '/providers/Microsoft.BillingBenefits/savingsPlanOrders?api-version=2022-11-01'). The list is paged: each response holds one page in 'value' and a 'nextLink' to the next; pass every page (concatenated, or one supplement file per page: files of one kind are merged). Detected by sku.name: the schema requires the order's sku (its name is optional, but every Microsoft example returns it), and reservation orders carry no sku; properties.savingsPlans is optional and not relied on. An order whose sku has no name is not detected and falls back to the generic path. The plan-level list (SavingsPlanModel) and the reservation-level list (ReservationResponse) also carry sku, term and billingPlan, so a field only they define (displayProvisioningState, appliedScopeType, userFriendlyAppliedScopeType, commitment, reservedResourceType, quantity) rules the order adapter out. One row per savings plan ORDER, keyed by its ARM id lowercased (Azure ARM ids are case-insensitive); a Contract Commitment source must key the same way. term maps to the FOCUS duration. billingPlan P1M is the monthly plan (no upfront, monthly payments); an order without billingPlan is not mapped, because 'absent means upfront' is not stated by the API. provisioningState maps without a clock: Expired, Cancelled=Canceled, creation/billing states=Pending. Succeeded only says that provisioning finished, not that the term is running, so it is left for the client, as is Failed, which has no FOCUS lifecycle value. BenefitCategory=Discount is invariant for savings plans (FOCUS 1.4 glossary: a commitment discount). Created comes from the ARM systemData.createdAt, the moment the order record was created, which is what FOCUS 1.4 defines (the moment the record was instantiated); when a response omits systemData, Created is not emitted. Not emitted: Model and FulfillmentInterval (the commitment grain, Hourly or, from api-version 2026-06-01, FullTerm, is on the plan, not the order, and FullTerm means Full Period and Discontinuous), OfferCategory, LastUpdated, Applicability, DiscountPercentage and InvoiceIssuerName."
+  },
+  "detect": {
+    "all_of": ["id", "properties.term", "sku.name"],
+    "any_of": ["properties.billingPlan", "properties.benefitStartTime", "properties.provisioningState",
+               "properties.savingsPlans"],
+    "none_of": ["properties.displayProvisioningState", "properties.appliedScopeType",
+                "properties.userFriendlyAppliedScopeType", "properties.commitment.amount",
+                "properties.reservedResourceType", "properties.quantity"]
+  },
+  "fields": [
+    {"target": "ContractCommitmentId", "source": "id", "transform": "lower"},
+    {"target": "ContractCommitmentDurationType", "source": "properties.term",
+     "value_map": {"P1M": "1 Month", "P1Y": "1 Year", "P3Y": "3 Years", "P5Y": "5 Years"}},
+    {"target": "ContractCommitmentPaymentModel", "source": "properties.billingPlan",
+     "value_map": {"P1M": "No Upfront"}},
+    {"target": "ContractCommitmentPaymentInterval", "source": "properties.billingPlan",
+     "value_map": {"P1M": "Monthly"}},
+    {"target": "ContractCommitmentLifecycleStatus", "source": "properties.provisioningState",
+     "value_map": {"Expired": "Expired", "Cancelled": "Canceled",
+                   "Creating": "Pending", "PendingBilling": "Pending",
+                   "ConfirmedBilling": "Pending", "Created": "Pending"}},
+    {"target": "ContractCommitmentCreated", "source": "systemData.createdAt", "transform": "date_to_utc"},
+    {"target": "ContractCommitmentBenefitCategory", "const": "Discount"}
+  ]
+}
