@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import json
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import timedelta
 from decimal import Decimal
@@ -108,6 +109,79 @@ def generate_contract_commitment_rows(
     generate_rows(rows, seed, include_credits=include_credits, profile=profile, adapter=adapter,
                   context=context)
     return contract_rows(context, profile, adapter)
+
+
+def contract_commitment_rows_for(
+    cost_and_usage: Iterable[Mapping[str, str]],
+    *,
+    profile: ProviderProfile,
+    adapter: VersionAdapter,
+) -> list[dict[str, str]]:
+    """The synthetic Contract Commitment dataset of rows from this toolkit's generator.
+
+    Internal: not re-exported at the package root (docs/versioning.md), and meant only
+    for rows that ``generate_rows`` produced, such as a run or a prefix of one.
+    ``generate_contract_commitment_rows`` runs its own generation and describes that run
+    only. A sample of another run (a prefix of a larger run, other ``include_credits``,
+    edited rows) can apply commitments that run does not list; this reads them from the
+    sample instead.
+
+    It applies the generator's conventions; it does not read terms from the rows:
+    ``ContractCommitmentCost`` is the first purchase's ``BilledCost`` (an hourly fee)
+    x 8,760; the commitment term is 365 days from that purchase's ``ChargePeriodStart``;
+    each contract period encloses its terms by 90 days on each side; ``BillingCurrency``
+    is ``USD``; the profile's three negotiated terms (``CC-MINSPEND``, ``CC-RATECARD``,
+    ``CC-USAGEMIN``) are always added; a purchase must carry its commitment as
+    ``CommitmentDiscountId``. On real exports it is not reliable: a commitment bought
+    before the period is applied without a purchase row and raises ``ValueError``, and
+    any other gets these synthetic terms, not its own. The converter's Contract
+    Commitment source is the path for real data.
+
+    The terms come from the first purchase of each commitment in the order given. They
+    are exact when that first purchase is the generator's first one, as in the rows of
+    a run or a prefix of one in generation order. Another order or slice gives other
+    terms: reversed rows, or rows after a commitment's first purchase, shift its period.
+    On the rows of one run, the result equals ``generate_contract_commitment_rows`` for
+    the same parameters.
+
+    *Interpretation:* a purchase is a ``Purchase`` row whose ``ContractApplied`` names
+    its own ``ResourceId``. That is the converse of the FOCUS rule. FOCUS 1.4 Contract
+    Applied (3.1.32.2.1) says "ContractAppliedObject.Elements[*].ContractCommitmentId MUST
+    match ResourceId when ChargeCategory is "Purchase" and the charge represents a
+    purchase of that contract commitment"; FOCUS 1.3 (3.1.31.1.3) says
+    "ContractCommitmentID MUST be equal to ResourceID when ChargeCategory is "Purchase"".
+    Listing every applied commitment is an interpretation too: FOCUS says only that the
+    dataset "can be joined" to Cost and Usage through Contract Commitment ID. A
+    commitment applied but neither purchased in the rows nor a negotiated term raises
+    ``ValueError``.
+    """
+    if adapter.contract_commitment_columns is None:
+        raise ValueError(f"FOCUS {adapter.version} has no Contract Commitment dataset")
+    context = GenerationContext()
+    applied: dict[str, None] = {}
+    for row in cost_and_usage:
+        text = row.get("ContractApplied") or ""
+        elements = json.loads(text)["Elements"] if text else []
+        for element in elements:
+            commit_id = element["ContractCommitmentId"]
+            applied[commit_id] = None
+            if (row.get("ChargeCategory") == "Purchase" and commit_id == row.get("ResourceId")
+                    and commit_id not in context.purchases):
+                if row.get("CommitmentDiscountId") != commit_id:
+                    raise ValueError(
+                        f"commitment purchase {commit_id} must carry it as CommitmentDiscountId"
+                    )
+                context.purchases[commit_id] = dict(row)
+                context.contracts[commit_id] = element["ContractId"]
+    out = contract_rows(context, profile, adapter)
+    described = {row["ContractCommitmentId"] for row in out}
+    missing = [commit_id for commit_id in applied if commit_id not in described]
+    if missing:
+        raise ValueError(
+            "ContractApplied names commitments these rows do not purchase: "
+            + ", ".join(missing)
+        )
+    return out
 
 
 def contract_rows(context: GenerationContext, profile: ProviderProfile, adapter: VersionAdapter) -> list[dict[str, str]]:

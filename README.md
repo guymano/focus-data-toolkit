@@ -10,14 +10,17 @@ Generate realistic **FOCUS 1.2 / 1.3** cost and usage data (AWS, Azure, GCP), co
 
 [FOCUS](https://focus.finops.org) is the open standard for cloud cost and usage data. FOCUS 1.4 defines four datasets: Cost and Usage, Contract Commitment, Billing Period, and Invoice Detail. The toolkit is honest by design: any value it cannot derive from your source is left empty (**strict** mode) or filled with clearly labelled assumptions (**synthetic** mode).
 
-The source prepares **0.14.0**, which converts FOCUS 1.2/1.3 sources toward 1.4 more
-faithfully:
+The source prepares **0.14.1**, a patch of 0.14.0, which converts FOCUS 1.2/1.3
+sources toward 1.4 more faithfully:
 - values are migrated to the 1.4 rules, and a stricter 1.4 lint checks the output;
 - commitment terms can be supplied explicitly;
 - Azure reservation and savings plan orders have adapters;
-- a 1.2 source can declare who issued it, to name its Service Provider.
+- a 1.2 source can declare who issued it, to name its Service Provider, in the CLI
+  and, since 0.14.1, in Studio.
 
-See the [conversion rules](docs/conversion-rules.md) and the [changelog](CHANGELOG.md).
+0.14.1 also reads the Contract Commitment dataset of a generated sample from the
+sample itself, so it lists every commitment the sample applies. See the
+[conversion rules](docs/conversion-rules.md) and the [changelog](CHANGELOG.md).
 The [generator corrections and validation evidence](docs/generator-corrections.md)
 describe the generated samples, unchanged since 0.13.0. The Docker examples below
 continue to pin the previously released 0.12.0 image.

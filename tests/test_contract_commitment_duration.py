@@ -250,6 +250,10 @@ def test_strict_dataset_waits_for_the_missing_term(tmp_path, odd_source):
     entry = result.manifest["datasets"]["Contract Commitment"]
     assert entry["status"] == "NOT_PRODUCED"
     assert entry["blocking_columns"] == [DURATION]
+    # The term is missing from the Contract Commitment source, not from Cost and Usage.
+    assert entry["reason"] == (
+        "Mandatory provider-issued fields unavailable from the Contract Commitment source"
+    )
     assert entry["columns"][DURATION]["lineage"] == "UNAVAILABLE"
     assert [d for d in result.diagnostics if d.code == "FDT-CC-001"]
     # The other datasets are unaffected.

@@ -29,6 +29,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 
 from focus_data_toolkit import __version__
+from focus_data_toolkit.context.provider import PROVIDER_ROLES
 from focus_data_toolkit.studio.config import MAX_PREVIEW_LIMIT, StudioConfig
 from focus_data_toolkit.studio.jobs import Job, JobManager
 from focus_data_toolkit.studio.preview import sampled_page
@@ -232,7 +233,8 @@ def create_app(config: StudioConfig, jobs: JobManager | None = None) -> FastAPI:
     # --- conversion jobs -----------------------------------------------------------------
     @app.post("/api/jobs")
     async def create_job(request: Request) -> Response:
-        from focus_data_toolkit.convert import ConversionCancelled, OnExists
+        from focus_data_toolkit.convert import ConversionCancelled, ConversionError, OnExists
+        from focus_data_toolkit.convert.cost_and_usage import declare_provider_role
         from focus_data_toolkit.model.capabilities import CapabilityProfile
         from focus_data_toolkit.runtime import ResourceLimitError
 
@@ -253,6 +255,29 @@ def create_app(config: StudioConfig, jobs: JobManager | None = None) -> FastAPI:
         except ValueError:
             return JSONResponse({"error": "invalid on_exists"}, status_code=400)
         caps = CapabilityProfile.of(*supports) if supports else None
+        # Who issued a FOCUS 1.2 source, as the CLI's --provider-role and
+        # --first-party-publisher declare it. Only a missing key or null means "not
+        # declared"; any other value is checked, and refused before the job is queued,
+        # with a fixed message (no exception text reaches the client).
+        provider_role = body.get("provider_role")
+        first_party = body.get("first_party_publishers")
+        if first_party is None:
+            first_party = []
+        if provider_role is not None and (
+            not isinstance(provider_role, str) or provider_role not in PROVIDER_ROLES
+        ):
+            return JSONResponse({"error": "provider_role must be csp or msp"}, status_code=400)
+        if not isinstance(first_party, list) or not all(isinstance(n, str) for n in first_party):
+            return JSONResponse({"error": "first_party_publishers must be a list of names"},
+                                status_code=400)
+        try:
+            declare_provider_role(provider_role, first_party)
+        except ConversionError as exc:
+            _LOG.warning("rejected provider role declaration: %s", exc)
+            return JSONResponse(
+                {"error": "first_party_publishers apply only to provider_role csp"},
+                status_code=400,
+            )
 
         def run(job: Job) -> None:
             from focus_data_toolkit.convert import convert_files
@@ -266,6 +291,8 @@ def create_app(config: StudioConfig, jobs: JobManager | None = None) -> FastAPI:
                     output_format=output_format,
                     on_exists=on_exists,
                     capabilities=caps,
+                    provider_role=provider_role,
+                    first_party_publishers=first_party,
                     progress=lambda event: job.events.append(event.as_dict()),
                     cancel=job.cancel.is_set,
                 )

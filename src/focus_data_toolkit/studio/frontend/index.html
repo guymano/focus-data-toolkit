@@ -71,12 +71,25 @@
             <option value="version">version</option>
           </select>
         </label>
+        <label>Provider role
+          <select id="providerRole">
+            <option value="">not declared</option>
+            <option value="csp">csp (cloud provider)</option>
+            <option value="msp">msp (MSP or reseller)</option>
+          </select>
+        </label>
       </div>
+      <label>First-party publishers <span class="muted">(csp only, one per line)</span>
+        <textarea id="firstParty" rows="2"></textarea>
+      </label>
+      <p class="muted">FOCUS 1.2 sources only: who issued the file, as <code>--provider-role</code>
+        and <code>--first-party-publisher</code> declare it.</p>
       <button id="convertBtn" disabled>Convert</button>
     </section>
 
     <section class="card hidden" id="progressCard">
       <h2>3 · Progress</h2>
+      <p id="progressSource" class="pill"></p>
       <div class="bar"><div id="barFill"></div></div>
       <p id="progressText" class="muted">starting…</p>
       <button id="cancelBtn">Cancel</button>
@@ -84,6 +97,7 @@
 
     <section class="card hidden" id="resultCard">
       <h2>4 · Results</h2>
+      <p id="resultSource" class="pill"></p>
       <p id="resultStatus"></p>
       <table id="datasets" class="grid"></table>
       <div id="downloads" class="downloads"></div>

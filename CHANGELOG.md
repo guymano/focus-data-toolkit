@@ -9,6 +9,102 @@ policy.
 
 ## [Unreleased]
 
+## [0.14.1] — 2026-10-09
+
+A patch release. An internal helper rebuilds the Contract Commitment dataset of a
+generated sample from the sample itself (#67), and Studio catches up with the CLI. Neither
+addition is on the versioned surface of [docs/versioning.md](docs/versioning.md), which is
+why this is a patch.
+
+- **New byte baseline:**
+  - **generated samples: none.** For identical parameters, `generate_rows`,
+    `generate_contract_commitment_rows`, the CSV functions, `focus-toolkit generate` and
+    Studio generation write the same bytes as 0.14.0. The new internal
+    `contract_commitment_rows_for` writes nothing unless called; on the rows of one run
+    it returns that run's dataset;
+  - converted output:
+    - the toolkit version, `0.14.1`, in the manifest (`tool_version`), the run metadata
+      (`toolkit_version`) and the Parquet key-value metadata (`focus.toolkit_version`),
+      and therefore in `SHA256SUMS`; converted CSV datasets are unchanged;
+    - the `reason` of a Contract Commitment left `NOT_PRODUCED` by strict mode for a
+      missing mandatory field (see Changed). This includes the strict conversion of
+      every generated 1.3 sample with its Contract Commitment dataset;
+  - official-sample evidence: the generation source fingerprints of
+    `tests/fixtures/official/generator_validation/baseline.json` (the changed generator
+    modules and `_version.py`) and the raw validator logs; data hashes and every rule
+    result are unchanged.
+
+### Added
+
+- The FOCUS 1.3 generator modules carry `contract_commitment_rows_for(rows)`, an
+  **internal** helper: it is not re-exported at the package root, so under
+  [docs/versioning.md](docs/versioning.md) it may change in any release. It rebuilds the
+  synthetic Contract Commitment dataset of rows from this toolkit's generator (#67).
+
+  A dataset generated separately describes its own run, and a sample of another run can
+  differ from it. A prefix of a run can differ from a shorter run near its end, because
+  groups are complete and budget-aware, and `include_credits` changes the draws; both
+  were already true in 0.12.0. Such a sample could apply commitments that its separately
+  generated dataset did not list. The helper lists every commitment the rows purchase or
+  apply, beside the negotiated terms. A commitment applied without its purchase in the
+  rows raises `ValueError`.
+
+  It is meant only for generated rows. It writes the generator's conventions, not terms
+  read from the rows:
+  - `ContractCommitmentCost` = the first purchase's hourly `BilledCost` × 8,760;
+  - a 365-day term from that purchase's `ChargePeriodStart`;
+  - contract periods 90 days wider on each side;
+  - `BillingCurrency` `USD`;
+  - the profile's three negotiated terms, always added;
+  - a purchase must carry its commitment as `CommitmentDiscountId`.
+
+  On real exports it is not reliable. A commitment bought before the period raises
+  `ValueError`, and any other gets these synthetic terms. The result follows the order
+  of the rows: each commitment's first purchase in that order supplies its terms. That
+  is exact for a run, or a prefix of one, in generation order; reversed or otherwise
+  sliced rows can shift a commitment's period.
+
+  *Interpretation:* a purchase is a `Purchase` row whose `ContractApplied` names its
+  own `ResourceId`. That is the converse of the FOCUS rule: in Contract Applied, 1.4
+  says `ContractCommitmentId` "MUST match ResourceId when ChargeCategory is "Purchase""
+  and the charge represents a purchase of that commitment; 1.3 says
+  `ContractCommitmentID` "MUST be equal to ResourceID". Listing every applied commitment
+  is an interpretation too: FOCUS says only that the dataset "can be joined" to Cost and
+  Usage through Contract Commitment ID. Generated sample bytes are unchanged.
+- Studio declares who issued a FOCUS 1.2 source, as the CLI's `--provider-role` and
+  `--first-party-publisher` do: a **Provider role** choice and a list of first-party
+  publishers in the Convert step, and `provider_role` / `first_party_publishers` in the
+  `/api/jobs` request. Only a missing key or `null` means "not declared". Any other value
+  is checked before a job is queued: the role must be the string `csp` or `msp`, and the
+  publishers a list of strings, given only with `csp`. An invalid value, of the wrong type
+  or falsy included, gets HTTP 400 with a fixed message; the detail is logged on the
+  server, never returned.
+
+### Changed
+
+- **New byte baseline for conversion manifests.** When strict mode leaves Contract
+  Commitment `NOT_PRODUCED` because a mandatory field is missing, its manifest `reason` and
+  the CLI's `not produced` line now read "Mandatory provider-issued fields unavailable from
+  the Contract Commitment source". They read "... from Cost and Usage", but that dataset is
+  built from its own source. This is the common case of a FOCUS 1.3 source converted
+  with its Contract Commitment dataset but without the commitment-term supplements, since
+  1.3 lacks the 1.4 terms (`ContractCommitmentPaymentModel` and others). Every generated
+  1.3 sample is in that case, so the manifest of its strict conversion changes, and so
+  does its `SHA256SUMS`. The reason of the other datasets, the converted datasets and every
+  other output are unchanged.
+
+### Fixed
+
+- Studio follows one conversion at a time and shows its progress and results under the
+  source it converted. Starting another conversion closes the previous one's event
+  stream. That conversion's later progress, end event and result are ignored, so an
+  earlier conversion no longer replaces the current view or hides its progress.
+  Choosing another source clears the detection and a finished conversion's results and
+  preview. A conversion still running stays followed so it can be cancelled, and its
+  progress and results name the source it converted. A detection that answers after the
+  source changed, success or error, is ignored, and so is a preview answer after the
+  conversion or file changed.
+
 ## [0.14.0] — 2026-10-06
 
 FOCUS 1.2/1.3 to 1.4 conversion follows the specification more closely, and commitment
@@ -884,7 +980,8 @@ conformance defects.
 
 <!-- Reference links. 0.2.0/0.3.0 were pre-release development milestones and were never tagged
      or published, so only the first public release (0.9.0) has a tag link. -->
-[Unreleased]: https://github.com/guymano/focus-data-toolkit/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/guymano/focus-data-toolkit/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/guymano/focus-data-toolkit/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.11.0...v0.12.0
