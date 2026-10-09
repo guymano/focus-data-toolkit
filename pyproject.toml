@@ -51,7 +51,14 @@ parquet = [
 scale = ["focus-data-toolkit[parquet]"]
 # The official FinOps FOCUS validator, from PyPI. It requires Python >= 3.12, so the marker keeps
 # `pip install focus-data-toolkit[validator]` a no-op (rather than an error) on Python 3.11.
-validator = ["focus-validator>=2.1,<3 ; python_version >= '3.12'"]
+# focus-validator (2.1 to 2.2.1) pins numpy<2 but leaves pyarrow open, and pyarrow 26 needs
+# NumPy 2 at import without declaring it: uncapped, a fresh install pairs pyarrow 26 with
+# NumPy 1.26 and the validator fails with an ImportError. Same cap as the parquet extra
+# (tests/test_dependency_caps.py keeps the extras and CI's official-validation job aligned).
+validator = [
+    "focus-validator>=2.1,<3 ; python_version >= '3.12'",
+    "pyarrow<26 ; python_version >= '3.12'",
+]
 # Focus Data Toolkit Studio: a LOCAL web UI over the same Core (see focus_data_toolkit.studio).
 # Optional so the core stays standard-library only; the CLI's `ui` command imports it lazily.
 studio = [

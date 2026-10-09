@@ -9,6 +9,17 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- `pip install focus-data-toolkit[validator]` installs a working official validator again.
+  pyarrow 26.0.0, published on 2026-10-09, needs NumPy 2 at import without declaring it,
+  and focus-validator 2.1 to 2.2.1 pin `numpy<2`. A fresh install therefore paired
+  pyarrow 26 with NumPy 1.26, and the validator failed with "ImportError: pyarrow requires
+  NumPy 2.0 or newer". The `validator` extra now caps `pyarrow<26`, as the `parquet` extra
+  already did; `[parquet]` and `[all]` were not affected, and the container image pins
+  pyarrow in `constraints/runtime.txt`. CI's `official-validation` job installs
+  focus-validator with the same cap. Output bytes are unchanged.
+
 ## [0.14.1] — 2026-10-09
 
 A patch release. An internal helper rebuilds the Contract Commitment dataset of a

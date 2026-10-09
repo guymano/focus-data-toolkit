@@ -86,7 +86,9 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv venv --python 3.12 .venv-official
-      - run: uv pip install --python .venv-official/bin/python focus-validator==2.2.1
+      # focus-validator pins numpy<2 but not pyarrow, and pyarrow 26 needs NumPy 2 at import
+      # without declaring it: cap pyarrow as the [validator] extra does (tests/test_dependency_caps.py).
+      - run: uv pip install --python .venv-official/bin/python focus-validator==2.2.1 "pyarrow<26"
       - run: .venv-official/bin/python scripts/validate_official_samples.py
 
   package:

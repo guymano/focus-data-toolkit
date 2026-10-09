@@ -543,6 +543,7 @@ studio-all = [
 ]
 validator = [
     { name = "focus-validator", marker = "python_full_version >= '3.12'" },
+    { name = "pyarrow", marker = "python_full_version >= '3.12'" },
 ]
 
 [package.metadata]
@@ -557,6 +558,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27,<1" },
     { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.21,<5" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11,<2.5" },
+    { name = "pyarrow", marker = "python_full_version >= '3.12' and extra == 'validator'", specifier = "<26" },
     { name = "pyarrow", marker = "extra == 'parquet'", specifier = ">=15,<26" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5,<8" },
