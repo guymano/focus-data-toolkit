@@ -13,6 +13,10 @@ official validator) requires Python ≥ 3.12; its dependency marker makes
 `pip install focus-data-toolkit[validator]` a **no-op on 3.11** rather than an
 error.
 
+The `validator` extra also caps PyArrow below 26, as `parquet` does: focus-validator
+(2.1 to 2.2.1) pins NumPy below 2, and PyArrow 26 needs NumPy 2 at import without
+declaring it, so an uncapped install fails with an `ImportError`.
+
 ### The `all` extra under Python 3.11
 
 `focus-data-toolkit[all]` aggregates `parquet` + `validator`. Because
@@ -86,7 +90,7 @@ FOCUS 1.4 model is a documented, verifiable artifact — see
 | ------------- | --------------------------------------------------- | -------------------------------------- |
 | `parquet`     | PyArrow (+ `tzdata` on Windows)                     | Exact `decimal128` columnar output.    |
 | `scale`       | alias of `parquet`                                  | Large-input state uses stdlib sqlite3. |
-| `validator`   | `focus-validator` (PyPI)                            | Python 3.12+ only.                     |
+| `validator`   | `focus-validator` (PyPI), PyArrow < 26              | Python 3.12+ only.                     |
 | `all`         | `parquet` + `validator`                             | `validator` is 3.12+ (see above).      |
 | `release`     | `build`, `twine`                                    | Build/inspect distributions.           |
 | `dev`         | `release` + `parquet` + pytest/ruff/mypy/coverage   | Full local dev + CI.                   |
