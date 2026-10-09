@@ -36,12 +36,16 @@ policy.
 
 ### Changed
 
-- **New byte baseline for some conversion manifests.** When strict mode leaves Contract
+- **New byte baseline for conversion manifests.** When strict mode leaves Contract
   Commitment `NOT_PRODUCED` because a mandatory field is missing, its manifest `reason` and
   the CLI's `not produced` line now read "Mandatory provider-issued fields unavailable from
   the Contract Commitment source". They read "... from Cost and Usage", but that dataset is
-  built from its own source. The reason of the other datasets, and every other output, is
-  unchanged.
+  built from its own source. This is the common case of a FOCUS 1.3 source converted
+  with its Contract Commitment dataset but without the commitment-term supplements, since
+  1.3 lacks the 1.4 terms (`ContractCommitmentPaymentModel` and others). Every generated
+  1.3 sample is in that case, so the manifest of its strict conversion changes, and so
+  does its `SHA256SUMS`. The reason of the other datasets, the converted datasets and every
+  other output are unchanged.
 
 ### Fixed
 
