@@ -6,6 +6,7 @@ to the configured loopback authority so the Host guard passes exactly as a real 
 
 from __future__ import annotations
 
+import csv
 import threading
 import time
 from pathlib import Path
@@ -264,6 +265,51 @@ def test_convert_job_succeeds_and_matches_cli(tmp_path):
     convert_files(str(config.root / "cau.csv"), str(ref), mode="synthetic")
     studio_sums = client.get(f"/api/jobs/{status['job_id']}/checksums", headers=_auth(config)).text
     assert studio_sums == (ref / "SHA256SUMS").read_text(encoding="utf-8")
+
+
+def _marketplace_1_2(root: Path) -> None:
+    """A FOCUS 1.2 source whose usage rows alternate a Marketplace seller and a first-party
+    publisher name (PublisherName differs from ProviderName on both)."""
+    module = get_generator("aws", "1.2")
+    rows = module.generate_rows(40, 5)
+    for i, row in enumerate(r for r in rows if r["ChargeCategory"] == "Usage"):
+        row["PublisherName"] = ("Datadog", "Amazon")[i % 2]
+    with (root / "cau12.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(module.COLUMNS), lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def test_provider_role_reaches_the_conversion(tmp_path):
+    client, config = _client(tmp_path)
+    _marketplace_1_2(config.root)
+    status = _run_job(client, config, path="cau12.csv", mode="synthetic",
+                      provider_role="csp", first_party_publishers=["Amazon"])
+    assert status["status"] == "succeeded", status
+
+    # Parity with the CLI's --provider-role csp --first-party-publisher Amazon.
+    declared, undeclared = tmp_path / "declared", tmp_path / "undeclared"
+    source = str(config.root / "cau12.csv")
+    convert_files(source, str(declared), mode="synthetic",
+                  provider_role="csp", first_party_publishers=["Amazon"])
+    convert_files(source, str(undeclared), mode="synthetic")
+    studio_sums = client.get(f"/api/jobs/{status['job_id']}/checksums", headers=_auth(config)).text
+    assert studio_sums == (declared / "SHA256SUMS").read_text(encoding="utf-8")
+    assert studio_sums != (undeclared / "SHA256SUMS").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("declaration, message", [
+    ({"provider_role": "isp"}, "unknown provider role"),
+    ({"provider_role": "msp", "first_party_publishers": ["Amazon"]}, "only to the provider role"),
+    ({"first_party_publishers": ["Amazon"]}, "only to the provider role"),
+    ({"provider_role": "csp", "first_party_publishers": "Amazon"}, "list of names"),
+])
+def test_invalid_provider_role_is_refused_before_the_job(tmp_path, declaration, message):
+    client, config = _client(tmp_path)
+    resp = client.post("/api/jobs", headers=_post_headers(config),
+                       json={"path": "cau.csv", **declaration})
+    assert resp.status_code == 400
+    assert message in resp.json()["error"]
 
 
 def test_preview_is_bounded(tmp_path):

@@ -26,6 +26,12 @@ function setSource(source, label) {
   el.classList.remove("hidden");
   $("detectBtn").disabled = false;
   $("convertBtn").disabled = false;
+  // The detection and the results described the previous source.
+  const out = $("detectOut");
+  out.textContent = "";
+  out.classList.add("hidden");
+  $("resultCard").classList.add("hidden");
+  $("previewTable").innerHTML = "";
 }
 
 // --- tabs ---
@@ -84,8 +90,10 @@ $("genBtn").onclick = async () => {
 
 // --- detect ---
 $("detectBtn").onclick = async () => {
+  const source = state.source;
   try {
-    const r = await api("/api/detect", { method: "POST", json: state.source });
+    const r = await api("/api/detect", { method: "POST", json: source });
+    if (state.source !== source) return;  // the source changed meanwhile: stale answer
     const out = $("detectOut");
     out.textContent = `${r.dataset || "?"} · FOCUS ${r.detected_version || "?"} · confidence ${r.confidence} (score ${r.score})`
       + (r.missing_columns?.length ? `\nmissing: ${r.missing_columns.join(", ")}` : "")
@@ -99,10 +107,13 @@ $("convertBtn").onclick = async () => {
   try {
     const body = Object.assign({}, state.source, {
       mode: $("mode").value, output_format: $("format").value, on_exists: $("onExists").value,
+      provider_role: $("providerRole").value || null,
+      first_party_publishers: $("firstParty").value.split("\n").map((n) => n.trim()).filter(Boolean),
     });
     const r = await api("/api/jobs", { method: "POST", json: body });
     state.jobId = r.job_id;
     $("resultCard").classList.add("hidden");
+    $("previewTable").innerHTML = "";
     $("progressCard").classList.remove("hidden");
     $("barFill").style.width = "0";
     $("progressText").textContent = "starting…";
@@ -168,6 +179,7 @@ async function loadResult(jobId) {
 
   const sel = $("previewFile");
   sel.innerHTML = "";
+  $("previewTable").innerHTML = "";  // a preview of an earlier result is stale
   for (const f of (r.files || [])) {
     if (/\.(csv|parquet)$/.test(f.name) || f.is_dir) {
       const o = document.createElement("option"); o.value = f.name; o.textContent = f.name; sel.appendChild(o);
@@ -177,9 +189,13 @@ async function loadResult(jobId) {
 
 $("previewBtn").onclick = async () => {
   const file = $("previewFile").value;
-  if (!state.jobId || !file) return;
+  const jobId = state.jobId;
+  if (!jobId || !file) return;
   try {
-    const p = await api(`/api/jobs/${state.jobId}/preview?file=${encodeURIComponent(file)}&limit=50`);
+    const p = await api(`/api/jobs/${jobId}/preview?file=${encodeURIComponent(file)}&limit=50`);
+    // Another conversion, file or source was chosen meanwhile: stale answer.
+    if (state.jobId !== jobId || $("previewFile").value !== file
+        || $("resultCard").classList.contains("hidden")) return;
     const cols = p.columns || [];
     const head = "<tr>" + cols.map((c) => `<th>${escapeHtml(c)}</th>`).join("") + "</tr>";
     const rows = (p.rows || []).map((row) =>

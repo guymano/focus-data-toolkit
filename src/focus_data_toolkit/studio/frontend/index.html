@@ -71,7 +71,19 @@
             <option value="version">version</option>
           </select>
         </label>
+        <label>Provider role
+          <select id="providerRole">
+            <option value="">not declared</option>
+            <option value="csp">csp (cloud provider)</option>
+            <option value="msp">msp (MSP or reseller)</option>
+          </select>
+        </label>
       </div>
+      <label>First-party publishers <span class="muted">(csp only, one per line)</span>
+        <textarea id="firstParty" rows="2"></textarea>
+      </label>
+      <p class="muted">FOCUS 1.2 sources only: who issued the file, as <code>--provider-role</code>
+        and <code>--first-party-publisher</code> declare it.</p>
       <button id="convertBtn" disabled>Convert</button>
     </section>
 

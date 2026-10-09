@@ -148,10 +148,16 @@ The launch command prints a URL containing a one-time token and opens it in your
    - **generated** synthetic test data (AWS/Azure/GCP, FOCUS 1.2/1.3).
 2. **Detect** the dataset / FOCUS version / confidence.
 3. **Convert** (strict or synthetic; CSV or Parquet) with **live per-phase progress** and a
-   working **Cancel** — cancelling publishes nothing.
+   working **Cancel** — cancelling publishes nothing. For a FOCUS 1.2 source, **Provider role**
+   and **First-party publishers** declare who issued the file, as the CLI's `--provider-role` and
+   `--first-party-publisher` do (see [conversion rules](conversion-rules.md#participating-entities-of-a-12-source));
+   an invalid declaration is refused before the job starts.
 4. **Review** — a **sampled, paginated** preview (the full file is never loaded into the backend or
    the browser), the per-dataset status/conformance table, and downloads: each produced dataset,
    `focus_1_4_manifest.json`, `SHA256SUMS`, diagnostics as JSON or CSV, and an HTML summary.
+
+Choosing another source clears the detection and the results shown for the previous one, and a
+new conversion clears the previous preview.
 
 ## Security model
 

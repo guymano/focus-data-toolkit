@@ -28,6 +28,27 @@ policy.
   give exactly that run's dataset. *Interpretation:* FOCUS says only that the dataset
   "can be joined" to Cost and Usage through Contract Commitment ID; no MUST requires
   listing every applied commitment. Generated sample bytes are unchanged.
+- Studio declares who issued a FOCUS 1.2 source, as the CLI's `--provider-role` and
+  `--first-party-publisher` do: a **Provider role** choice and a list of first-party
+  publishers in the Convert step, and `provider_role` / `first_party_publishers` in the
+  `/api/jobs` request. An invalid declaration is refused with HTTP 400 before the job
+  starts.
+
+### Changed
+
+- **New byte baseline for some conversion manifests.** When strict mode leaves Contract
+  Commitment `NOT_PRODUCED` because a mandatory field is missing, its manifest `reason` and
+  the CLI's `not produced` line now read "Mandatory provider-issued fields unavailable from
+  the Contract Commitment source". They read "... from Cost and Usage", but that dataset is
+  built from its own source. The reason of the other datasets, and every other output, is
+  unchanged.
+
+### Fixed
+
+- Studio no longer shows the detection, results or preview of a previous source after
+  another one is chosen, nor the preview of an earlier conversion after a new one. A
+  detection or preview that returns after the source, conversion or file changed is
+  ignored.
 
 ## [0.14.0] — 2026-10-06
 
