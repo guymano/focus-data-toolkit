@@ -298,18 +298,48 @@ def test_provider_role_reaches_the_conversion(tmp_path):
     assert studio_sums != (undeclared / "SHA256SUMS").read_text(encoding="utf-8")
 
 
+ROLE = "provider_role must be csp or msp"
+NAMES = "first_party_publishers must be a list of names"
+CSP_ONLY = "first_party_publishers apply only to provider_role csp"
+
+
 @pytest.mark.parametrize("declaration, message", [
-    ({"provider_role": "isp"}, "unknown provider role"),
-    ({"provider_role": "msp", "first_party_publishers": ["Amazon"]}, "only to the provider role"),
-    ({"first_party_publishers": ["Amazon"]}, "only to the provider role"),
-    ({"provider_role": "csp", "first_party_publishers": "Amazon"}, "list of names"),
+    ({"provider_role": "isp"}, ROLE),
+    ({"provider_role": "CSP"}, ROLE),
+    ({"provider_role": ["csp"]}, ROLE),
+    # Present values of the wrong type are refused, falsy ones included.
+    ({"provider_role": False}, ROLE),
+    ({"provider_role": 0}, ROLE),
+    ({"provider_role": ""}, ROLE),
+    ({"provider_role": []}, ROLE),
+    ({"provider_role": {}}, ROLE),
+    ({"provider_role": "csp", "first_party_publishers": "Amazon"}, NAMES),
+    ({"provider_role": "csp", "first_party_publishers": ""}, NAMES),
+    ({"provider_role": "csp", "first_party_publishers": 0}, NAMES),
+    ({"provider_role": "csp", "first_party_publishers": False}, NAMES),
+    ({"provider_role": "csp", "first_party_publishers": {}}, NAMES),
+    ({"provider_role": "csp", "first_party_publishers": ["Amazon", 1]}, NAMES),
+    ({"provider_role": "msp", "first_party_publishers": ["Amazon"]}, CSP_ONLY),
+    ({"first_party_publishers": ["Amazon"]}, CSP_ONLY),
 ])
 def test_invalid_provider_role_is_refused_before_the_job(tmp_path, declaration, message):
     client, config = _client(tmp_path)
     resp = client.post("/api/jobs", headers=_post_headers(config),
                        json={"path": "cau.csv", **declaration})
     assert resp.status_code == 400
-    assert message in resp.json()["error"]
+    # A fixed message: neither the exception text nor the submitted value comes back.
+    assert resp.json() == {"error": message}
+    assert not any((config.work_dir / "jobs").iterdir())  # no job was queued
+
+
+@pytest.mark.parametrize("declaration", [
+    {}, {"provider_role": None}, {"provider_role": None, "first_party_publishers": None},
+    {"provider_role": "msp", "first_party_publishers": []},
+])
+def test_a_missing_or_null_declaration_is_not_declared(tmp_path, declaration):
+    client, config = _client(tmp_path)
+    status = _run_job(client, config, path="cau.csv", mode="synthetic", **declaration)
+    assert status["status"] == "succeeded", status
 
 
 def test_preview_is_bounded(tmp_path):

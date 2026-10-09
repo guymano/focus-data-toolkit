@@ -4110,7 +4110,7 @@
         "skipped": 210,
         "total": 578
       },
-      "report_sha256": "e91eb9f37d5778592bda33039beb2afee6456f40b65b672557b7961beb521624",
+      "report_sha256": "d7e5e5999512a82cd0862f9b84c95972092e4802225c343c7ed0102d95f2f21f",
       "statistics": {
         "billed_cost": "18857.124623679033750",
         "commitment_billed_cost": "5826.912000",
@@ -4590,7 +4590,7 @@
         "skipped": 38,
         "total": 114
       },
-      "report_sha256": "2061e3964f9fb6d30c6833ac137ab52a1b138938c87fa4cd482dcde734676bd2",
+      "report_sha256": "f1a8593dc971ee4fbe805002004542a949e763f44a9c3bd4a63bcc370d3cf80a",
       "statistics": {
         "rows": 75
       }
@@ -12491,7 +12491,7 @@
         "skipped": 297,
         "total": 764
       },
-      "report_sha256": "610e264a4421c7144e947edb2e95f796ee3404347d3a6410612e6878759936c3",
+      "report_sha256": "b230037313e944de69b212051a3a4538f8f1f46336813f5333f7737b56ed0d2d",
       "statistics": {
         "billed_cost": "18554.856257624590813",
         "commitment_billed_cost": "4610.304000",
@@ -16209,7 +16209,7 @@
         "skipped": 210,
         "total": 578
       },
-      "report_sha256": "9e1b38bc7a7160871464f6c8d672e92c5b0f63661dd965285eb0c521cb2866c5",
+      "report_sha256": "38692f344fbf98bc0cb96684ae8f06683b37fee874edc0b78b459b1ce219d1b7",
       "statistics": {
         "billed_cost": "49321.108200244240000",
         "commitment_billed_cost": "11653.824000",
@@ -16689,7 +16689,7 @@
         "skipped": 38,
         "total": 114
       },
-      "report_sha256": "5bbface904d679579c80dad69e211436af4c936efebd78fe744f55b37e30cd56",
+      "report_sha256": "ee2334c843a92c0af0025a0dbb64ff3ded0447fe7aa83059a9115b3be5073cde",
       "statistics": {
         "rows": 67
       }
@@ -24146,7 +24146,7 @@
         "skipped": 297,
         "total": 764
       },
-      "report_sha256": "f722b7e76d745e9ccc20aec8ae8763ab201360f7d791a2bd9932ba2b9be155a2",
+      "report_sha256": "97b6e5e3e8e99c26e4374699c38cabbb9965b51616e445bf352745375fdef4e8",
       "statistics": {
         "billed_cost": "44516.766247198048000",
         "commitment_billed_cost": "8196.096000",
@@ -27864,7 +27864,7 @@
         "skipped": 210,
         "total": 578
       },
-      "report_sha256": "503dda686183a5fb50a5410efcbc5693f0fb44bbe10246db8554a1e82356eaf6",
+      "report_sha256": "7fb04a73b26e5adbe0d1a33c052e4e402438170c2e0baa58b1a0b8fce4d8800f",
       "statistics": {
         "billed_cost": "31758.210633880783500",
         "commitment_billed_cost": "7418.374000",
@@ -28344,7 +28344,7 @@
         "skipped": 38,
         "total": 114
       },
-      "report_sha256": "a10b6512ae2fa261c82e18408b63748d7b1c3441c5efa0296faddf4f60063621",
+      "report_sha256": "b012a91bbc987a9b658fc6882752657a3702c9f76d95fb83040814c734faf49b",
       "statistics": {
         "rows": 77
       }
@@ -35801,7 +35801,7 @@
         "skipped": 297,
         "total": 764
       },
-      "report_sha256": "ceb6cd98170d0200c2ba0abe793ea26e01c38c82b54a2e40ce16c839818b1046",
+      "report_sha256": "fc909fb319d6827a70d6e81947a9854e4deee5b76939b1321ebabe0e99f16bfb",
       "statistics": {
         "billed_cost": "21535.602792935027500",
         "commitment_billed_cost": "6613.972000",
@@ -35819,9 +35819,9 @@
     "scripts/__init__.py": "dc64bd78882fe4e2c4118c25d993ef301249a49c656e776deca81c8dad3b1888",
     "scripts/sample_audit.py": "75beb05d2ecd7106e99510e04b7376deb5a99ab1c9604a7998e70b7d42c33a38",
     "scripts/validate_official_samples.py": "e0a3b31461c81ffadb8c936b63f3f3b6bb386b72e62396937f999d8de1ae1b0a",
-    "src/focus_data_toolkit/_version.py": "19e819989855fc06ef19c89116e230c2d271ba965627ea1329c4ced8ac3c812a",
+    "src/focus_data_toolkit/_version.py": "7da2b78308832f1262430fa1ef68192020f119f6819aef7d419708c9d69c520b",
     "src/focus_data_toolkit/focus_json.py": "141586673b1501986357727b439b1fd00e586bb58a0dfb0309edda38c7ebae31",
-    "src/focus_data_toolkit/generators/__init__.py": "67b4fa2d3202db03150b8678326a950aac6a36560898f69f5f60a8b103873926",
+    "src/focus_data_toolkit/generators/__init__.py": "bcf6f5f7ec4c34c012a7ca02838580065cca715f3c377bee7e67c01c5e3fe937",
     "src/focus_data_toolkit/generators/_shim.py": "046d9ddf9c389eb06c067acb028eeb4714c056e3a8ba4a7f32c5cedfbb934a30",
     "src/focus_data_toolkit/generators/engine/__init__.py": "28c27f7485dfd484e11bcf9e965fbd035fea0b087c6dc402fbc3a4f0db5aeab2",
     "src/focus_data_toolkit/generators/engine/allocation_math.py": "e4695818b8be5e88129f9ae6d57d6add87d379d37dd0badd8eb6c084ad4020ec",
@@ -35830,7 +35830,7 @@
     "src/focus_data_toolkit/generators/engine/json_focus.py": "849d0f213a7ab828f989444e8434c7cc6e8bc310a04c5caff86320df1b0f0aa0",
     "src/focus_data_toolkit/generators/engine/ladder.py": "0feaaf95d024393fbea95712556fb89344a19d53c1b3355b8fb84b2f4a6e95af",
     "src/focus_data_toolkit/generators/engine/scenarios_core.py": "6b7279f2498051fe56ee6caaf45b2e45b8579224c07325d04dd32ff1a3a9e649",
-    "src/focus_data_toolkit/generators/engine/serialize.py": "8e3148841449be711bc99bbe45c511dac674948e31f568f9cbcc5b17ca968449",
+    "src/focus_data_toolkit/generators/engine/serialize.py": "cda0ce30edd4258aa050852b9d79693da81de891c1d0746bd5500e924c5380f4",
     "src/focus_data_toolkit/generators/generate_aws_focus_1_2.py": "2e98e4a469ef346955e3e6e1c8707800685b83a69ce926a6aef279fe8147956e",
     "src/focus_data_toolkit/generators/generate_aws_focus_1_3.py": "d3febfee834b93113b30f6730acace169ddc3988abcc6904ef04be592e2fd9b0",
     "src/focus_data_toolkit/generators/generate_azure_focus_1_2.py": "38562fea964e234a8c3c45b08572b93acd4211168344028072d957bed9d6ff2a",

@@ -117,24 +117,43 @@ def contract_commitment_rows_for(
     profile: ProviderProfile,
     adapter: VersionAdapter,
 ) -> list[dict[str, str]]:
-    """The Contract Commitment dataset of exactly these Cost and Usage rows.
+    """The synthetic Contract Commitment dataset of rows from this toolkit's generator.
 
-    ``generate_contract_commitment_rows`` runs its own generation, so it describes the
-    commitments of that run only. A sample taken from another run (a prefix of a larger
-    run, other ``include_credits``, edited rows) can apply commitments it does not list.
-    This reads them from the sample instead.
+    Internal: not re-exported at the package root (docs/versioning.md), and meant only
+    for rows that ``generate_rows`` produced, such as a run or a prefix of one.
+    ``generate_contract_commitment_rows`` runs its own generation and describes that run
+    only. A sample of another run (a prefix of a larger run, other ``include_credits``,
+    edited rows) can apply commitments that run does not list; this reads them from the
+    sample instead.
 
-    A commitment purchase is a ``Purchase`` row whose ``ContractApplied`` names its own
-    ``ResourceId``, as FOCUS 1.3/1.4 Contract Applied requires of the purchase of a
-    contract commitment. The first such row supplies the terms and the ``ContractId``,
-    as the generation registry does, so ``generate_rows(n, seed, ...)`` yields the same
-    dataset as ``generate_contract_commitment_rows(n, seed, ...)``. The negotiated terms
-    are always listed.
+    It applies the generator's conventions; it does not read terms from the rows:
+    ``ContractCommitmentCost`` is the first purchase's ``BilledCost`` (an hourly fee)
+    x 8,760; the commitment term is 365 days from that purchase's ``ChargePeriodStart``;
+    each contract period encloses its terms by 90 days on each side; ``BillingCurrency``
+    is ``USD``; the profile's three negotiated terms (``CC-MINSPEND``, ``CC-RATECARD``,
+    ``CC-USAGEMIN``) are always added; a purchase must carry its commitment as
+    ``CommitmentDiscountId``. On real exports it is not reliable: a commitment bought
+    before the period is applied without a purchase row and raises ``ValueError``, and
+    any other gets these synthetic terms, not its own. The converter's Contract
+    Commitment source is the path for real data.
 
-    Listing every commitment the sample applies is an interpretation: FOCUS states only
-    that the dataset "can be joined" to Cost and Usage through Contract Commitment ID.
-    A commitment that is applied but neither purchased in these rows nor a negotiated
-    term raises ``ValueError``: its terms cannot be read from the sample.
+    The terms come from the first purchase of each commitment in the order given. They
+    are exact when that first purchase is the generator's first one, as in the rows of
+    a run or a prefix of one in generation order. Another order or slice gives other
+    terms: reversed rows, or rows after a commitment's first purchase, shift its period.
+    On the rows of one run, the result equals ``generate_contract_commitment_rows`` for
+    the same parameters.
+
+    *Interpretation:* a purchase is a ``Purchase`` row whose ``ContractApplied`` names
+    its own ``ResourceId``. That is the converse of the FOCUS rule. FOCUS 1.4 Contract
+    Applied (3.1.32.2.1) says "ContractAppliedObject.Elements[*].ContractCommitmentId MUST
+    match ResourceId when ChargeCategory is "Purchase" and the charge represents a
+    purchase of that contract commitment"; FOCUS 1.3 (3.1.31.1.3) says
+    "ContractCommitmentID MUST be equal to ResourceID when ChargeCategory is "Purchase"".
+    Listing every applied commitment is an interpretation too: FOCUS says only that the
+    dataset "can be joined" to Cost and Usage through Contract Commitment ID. A
+    commitment applied but neither purchased in the rows nor a negotiated term raises
+    ``ValueError``.
     """
     if adapter.contract_commitment_columns is None:
         raise ValueError(f"FOCUS {adapter.version} has no Contract Commitment dataset")
