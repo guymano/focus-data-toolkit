@@ -87,12 +87,18 @@ The 0.14.0 release changes converted output in documented ways:
 Generated sample bytes are unchanged. See [CHANGELOG.md](../CHANGELOG.md) and the
 [conversion rules](conversion-rules.md).
 
-The 0.14.1 release changes no generated sample bytes. It adds
-`contract_commitment_rows_for` to the 1.3 generator modules. Converted output
-carries the new toolkit version in its manifest, run metadata and Parquet metadata.
-A Contract Commitment left `NOT_PRODUCED` by strict mode for a missing mandatory
-field also gets a new manifest `reason`. That includes the strict conversion of every
-generated 1.3 sample with its Contract Commitment dataset.
+The 0.14.1 release changes no generated sample bytes. Converted output carries the
+new toolkit version in its manifest, run metadata and Parquet metadata. A Contract
+Commitment left `NOT_PRODUCED` by strict mode for a missing mandatory field also gets
+a new manifest `reason`. That includes the strict conversion of every generated 1.3
+sample with its Contract Commitment dataset.
+
+0.14.1 is a patch although it adds two things, because neither is on the surface
+above:
+- `contract_commitment_rows_for` on the 1.3 generator modules is internal: it is not
+  re-exported at the package root, and it is meant only for generated rows;
+- the Studio's provider role, a field of its local HTTP API, which this policy does not
+  version.
 
 The toolkit's own version is independent of the FOCUS specification versions it
 supports (generate 1.2/1.3, convert toward 1.4, detect 1.2/1.3/1.4). The FOCUS

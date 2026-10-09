@@ -11,13 +11,15 @@ policy.
 
 ## [0.14.1] — 2026-10-09
 
-A patch release. The Contract Commitment dataset of a generated sample can be read from
-the sample itself (#67), and Studio catches up with the CLI.
+A patch release. An internal helper rebuilds the Contract Commitment dataset of a
+generated sample from the sample itself (#67), and Studio catches up with the CLI. Neither
+addition is on the versioned surface of [docs/versioning.md](docs/versioning.md), which is
+why this is a patch.
 
 - **New byte baseline:**
   - **generated samples: none.** For identical parameters, `generate_rows`,
     `generate_contract_commitment_rows`, the CSV functions, `focus-toolkit generate` and
-    Studio generation write the same bytes as 0.14.0. The new
+    Studio generation write the same bytes as 0.14.0. The new internal
     `contract_commitment_rows_for` writes nothing unless called; on the rows of one run
     it returns that run's dataset;
   - converted output:
