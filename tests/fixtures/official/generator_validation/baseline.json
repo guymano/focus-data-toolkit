@@ -4110,7 +4110,7 @@
         "skipped": 210,
         "total": 578
       },
-      "report_sha256": "1cf142fc11a3bdc644feb8d16fdfbd9d2c2c6b7c9169ddf99aef891577d48a88",
+      "report_sha256": "e91eb9f37d5778592bda33039beb2afee6456f40b65b672557b7961beb521624",
       "statistics": {
         "billed_cost": "18857.124623679033750",
         "commitment_billed_cost": "5826.912000",
@@ -4590,7 +4590,7 @@
         "skipped": 38,
         "total": 114
       },
-      "report_sha256": "b4bda14aa3b16d15b9058a7359d72419972e02475973590e684b362f0100034a",
+      "report_sha256": "2061e3964f9fb6d30c6833ac137ab52a1b138938c87fa4cd482dcde734676bd2",
       "statistics": {
         "rows": 75
       }
@@ -12491,7 +12491,7 @@
         "skipped": 297,
         "total": 764
       },
-      "report_sha256": "a8a27e23421f11ab3fa6239bac2d1d5a3e5946008a1ff778f5d4d729bd47ac24",
+      "report_sha256": "610e264a4421c7144e947edb2e95f796ee3404347d3a6410612e6878759936c3",
       "statistics": {
         "billed_cost": "18554.856257624590813",
         "commitment_billed_cost": "4610.304000",
@@ -16209,7 +16209,7 @@
         "skipped": 210,
         "total": 578
       },
-      "report_sha256": "a661525d6fa6c541bd1cd367d3de6219c82dfbc9396b28b369d51dcb4f945141",
+      "report_sha256": "9e1b38bc7a7160871464f6c8d672e92c5b0f63661dd965285eb0c521cb2866c5",
       "statistics": {
         "billed_cost": "49321.108200244240000",
         "commitment_billed_cost": "11653.824000",
@@ -16689,7 +16689,7 @@
         "skipped": 38,
         "total": 114
       },
-      "report_sha256": "9d4c7236b93f34033ef3a81256c695c365d0ce95cac949c20b6dbe33bcbc757c",
+      "report_sha256": "5bbface904d679579c80dad69e211436af4c936efebd78fe744f55b37e30cd56",
       "statistics": {
         "rows": 67
       }
@@ -24146,7 +24146,7 @@
         "skipped": 297,
         "total": 764
       },
-      "report_sha256": "78457fafd55a9528460043953c113eb1b120664897d52c1a2f1703892a77f681",
+      "report_sha256": "f722b7e76d745e9ccc20aec8ae8763ab201360f7d791a2bd9932ba2b9be155a2",
       "statistics": {
         "billed_cost": "44516.766247198048000",
         "commitment_billed_cost": "8196.096000",
@@ -27864,7 +27864,7 @@
         "skipped": 210,
         "total": 578
       },
-      "report_sha256": "d472e9bfd96c429ef6a6462dfee3187953b2241878bb25f96076cb091418ed91",
+      "report_sha256": "503dda686183a5fb50a5410efcbc5693f0fb44bbe10246db8554a1e82356eaf6",
       "statistics": {
         "billed_cost": "31758.210633880783500",
         "commitment_billed_cost": "7418.374000",
@@ -28344,7 +28344,7 @@
         "skipped": 38,
         "total": 114
       },
-      "report_sha256": "217bc8726e4a188384fe6695d90ca3a13d7933d467f48eba0609ce569f9c556e",
+      "report_sha256": "a10b6512ae2fa261c82e18408b63748d7b1c3441c5efa0296faddf4f60063621",
       "statistics": {
         "rows": 77
       }
@@ -35801,7 +35801,7 @@
         "skipped": 297,
         "total": 764
       },
-      "report_sha256": "350592432faeecad47ad81736faf2ecc43c3288d96412d6b169febccb8076653",
+      "report_sha256": "ceb6cd98170d0200c2ba0abe793ea26e01c38c82b54a2e40ce16c839818b1046",
       "statistics": {
         "billed_cost": "21535.602792935027500",
         "commitment_billed_cost": "6613.972000",
@@ -35819,7 +35819,7 @@
     "scripts/__init__.py": "dc64bd78882fe4e2c4118c25d993ef301249a49c656e776deca81c8dad3b1888",
     "scripts/sample_audit.py": "75beb05d2ecd7106e99510e04b7376deb5a99ab1c9604a7998e70b7d42c33a38",
     "scripts/validate_official_samples.py": "e0a3b31461c81ffadb8c936b63f3f3b6bb386b72e62396937f999d8de1ae1b0a",
-    "src/focus_data_toolkit/_version.py": "7da2b78308832f1262430fa1ef68192020f119f6819aef7d419708c9d69c520b",
+    "src/focus_data_toolkit/_version.py": "19e819989855fc06ef19c89116e230c2d271ba965627ea1329c4ced8ac3c812a",
     "src/focus_data_toolkit/focus_json.py": "141586673b1501986357727b439b1fd00e586bb58a0dfb0309edda38c7ebae31",
     "src/focus_data_toolkit/generators/__init__.py": "67b4fa2d3202db03150b8678326a950aac6a36560898f69f5f60a8b103873926",
     "src/focus_data_toolkit/generators/_shim.py": "046d9ddf9c389eb06c067acb028eeb4714c056e3a8ba4a7f32c5cedfbb934a30",
