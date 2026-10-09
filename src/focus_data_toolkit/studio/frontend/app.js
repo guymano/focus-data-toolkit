@@ -4,7 +4,12 @@
 
 const TOKEN = new URLSearchParams(location.search).get("token") || "";
 const $ = (id) => document.getElementById(id);
-const state = { source: null, jobId: null, cwd: "", config: null };
+// The Studio follows one conversion at a time (jobId), shown under the source it converted
+// (jobLabel); events and results of any other job are ignored.
+const state = {
+  source: null, sourceLabel: "", jobId: null, jobLabel: "", events: null, submits: 0,
+  cwd: "", config: null,
+};
 
 function withToken(url) {
   return url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(TOKEN);
@@ -21,12 +26,14 @@ async function api(path, { method = "GET", json, form } = {}) {
 
 function setSource(source, label) {
   state.source = source;
+  state.sourceLabel = label;
   const el = $("sourceLabel");
   el.textContent = "source: " + label;
   el.classList.remove("hidden");
   $("detectBtn").disabled = false;
   $("convertBtn").disabled = false;
-  // The detection and the results described the previous source.
+  // The detection and a finished conversion's results described the previous source. A
+  // conversion still running stays followed, under the source it converts.
   const out = $("detectOut");
   out.textContent = "";
   out.classList.add("hidden");
@@ -99,11 +106,13 @@ $("detectBtn").onclick = async () => {
       + (r.missing_columns?.length ? `\nmissing: ${r.missing_columns.join(", ")}` : "")
       + (r.unknown_columns?.length ? `\nunknown: ${r.unknown_columns.join(", ")}` : "");
     out.classList.remove("hidden");
-  } catch (e) { alert(e.message); }
+  } catch (e) { if (state.source === source) alert(e.message); }
 };
 
 // --- convert + progress (SSE) ---
 $("convertBtn").onclick = async () => {
+  const ticket = ++state.submits;
+  const label = state.sourceLabel;
   try {
     const body = Object.assign({}, state.source, {
       mode: $("mode").value, output_format: $("format").value, on_exists: $("onExists").value,
@@ -111,19 +120,44 @@ $("convertBtn").onclick = async () => {
       first_party_publishers: $("firstParty").value.split("\n").map((n) => n.trim()).filter(Boolean),
     });
     const r = await api("/api/jobs", { method: "POST", json: body });
-    state.jobId = r.job_id;
-    $("resultCard").classList.add("hidden");
-    $("previewTable").innerHTML = "";
-    $("progressCard").classList.remove("hidden");
-    $("barFill").style.width = "0";
-    $("progressText").textContent = "starting…";
-    streamProgress(r.job_id);
+    if (ticket !== state.submits) return;  // a later conversion was started meanwhile
+    follow(r.job_id, label);
   } catch (e) { alert(e.message); }
 };
 
+// Follow a conversion: stop following the previous one and show this one's progress.
+function follow(jobId, label) {
+  if (state.events) state.events.close();
+  state.events = null;
+  state.jobId = jobId;
+  state.jobLabel = label;
+  $("resultCard").classList.add("hidden");
+  $("previewTable").innerHTML = "";
+  $("progressSource").textContent = "source: " + label;
+  $("progressCard").classList.remove("hidden");
+  $("barFill").style.width = "0";
+  $("progressText").textContent = "starting…";
+  streamProgress(jobId);
+}
+
 function streamProgress(jobId) {
   const es = new EventSource(withToken(`/api/jobs/${jobId}/events`));
+  state.events = es;
+  // An event of a job the Studio no longer follows is stale: close its stream instead.
+  const followed = () => {
+    if (state.jobId === jobId) return true;
+    es.close();
+    return false;
+  };
+  const finish = () => {
+    es.close();
+    if (state.events === es) state.events = null;
+    if (!followed()) return;
+    $("barFill").style.width = "100%";
+    loadResult(jobId);
+  };
   es.onmessage = (ev) => {
+    if (!followed()) return;
     const p = JSON.parse(ev.data);
     const pct = p.fraction != null ? Math.round(p.fraction * 100) : null;
     $("barFill").style.width = (pct != null ? pct : 8) + "%";
@@ -132,12 +166,8 @@ function streamProgress(jobId) {
       `${p.phase} · ${p.completed.toLocaleString()}${total} ${p.unit}` +
       (pct != null ? ` (${pct}%)` : "") + (p.message ? ` — ${p.message}` : "");
   };
-  es.addEventListener("done", (ev) => {
-    es.close();
-    $("barFill").style.width = "100%";
-    loadResult(jobId);
-  });
-  es.onerror = () => { es.close(); loadResult(jobId); };
+  es.addEventListener("done", finish);
+  es.onerror = finish;
 }
 
 $("cancelBtn").onclick = async () => {
@@ -147,8 +177,10 @@ $("cancelBtn").onclick = async () => {
 // --- results ---
 async function loadResult(jobId) {
   const r = await api(`/api/jobs/${jobId}/result`);
+  if (state.jobId !== jobId) return;  // another conversion is followed now: stale result
   $("progressCard").classList.add("hidden");
   $("resultCard").classList.remove("hidden");
+  $("resultSource").textContent = "source: " + state.jobLabel;
   const cls = r.status === "succeeded" ? "status-ok" : r.status === "cancelled" ? "status-warn" : "status-err";
   $("resultStatus").innerHTML = `<span class="${cls}">${r.status}</span>` +
     (r.error ? ` — ${escapeHtml(r.error)}` : "") +

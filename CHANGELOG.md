@@ -31,8 +31,11 @@ policy.
 - Studio declares who issued a FOCUS 1.2 source, as the CLI's `--provider-role` and
   `--first-party-publisher` do: a **Provider role** choice and a list of first-party
   publishers in the Convert step, and `provider_role` / `first_party_publishers` in the
-  `/api/jobs` request. An invalid declaration is refused with HTTP 400 before the job
-  starts.
+  `/api/jobs` request. Only a missing key or `null` means "not declared". Any other value
+  is checked before a job is queued: the role must be the string `csp` or `msp`, and the
+  publishers a list of strings, given only with `csp`. An invalid value, of the wrong type
+  or falsy included, gets HTTP 400 with a fixed message; the detail is logged on the
+  server, never returned.
 
 ### Changed
 
@@ -49,10 +52,15 @@ policy.
 
 ### Fixed
 
-- Studio no longer shows the detection, results or preview of a previous source after
-  another one is chosen, nor the preview of an earlier conversion after a new one. A
-  detection or preview that returns after the source, conversion or file changed is
-  ignored.
+- Studio follows one conversion at a time and shows its progress and results under the
+  source it converted. Starting another conversion closes the previous one's event
+  stream. That conversion's later progress, end event and result are ignored, so an
+  earlier conversion no longer replaces the current view or hides its progress.
+  Choosing another source clears the detection and a finished conversion's results and
+  preview. A conversion still running stays followed so it can be cancelled, and its
+  progress and results name the source it converted. A detection that answers after the
+  source changed, success or error, is ignored, and so is a preview answer after the
+  conversion or file changed.
 
 ## [0.14.0] — 2026-10-06
 
