@@ -9,6 +9,31 @@ policy.
 
 ## [Unreleased]
 
+## [0.14.1] — 2026-10-09
+
+A patch release. An internal helper rebuilds the Contract Commitment dataset of a
+generated sample from the sample itself (#67), and Studio catches up with the CLI. Neither
+addition is on the versioned surface of [docs/versioning.md](docs/versioning.md), which is
+why this is a patch.
+
+- **New byte baseline:**
+  - **generated samples: none.** For identical parameters, `generate_rows`,
+    `generate_contract_commitment_rows`, the CSV functions, `focus-toolkit generate` and
+    Studio generation write the same bytes as 0.14.0. The new internal
+    `contract_commitment_rows_for` writes nothing unless called; on the rows of one run
+    it returns that run's dataset;
+  - converted output:
+    - the toolkit version, `0.14.1`, in the manifest (`tool_version`), the run metadata
+      (`toolkit_version`) and the Parquet key-value metadata (`focus.toolkit_version`),
+      and therefore in `SHA256SUMS`; converted CSV datasets are unchanged;
+    - the `reason` of a Contract Commitment left `NOT_PRODUCED` by strict mode for a
+      missing mandatory field (see Changed). This includes the strict conversion of
+      every generated 1.3 sample with its Contract Commitment dataset;
+  - official-sample evidence: the generation source fingerprints of
+    `tests/fixtures/official/generator_validation/baseline.json` (the changed generator
+    modules and `_version.py`) and the raw validator logs; data hashes and every rule
+    result are unchanged.
+
 ### Added
 
 - The FOCUS 1.3 generator modules carry `contract_commitment_rows_for(rows)`, an
@@ -955,7 +980,8 @@ conformance defects.
 
 <!-- Reference links. 0.2.0/0.3.0 were pre-release development milestones and were never tagged
      or published, so only the first public release (0.9.0) has a tag link. -->
-[Unreleased]: https://github.com/guymano/focus-data-toolkit/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/guymano/focus-data-toolkit/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/guymano/focus-data-toolkit/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/guymano/focus-data-toolkit/compare/v0.11.0...v0.12.0
