@@ -1,7 +1,8 @@
 """Issue #67: the Contract Commitment dataset of a sample lists every commitment it applies.
 
-FOCUS 1.3/1.4 say the Contract Commitment dataset "can be joined to the Cost and Usage
-dataset through the use of Contract Commitment ID". No MUST requires every applied
+``contract_commitment_rows_for`` is an internal helper for rows from this toolkit's
+generator. FOCUS 1.3/1.4 say the Contract Commitment dataset "can be joined to the Cost and
+Usage dataset through the use of Contract Commitment ID". No MUST requires every applied
 commitment to be listed; requiring it here is the toolkit's interpretation, so that join
 never loses a commitment the sample both purchases and applies.
 """
@@ -65,9 +66,9 @@ def test_sample_from_a_larger_run_lists_every_applied_commitment(provider):
 
 
 def test_a_separate_run_misses_commitments_of_the_sample():
-    # Why the sample's own rows are needed: since complete budget-aware groups (0.13.0),
-    # the first 100 rows of a 400-row run differ from a 100-row run near the end, and
-    # credits change the draws. A separately generated dataset then misses commitments.
+    # Why the sample's own rows are needed: groups are complete and budget-aware, so a
+    # prefix of a run can differ from a shorter run near its end, and credits change the
+    # draws (both already in 0.12.0). A separately generated dataset then misses some.
     for provider in ("aws", "azure"):
         module = get_generator(provider, "1.3")
         sample = module.generate_rows(400, include_credits=True)[:100]
@@ -87,6 +88,48 @@ def test_rows_of_a_run_give_the_dataset_of_that_run(provider, credits, seed):
         rows = module.generate_rows(size, seed, include_credits=credits)
         assert module.contract_commitment_rows_for(rows) == (
             module.generate_contract_commitment_rows(size, seed, include_credits=credits))
+
+
+def _terms(contracts: list[dict[str, str]]) -> dict[str, dict[str, str]]:
+    """Each commitment's own terms; the parent ContractPeriod spans all its children."""
+    return {
+        row["ContractCommitmentId"]: {k: v for k, v in row.items()
+                                      if k not in ("ContractPeriodStart", "ContractPeriodEnd")}
+        for row in contracts
+    }
+
+
+@pytest.mark.parametrize("provider", PROVIDERS)
+@pytest.mark.parametrize("size", [5, 30, 99, 400])
+def test_a_prefix_in_generation_order_keeps_each_commitments_terms(provider, size):
+    # The documented guarantee: each commitment's first purchase in a prefix is the
+    # generator's first one, so its terms are those of the whole run.
+    module = get_generator(provider, "1.3")
+    rows = module.generate_rows(1000, include_credits=True)
+    whole = _terms(module.contract_commitment_rows_for(rows))
+    for commitment, terms in _terms(module.contract_commitment_rows_for(rows[:size])).items():
+        assert terms == whole[commitment], commitment
+
+
+@pytest.mark.parametrize("provider", PROVIDERS)
+def test_terms_follow_the_order_of_the_rows(provider):
+    # The documented limit: another order or slice gives other terms.
+    module = get_generator(provider, "1.3")
+    rows = module.generate_rows(1000)
+    whole = _terms(module.contract_commitment_rows_for(rows))
+    # Rows after a commitment's first recurring purchase: its period moves to the next one.
+    purchases: dict[str, list[int]] = {}
+    for index, row in enumerate(rows):
+        if row["ChargeCategory"] == "Purchase" and row["CommitmentDiscountId"]:
+            purchases.setdefault(row["CommitmentDiscountId"], []).append(index)
+    commitment, (first, second, *_) = next(
+        (c, p) for c, p in purchases.items() if len(p) >= 2)
+    later = _terms(module.contract_commitment_rows_for(rows[first + 1:]))
+    assert later[commitment]["ContractCommitmentPeriodStart"] == rows[second]["ChargePeriodStart"]
+    assert later[commitment] != whole[commitment]
+    # Reversed rows: the last recurring purchase supplies the terms instead.
+    reversed_terms = _terms(module.contract_commitment_rows_for(rows[::-1]))
+    assert reversed_terms[commitment] == later[commitment]
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)

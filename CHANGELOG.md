@@ -11,23 +11,41 @@ policy.
 
 ### Added
 
-- The FOCUS 1.3 generator modules expose `contract_commitment_rows_for(rows)`: the
-  Contract Commitment dataset of the given Cost and Usage rows, for a sample taken from
-  any run (#67). A dataset generated separately describes the commitments of its own
-  run, and since 0.13.0 a sample differs from a separate run with other rows or options:
-  - the first 100 rows of a 400-row run differ from a 100-row run near the end, because
-    groups are complete and budget-aware;
-  - `include_credits` changes the draws.
+- The FOCUS 1.3 generator modules carry `contract_commitment_rows_for(rows)`, an
+  **internal** helper: it is not re-exported at the package root, so under
+  [docs/versioning.md](docs/versioning.md) it may change in any release. It rebuilds the
+  synthetic Contract Commitment dataset of rows from this toolkit's generator (#67).
 
-  Such a sample could apply commitments that its separately generated dataset did not
-  list. The new function lists every commitment the rows purchase or apply, beside the
-  negotiated terms. A commitment is purchased by a `Purchase` row whose
-  `ContractApplied` names its own `ResourceId`, as FOCUS 1.3 and 1.4 require; its first
-  row supplies the terms. A commitment applied without its purchase in the rows is
-  refused (`ValueError`), since its terms cannot be read from them. The rows of a run
-  give exactly that run's dataset. *Interpretation:* FOCUS says only that the dataset
-  "can be joined" to Cost and Usage through Contract Commitment ID; no MUST requires
-  listing every applied commitment. Generated sample bytes are unchanged.
+  A dataset generated separately describes its own run, and a sample of another run can
+  differ from it. A prefix of a run can differ from a shorter run near its end, because
+  groups are complete and budget-aware, and `include_credits` changes the draws; both
+  were already true in 0.12.0. Such a sample could apply commitments that its separately
+  generated dataset did not list. The helper lists every commitment the rows purchase or
+  apply, beside the negotiated terms. A commitment applied without its purchase in the
+  rows raises `ValueError`.
+
+  It is meant only for generated rows. It writes the generator's conventions, not terms
+  read from the rows:
+  - `ContractCommitmentCost` = the first purchase's hourly `BilledCost` × 8,760;
+  - a 365-day term from that purchase's `ChargePeriodStart`;
+  - contract periods 90 days wider on each side;
+  - `BillingCurrency` `USD`;
+  - the profile's three negotiated terms, always added;
+  - a purchase must carry its commitment as `CommitmentDiscountId`.
+
+  On real exports it is not reliable. A commitment bought before the period raises
+  `ValueError`, and any other gets these synthetic terms. The result follows the order
+  of the rows: each commitment's first purchase in that order supplies its terms. That
+  is exact for a run, or a prefix of one, in generation order; reversed or otherwise
+  sliced rows can shift a commitment's period.
+
+  *Interpretation:* a purchase is a `Purchase` row whose `ContractApplied` names its
+  own `ResourceId`. That is the converse of the FOCUS rule: in Contract Applied, 1.4
+  says `ContractCommitmentId` "MUST match ResourceId when ChargeCategory is "Purchase""
+  and the charge represents a purchase of that commitment; 1.3 says
+  `ContractCommitmentID` "MUST be equal to ResourceID". Listing every applied commitment
+  is an interpretation too: FOCUS says only that the dataset "can be joined" to Cost and
+  Usage through Contract Commitment ID. Generated sample bytes are unchanged.
 
 ## [0.14.0] — 2026-10-06
 
