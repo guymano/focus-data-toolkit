@@ -15,7 +15,8 @@ Public API:
   + semantically lint rows against the committed FOCUS 1.4 data model. (A linter, not a full
   FOCUS conformance validator; ``validate_focus_1_4`` is a deprecated alias.)
 - :mod:`focus_data_toolkit.generators` — deterministic, provider-realistic FOCUS 1.2/1.3
-  source generators for AWS, Azure and GCP.
+  source generators for AWS, Azure and GCP. Their ``contract_commitment_rows_for`` helper
+  is internal (not re-exported here; see docs/versioning.md).
 - :class:`SupplementBundle` / :class:`SupplementFileSpec` / :func:`load_bundle_dir` — load
   the client supplements (FOCUS-named files or provider-native exports) passed to either
   conversion as ``supplements=``; :func:`compute_gaps` reports which columns still block

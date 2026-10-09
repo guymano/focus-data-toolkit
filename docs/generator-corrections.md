@@ -71,19 +71,44 @@ datasets and avoids state leaking between calls. Contract Commitment APIs now
 accept keyword-only `include_credits=False`; pass the same rows, seed and options
 when generating the two datasets separately.
 
-A sample taken from another run needs its own Contract Commitment dataset:
-`contract_commitment_rows_for(rows)` on a 1.3 module reads it from the Cost and
-Usage rows themselves. Groups are complete and budget-aware, so the first 100 rows
-of a 400-row run differ from a 100-row run near the end, and `include_credits`
-changes the draws. A dataset generated separately can then miss commitments the
-sample purchases and applies (issue #67). A commitment purchase is a `Purchase`
-row whose `ContractApplied` names its own `ResourceId`, as FOCUS 1.3 and 1.4
-Contract Applied require. Its first row supplies the terms, as the registry does,
-so the rows of a run give exactly that run's dataset. Every applied commitment is
-listed, beside the negotiated terms; a commitment applied without its purchase in
-the sample is refused, because its terms cannot be read from it. *Interpretation:*
-FOCUS only says the dataset "can be joined" to Cost and Usage through Contract
-Commitment ID; no MUST requires every applied commitment to be listed.
+A sample taken from another run needs its own Contract Commitment dataset (issue
+#67). A prefix of a run can differ from a shorter run near its end, because groups
+are complete and budget-aware, and `include_credits` changes the draws; both were
+already true in 0.12.0. A dataset generated separately can then miss commitments
+the sample purchases and applies. `contract_commitment_rows_for(rows)` on a 1.3
+module rebuilds the dataset from generated rows instead. It is an **internal**
+helper, not re-exported at the package root (see [versioning](versioning.md)), and
+it is meant only for rows from this toolkit's generator.
+
+It writes the generator's conventions, not terms read from the rows:
+- `ContractCommitmentCost` is the first purchase's hourly `BilledCost` × 8,760;
+- the term runs 365 days from that purchase's `ChargePeriodStart`;
+- each contract period encloses its terms by 90 days on each side;
+- `BillingCurrency` is `USD`;
+- the three negotiated terms of the profile are always added;
+- a purchase must carry its commitment as `CommitmentDiscountId`.
+
+On real exports it is not reliable: a commitment bought before the period is
+applied without a purchase row and raises `ValueError`, and any other gets these
+synthetic terms, not its own. Real Contract Commitment data comes through the
+converter's Contract Commitment source.
+
+The terms come from each commitment's first purchase **in the order given**. They
+are exact for the rows of a run, or a prefix of one, in generation order: the rows
+of a run give exactly that run's dataset. Another order or slice gives other
+terms. Reversed rows, or rows starting after a commitment's first recurring
+purchase, shift its period. Every applied commitment is listed beside the
+negotiated terms, and one applied without its purchase in the rows is refused.
+
+*Interpretation:* a purchase is a `Purchase` row whose `ContractApplied` names its
+own `ResourceId`. That is the converse of the FOCUS rule. FOCUS 1.4 Contract
+Applied (3.1.32.2.1) says "ContractAppliedObject.Elements[*].ContractCommitmentId
+MUST match ResourceId when ChargeCategory is "Purchase" and the charge represents a
+purchase of that contract commitment"; FOCUS 1.3 (3.1.31.1.3) says
+"ContractCommitmentID MUST be equal to ResourceID when ChargeCategory is
+"Purchase"". Requiring every applied commitment to be listed is also an
+interpretation. FOCUS says only that the dataset "can be joined" to Cost and Usage
+through Contract Commitment ID, and no MUST requires the listing.
 
 ## ContractApplied compatibility
 
