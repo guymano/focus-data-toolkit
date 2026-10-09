@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import json
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import timedelta
 from decimal import Decimal
@@ -108,6 +109,60 @@ def generate_contract_commitment_rows(
     generate_rows(rows, seed, include_credits=include_credits, profile=profile, adapter=adapter,
                   context=context)
     return contract_rows(context, profile, adapter)
+
+
+def contract_commitment_rows_for(
+    cost_and_usage: Iterable[Mapping[str, str]],
+    *,
+    profile: ProviderProfile,
+    adapter: VersionAdapter,
+) -> list[dict[str, str]]:
+    """The Contract Commitment dataset of exactly these Cost and Usage rows.
+
+    ``generate_contract_commitment_rows`` runs its own generation, so it describes the
+    commitments of that run only. A sample taken from another run (a prefix of a larger
+    run, other ``include_credits``, edited rows) can apply commitments it does not list.
+    This reads them from the sample instead.
+
+    A commitment purchase is a ``Purchase`` row whose ``ContractApplied`` names its own
+    ``ResourceId``, as FOCUS 1.3/1.4 Contract Applied requires of the purchase of a
+    contract commitment. The first such row supplies the terms and the ``ContractId``,
+    as the generation registry does, so ``generate_rows(n, seed, ...)`` yields the same
+    dataset as ``generate_contract_commitment_rows(n, seed, ...)``. The negotiated terms
+    are always listed.
+
+    Listing every commitment the sample applies is an interpretation: FOCUS states only
+    that the dataset "can be joined" to Cost and Usage through Contract Commitment ID.
+    A commitment that is applied but neither purchased in these rows nor a negotiated
+    term raises ``ValueError``: its terms cannot be read from the sample.
+    """
+    if adapter.contract_commitment_columns is None:
+        raise ValueError(f"FOCUS {adapter.version} has no Contract Commitment dataset")
+    context = GenerationContext()
+    applied: dict[str, None] = {}
+    for row in cost_and_usage:
+        text = row.get("ContractApplied") or ""
+        elements = json.loads(text)["Elements"] if text else []
+        for element in elements:
+            commit_id = element["ContractCommitmentId"]
+            applied[commit_id] = None
+            if (row.get("ChargeCategory") == "Purchase" and commit_id == row.get("ResourceId")
+                    and commit_id not in context.purchases):
+                if row.get("CommitmentDiscountId") != commit_id:
+                    raise ValueError(
+                        f"commitment purchase {commit_id} must carry it as CommitmentDiscountId"
+                    )
+                context.purchases[commit_id] = dict(row)
+                context.contracts[commit_id] = element["ContractId"]
+    out = contract_rows(context, profile, adapter)
+    described = {row["ContractCommitmentId"] for row in out}
+    missing = [commit_id for commit_id in applied if commit_id not in described]
+    if missing:
+        raise ValueError(
+            "ContractApplied names commitments these rows do not purchase: "
+            + ", ".join(missing)
+        )
+    return out
 
 
 def contract_rows(context: GenerationContext, profile: ProviderProfile, adapter: VersionAdapter) -> list[dict[str, str]]:

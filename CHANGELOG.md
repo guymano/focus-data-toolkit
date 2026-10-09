@@ -9,6 +9,26 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- The FOCUS 1.3 generator modules expose `contract_commitment_rows_for(rows)`: the
+  Contract Commitment dataset of the given Cost and Usage rows, for a sample taken from
+  any run (#67). A dataset generated separately describes the commitments of its own
+  run, and since 0.13.0 a sample differs from a separate run with other rows or options:
+  - the first 100 rows of a 400-row run differ from a 100-row run near the end, because
+    groups are complete and budget-aware;
+  - `include_credits` changes the draws.
+
+  Such a sample could apply commitments that its separately generated dataset did not
+  list. The new function lists every commitment the rows purchase or apply, beside the
+  negotiated terms. A commitment is purchased by a `Purchase` row whose
+  `ContractApplied` names its own `ResourceId`, as FOCUS 1.3 and 1.4 require; its first
+  row supplies the terms. A commitment applied without its purchase in the rows is
+  refused (`ValueError`), since its terms cannot be read from them. The rows of a run
+  give exactly that run's dataset. *Interpretation:* FOCUS says only that the dataset
+  "can be joined" to Cost and Usage through Contract Commitment ID; no MUST requires
+  listing every applied commitment. Generated sample bytes are unchanged.
+
 ## [0.14.0] — 2026-10-06
 
 FOCUS 1.2/1.3 to 1.4 conversion follows the specification more closely, and commitment

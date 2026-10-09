@@ -3,7 +3,9 @@
 Each ``generate_<provider>_focus_<version>`` module is a thin shim binding a provider profile
 to a version adapter (see :mod:`focus_data_toolkit.generators.engine`); a given ``(rows, seed)``
 pair always produces the same CSV. All modules expose ``generate_csv_bytes(rows, seed)``; the
-1.3 modules additionally expose ``generate_contract_commitment_csv_bytes(rows, seed)``.
+1.3 modules additionally expose ``generate_contract_commitment_csv_bytes(rows, seed)`` and
+``contract_commitment_rows_for(cost_and_usage_rows)``, the Contract Commitment dataset of a
+sample taken from any run.
 """
 
 from __future__ import annotations

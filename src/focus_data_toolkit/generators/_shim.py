@@ -40,4 +40,7 @@ def build_module_api(profile: ProviderProfile, adapter: VersionAdapter) -> dict[
         api["generate_contract_commitment_csv_bytes"] = partial(
             serialize.generate_contract_commitment_csv_bytes, profile=profile, adapter=adapter
         )
+        api["contract_commitment_rows_for"] = partial(
+            serialize.contract_commitment_rows_for, profile=profile, adapter=adapter
+        )
     return api

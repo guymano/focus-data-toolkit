@@ -71,6 +71,20 @@ datasets and avoids state leaking between calls. Contract Commitment APIs now
 accept keyword-only `include_credits=False`; pass the same rows, seed and options
 when generating the two datasets separately.
 
+A sample taken from another run needs its own Contract Commitment dataset:
+`contract_commitment_rows_for(rows)` on a 1.3 module reads it from the Cost and
+Usage rows themselves. Groups are complete and budget-aware, so the first 100 rows
+of a 400-row run differ from a 100-row run near the end, and `include_credits`
+changes the draws. A dataset generated separately can then miss commitments the
+sample purchases and applies (issue #67). A commitment purchase is a `Purchase`
+row whose `ContractApplied` names its own `ResourceId`, as FOCUS 1.3 and 1.4
+Contract Applied require. Its first row supplies the terms, as the registry does,
+so the rows of a run give exactly that run's dataset. Every applied commitment is
+listed, beside the negotiated terms; a commitment applied without its purchase in
+the sample is refused, because its terms cannot be read from it. *Interpretation:*
+FOCUS only says the dataset "can be joined" to Cost and Usage through Contract
+Commitment ID; no MUST requires every applied commitment to be listed.
+
 ## ContractApplied compatibility
 
 Generated Spend elements contain applied cost; Usage elements contain applied
