@@ -265,11 +265,17 @@ def assemble_manifest(
 
         blockers = strict_blockers(prov, cols)
         if blockers and not synthetic:
+            # Contract Commitment is built from its own source dataset, the others from
+            # Cost and Usage: name the one the blocking fields were missing from.
+            origin = (
+                "the Contract Commitment source" if name == "Contract Commitment"
+                else "Cost and Usage"
+            )
             entries[name] = manifest_mod.dataset_entry(
                 status=manifest_mod.NOT_PRODUCED,
                 conformance=manifest_mod.CONF_INCOMPLETE,
                 provenance=prov,
-                reason="Mandatory provider-issued fields unavailable from Cost and Usage",
+                reason=f"Mandatory provider-issued fields unavailable from {origin}",
                 blocking_columns=blockers,
             )
             continue
