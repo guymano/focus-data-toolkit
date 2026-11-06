@@ -40,7 +40,7 @@ dynamic = ["version"]
 parquet = [
     # Wide range for compatibility; the lock/CI resolves to the latest (25.x). pyarrow >= 23.0.1
     # fixes PYSEC-2026-113, so the resolved version is vulnerability-free (see the pip-audit job).
-    "pyarrow>=15,<26",
+    "pyarrow>=15,<27",
     # pyarrow resolves timestamp timezones ("UTC") via Python's tzdata, which is absent on
     # Windows (no system tz database) — without it, Parquet Date/Time output raises
     # ZoneInfoNotFoundError. No-op on Linux/macOS.
@@ -57,7 +57,7 @@ scale = ["focus-data-toolkit[parquet]"]
 # (tests/test_dependency_caps.py keeps the extras and CI's official-validation job aligned).
 validator = [
     "focus-validator>=2.1,<3 ; python_version >= '3.12'",
-    "pyarrow<26 ; python_version >= '3.12'",
+    "pyarrow<27 ; python_version >= '3.12'",
 ]
 # Focus Data Toolkit Studio: a LOCAL web UI over the same Core (see focus_data_toolkit.studio).
 # Optional so the core stays standard-library only; the CLI's `ui` command imports it lazily.
